@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, Users, Shield, AlertCircle } from "lucide-react";
 import Link from "next/link";
+import { getSession } from "@/lib/auth-client";
 
 interface InviteDetails {
   token: string;
@@ -33,19 +33,15 @@ export default function InvitePage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  const supabase = useMemo(() => createClient(), []);
-
   // Check auth status and fetch invite (in parallel for performance)
   useEffect(() => {
     const checkAuthAndFetchInvite = async () => {
       try {
-        // Fetch auth and invite in parallel
         const [authResult, inviteResponse] = await Promise.all([
-          supabase.auth.getUser(),
+          getSession(),
           fetch(`/api/invites/${token}`),
         ]);
 
-        // Process auth result
         setIsLoggedIn(!!authResult.data?.user);
 
         // Process invite result
@@ -65,16 +61,16 @@ export default function InvitePage() {
     };
 
     checkAuthAndFetchInvite();
-  }, [token, supabase]);
+  }, [token]);
 
   const handleAccept = async () => {
     setAccepting(true);
 
     try {
-      const response = await fetch('/api/invites/accept', {
+      const response = await fetch('/api/account/bootstrap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ inviteToken: token }),
       });
 
       const data = await response.json();
@@ -85,46 +81,12 @@ export default function InvitePage() {
         return;
       }
 
-      // Switch to the new organization to ensure correct context
-      // This sets the cookie and reloads the page
       const orgId = data.data?.orgId;
       if (orgId) {
         toast.success('Bem-vindo à organização!');
-        
-        // Call switch org API to set cookie, then reload
-        await fetch('/api/org/switch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orgId }),
-        });
-        
-        // Hard reload to ensure clean state with new org
         window.location.href = '/dashboard';
       } else {
-        // Fallback: fetch profile to find the new org and set cookie
-        console.warn('[Invite Accept] orgId not returned, fetching from profile');
-        try {
-          const profileRes = await fetch('/api/users/me');
-          if (profileRes.ok) {
-            const profile = await profileRes.json();
-            // Find the org that matches the invite (by name)
-            const targetOrg = profile.data?.memberships?.find(
-              (m: { orgName: string }) => m.orgName === invite?.orgName
-            ) || profile.data?.memberships?.[0];
-            
-            if (targetOrg?.orgId) {
-              await fetch('/api/org/switch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orgId: targetOrg.orgId }),
-              });
-            }
-          }
-        } catch {
-          console.error('[Invite Accept] Failed to set org cookie via fallback');
-        }
         toast.success('Bem-vindo à organização!');
-        // Hard reload even in fallback
         window.location.href = '/dashboard';
       }
     } catch {

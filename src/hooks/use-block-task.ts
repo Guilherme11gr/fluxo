@@ -6,7 +6,7 @@ import { smartInvalidate } from '@/lib/query/helpers';
 import { toast } from 'sonner';
 import type { TasksResponse } from '@/lib/query/hooks/use-tasks';
 import type { Task } from '@/shared/types/task.types';
-import { createClient } from '@/lib/supabase/client';
+import { getSession } from '@/lib/auth-client';
 
 interface UseBlockTaskOptions {
   onSuccess?: (blocked: boolean) => void;
@@ -46,9 +46,8 @@ export function useBlockTask(taskId: string, options?: UseBlockTaskOptions) {
     }
 
     // Pegar userId atual para audit trail
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    const userId = user?.id;
+    const session = await getSession();
+    const userId = session.data?.user?.id;
 
     // 1. Cancel outgoing refetches
     await queryClient.cancelQueries({ queryKey: queryKeys.tasks.lists(orgId) });

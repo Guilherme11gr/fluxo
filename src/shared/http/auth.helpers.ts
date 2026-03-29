@@ -1,5 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AuthenticatedTenant } from '@/shared/types';
+import type { AppAuthUser } from '@/shared/types/auth.types';
 import { UnauthorizedError, ForbiddenError } from '@/shared/errors';
 import { cookies, headers } from 'next/headers';
 import { prisma } from '@/infra/adapters/prisma';
@@ -10,8 +10,17 @@ export const CURRENT_ORG_COOKIE = 'jt-current-org';
 // Header name for org selection (takes precedence over cookie)
 export const ORG_ID_HEADER = 'x-org-id';
 
+interface AuthClientLike {
+  auth: {
+    getUser(): Promise<{
+      data: { user: AppAuthUser | null };
+      error: Error | null;
+    }>;
+  };
+}
+
 /**
- * Extract authenticated user and tenant from Supabase session.
+ * Extract authenticated user and tenant from the current auth session.
  * Use this in ALL protected API routes.
  * 
  * Performance optimizations:
@@ -28,13 +37,13 @@ export const ORG_ID_HEADER = 'x-org-id';
  * @throws ForbiddenError if user has no organization
  */
 export async function extractAuthenticatedTenant(
-  supabase: SupabaseClient
+  authClient: AuthClientLike
 ): Promise<AuthenticatedTenant> {
   // 1. Get current user
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser();
+  } = await authClient.auth.getUser();
 
   if (authError || !user) {
     throw new UnauthorizedError('Sessão inválida ou expirada');
@@ -123,7 +132,7 @@ export async function extractAuthenticatedTenant(
  * @throws ForbiddenError if user doesn't have required role
  */
 export async function requireRole(
-  supabase: SupabaseClient,
+  authClient: AuthClientLike,
   userId: string,
   allowedRoles: Array<'OWNER' | 'ADMIN' | 'MEMBER'>,
   orgId?: string
@@ -132,7 +141,7 @@ export async function requireRole(
   let targetOrgId = orgId;
 
   if (!targetOrgId) {
-    const tenant = await extractAuthenticatedTenant(supabase);
+    const tenant = await extractAuthenticatedTenant(authClient);
     targetOrgId = tenant.tenantId;
   }
 
@@ -177,16 +186,16 @@ export function invalidateMembershipCache(userId: string): void {
 }
 
 /**
- * Extract user ID from Supabase session.
+ * Extract user ID from the current auth session.
  * Simpler than extractAuthenticatedTenant when you only need the user ID.
  * 
  * @throws UnauthorizedError if not authenticated
  */
-export async function extractUserId(supabase: SupabaseClient): Promise<string> {
+export async function extractUserId(authClient: AuthClientLike): Promise<string> {
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser();
+  } = await authClient.auth.getUser();
 
   if (authError || !user) {
     throw new UnauthorizedError('Sessão inválida ou expirada');
@@ -194,4 +203,3 @@ export async function extractUserId(supabase: SupabaseClient): Promise<string> {
 
   return user.id;
 }
-

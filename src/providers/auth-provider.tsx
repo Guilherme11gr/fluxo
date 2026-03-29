@@ -1,12 +1,11 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import type { User, Session } from '@supabase/supabase-js';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { authClient, useSession as useBetterAuthSession } from '@/lib/auth-client';
+import type { AppAuthSession, AppAuthUser } from '@/shared/types/auth.types';
 import { destroyQueryClient, markOrgSwitchPending } from '@/lib/query';
 
-// Cookie name (must match backend)
 const CURRENT_ORG_COOKIE = 'jt-current-org';
 
 export interface OrgMembership {
@@ -27,9 +26,9 @@ export interface UserProfile {
 }
 
 export interface AuthState {
-  user: User | null;
+  user: AppAuthUser | null;
   profile: UserProfile | null;
-  session: Session | null;
+  session: AppAuthSession['session'] | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   isSwitchingOrg: boolean;
@@ -41,177 +40,129 @@ export interface AuthState {
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<Omit<AuthState, 'logout' | 'refreshProfile' | 'switchOrg'>>({
-    user: null,
-    profile: null,
-    session: null,
-    isLoading: true,
-    isAuthenticated: false,
-    isSwitchingOrg: false,
-  });
-
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
+  const { data: sessionData, isPending: isSessionLoading } = useBetterAuthSession();
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const pathname = usePathname();
 
-  // Fetch user profile from API
+  const user = (sessionData?.user ?? null) as AppAuthUser | null;
+  const session = (sessionData?.session ?? null) as AppAuthSession['session'] | null;
+
   const fetchProfile = useCallback(async (): Promise<UserProfile | null> => {
     try {
-      const response = await fetch(`/api/users/me`, {
+      const response = await fetch('/api/users/me', {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
+          Pragma: 'no-cache',
         },
       });
+
+      if (response.status === 401 || response.status === 403) {
+        return null;
+      }
+
       if (response.ok) {
         const data = await response.json();
-        console.log('[AuthProvider] Profile fetched:', {
-          currentOrgId: data.data?.currentOrgId,
-          memberships: data.data?.memberships?.length,
-          timestamp: new Date().toISOString(),
-        });
         return data.data as UserProfile;
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
     }
+
     return null;
   }, []);
 
-  // Initialize auth state
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
+    let cancelled = false;
 
-        if (session?.user) {
-          const profile = await fetchProfile();
-          setState({
-            user: session.user,
-            profile,
-            session,
-            isLoading: false,
-            isAuthenticated: true,
-            isSwitchingOrg: false,
-          });
-        } else {
-          setState({
-            user: null,
-            profile: null,
-            session: null,
-            isLoading: false,
-            isAuthenticated: false,
-            isSwitchingOrg: false,
-          });
-        }
-      } catch (error) {
-        console.error('Error initializing auth:', error);
-        setState(prev => ({ ...prev, isLoading: false }));
+    const syncProfile = async () => {
+      if (!user) {
+        setProfile(null);
+        setIsProfileLoading(false);
+        return;
+      }
+
+      setIsProfileLoading(true);
+      const nextProfile = await fetchProfile();
+
+      if (!cancelled) {
+        setProfile(nextProfile);
+        setIsProfileLoading(false);
       }
     };
 
-    initAuth();
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: 'SIGNED_IN' | 'SIGNED_OUT' | 'TOKEN_REFRESHED' | 'USER_UPDATED', session: Session | null) => {
-        if (event === 'SIGNED_IN' && session?.user) {
-          const profile = await fetchProfile();
-          setState({
-            user: session.user,
-            profile,
-            session,
-            isLoading: false,
-            isAuthenticated: true,
-            isSwitchingOrg: false,
-          });
-        } else if (event === 'SIGNED_OUT') {
-          setState({
-            user: null,
-            profile: null,
-            session: null,
-            isLoading: false,
-            isAuthenticated: false,
-            isSwitchingOrg: false,
-          });
-        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-          setState(prev => ({
-            ...prev,
-            user: session.user,
-            session,
-            isAuthenticated: true,
-          }));
-        }
-      }
-    );
+    void syncProfile();
 
     return () => {
-      subscription.unsubscribe();
+      cancelled = true;
     };
-  }, [supabase, fetchProfile]);
+  }, [user?.id, fetchProfile, user]);
 
-  // Logout function
-  const logout = useCallback(async () => {
-    // Destroy React Query cache completely
-    destroyQueryClient();
-    
-    // Clear org cookie (simple clear - will be overwritten by server on next login)
-    document.cookie = `${CURRENT_ORG_COOKIE}=; Max-Age=0; Path=/`;
-    
-    await supabase.auth.signOut();
-    router.push('/login');
-    router.refresh();
-  }, [supabase, router]);
-
-  // Refresh profile
-  const refreshProfile = useCallback(async () => {
-    if (state.user) {
-      const profile = await fetchProfile();
-      setState(prev => ({ ...prev, profile }));
-    }
-  }, [state.user, fetchProfile]);
-
-  // Switch organization - Professional implementation
-  // Uses hard reload to guarantee clean state (like Trello/Linear)
-  const switchOrg = useCallback(async (orgId: string, returnUrl?: string) => {
-    // Prevent switching to same org
-    if (state.profile?.currentOrgId === orgId) {
+  useEffect(() => {
+    if (!user?.forcePasswordReset) {
       return;
     }
 
-    // Start switching state (shows loading overlay)
-    setState(prev => ({ ...prev, isSwitchingOrg: true }));
+    if (pathname === '/reset-password/required') {
+      return;
+    }
+
+    if (pathname === '/login' || pathname === '/signup') {
+      return;
+    }
+
+    router.replace('/reset-password/required');
+  }, [pathname, router, user?.forcePasswordReset]);
+
+  const logout = useCallback(async () => {
+    destroyQueryClient();
+    document.cookie = `${CURRENT_ORG_COOKIE}=; Max-Age=0; Path=/`;
+    await authClient.signOut();
+    router.push('/login');
+    router.refresh();
+  }, [router]);
+
+  const refreshProfile = useCallback(async () => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    const nextProfile = await fetchProfile();
+    setProfile(nextProfile);
+  }, [fetchProfile, user]);
+
+  const switchOrg = useCallback(async (orgId: string, returnUrl?: string) => {
+    if (profile?.currentOrgId === orgId) {
+      return;
+    }
+
+    setIsSwitchingOrg(true);
 
     try {
-      // 1. Mark org switch as pending FIRST (survives page reload/bfcache)
-      // This ensures cache is destroyed even if page is restored from bfcache
       markOrgSwitchPending();
-      
-      // 2. Destroy React Query cache COMPLETELY (not just clear)
-      // This sets browserQueryClient = undefined, forcing fresh instance
       destroyQueryClient();
 
-      // 3. Call API to set httpOnly cookie (server-side)
       const response = await fetch('/api/org/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgId }),
         credentials: 'same-origin',
       });
-      
+
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error?.message || 'Erro ao trocar de organização');
       }
 
-      // 4. Wait a bit for cookie to propagate (important for Vercel edge)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // 5. Verify cookie was set by making a verification request
-      // This ensures the cookie is persisted before reload
+      let verified = false;
       let verifyAttempts = 0;
       const maxAttempts = 3;
-      let verified = false;
 
       while (verifyAttempts < maxAttempts && !verified) {
         const verifyResponse = await fetch('/api/users/me', {
@@ -219,62 +170,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           cache: 'no-store',
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
+            Pragma: 'no-cache',
           },
         });
-        
+
         if (!verifyResponse.ok) {
           throw new Error('Falha ao verificar troca de organização');
         }
 
         const profileData = await verifyResponse.json();
-        
+
         if (profileData.data?.currentOrgId === orgId) {
           verified = true;
         } else {
-          console.warn(`[switchOrg] Attempt ${verifyAttempts + 1}: Cookie not propagated yet, waiting...`);
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise((resolve) => setTimeout(resolve, 200));
           verifyAttempts++;
         }
       }
 
-      if (!verified) {
-        console.error('[switchOrg] Cookie verification failed after max attempts');
-        // Still proceed with reload, but log the issue
-      }
-
-      // 6. Hard reload with cache bypass
-      // Use timestamp to bust any potential cache
-      const separator = (returnUrl || '/dashboard').includes('?') ? '&' : '?';
-      const targetUrl = `${returnUrl || '/dashboard'}${separator}_t=${Date.now()}`;
-      window.location.href = targetUrl;
-
+      const target = returnUrl || '/dashboard';
+      const separator = target.includes('?') ? '&' : '?';
+      window.location.href = `${target}${separator}_t=${Date.now()}`;
     } catch (error) {
       console.error('[switchOrg] Error:', error);
-      setState(prev => ({ ...prev, isSwitchingOrg: false }));
+      setIsSwitchingOrg(false);
       throw error;
     }
-  }, [state.profile?.currentOrgId]);
+  }, [profile?.currentOrgId]);
 
-  const value = useMemo(() => ({
-    ...state,
+  const value = useMemo<AuthState>(() => ({
+    user,
+    profile,
+    session,
+    isLoading: isSessionLoading || (Boolean(user) && isProfileLoading),
+    isAuthenticated: Boolean(user),
+    isSwitchingOrg,
     logout,
     refreshProfile,
     switchOrg,
-  }), [state, logout, refreshProfile, switchOrg]);
+  }), [
+    isProfileLoading,
+    isSessionLoading,
+    isSwitchingOrg,
+    logout,
+    profile,
+    refreshProfile,
+    session,
+    switchOrg,
+    user,
+  ]);
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuthContext() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuthContext must be used within an AuthProvider');
+
+  if (!context) {
+    throw new Error('useAuthContext must be used within AuthProvider');
   }
+
   return context;
 }
-

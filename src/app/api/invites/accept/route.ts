@@ -91,11 +91,15 @@ export async function POST(request: NextRequest) {
 
     // Create user profile if doesn't exist (for display name/avatar)
     if (!existingProfile) {
+      const displayName = typeof user.user_metadata.display_name === 'string'
+        ? user.user_metadata.display_name
+        : user.email?.split('@')[0] || 'Usuário';
+
       await prisma.userProfile.create({
         data: {
           id: user.id,
           orgId: invite.orgId,
-          displayName: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Usuário',
+          displayName,
           role: invite.role,
         },
       });
@@ -129,4 +133,3 @@ export async function POST(request: NextRequest) {
     return jsonError(body.error.code, body.error.message, status);
   }
 }
-

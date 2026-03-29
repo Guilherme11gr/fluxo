@@ -1,0 +1,13 @@
+.git
+.github
+.next
+coverage
+dist
+docs
+node_modules
+npm-debug.log
+test-results
+tmpclaude-*
+typecheck*.log
+*.stackdump
+*.local

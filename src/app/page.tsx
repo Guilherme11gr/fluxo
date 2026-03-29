@@ -3,8 +3,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { Zap, Brain, Target, Users } from "lucide-react";
+import { getServerAuthSession } from "@/lib/auth/session";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const session = await getServerAuthSession();
+  const primaryHref = session?.user ? "/projects" : "/login";
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Hero Section */}
@@ -22,7 +28,7 @@ export default function Home() {
           <span className="text-foreground font-medium">Inteligente • Simples • Potente</span>
         </p>
           <div className="flex gap-4 justify-center">
-            <Link href="/projects">
+            <Link href={primaryHref}>
               <Button size="lg" className="gap-2">
                 <Zap className="w-4 h-4" />
                 Começar Agora

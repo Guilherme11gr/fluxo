@@ -1,0 +1,138 @@
+name: Fluxo CI Deploy
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fluxo-production
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "20"
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        env:
+          HUSKY: 0
+        run: npm ci
+
+  deploy:
+    name: Deploy to VPS
+    needs:
+      - verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install deploy tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync openssh-client
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.FLUXO_VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.FLUXO_VPS_KNOWN_HOSTS }}
+        run: |
+          if [[ -z "${VPS_SSH_KEY}" ]]; then
+            echo "Missing secret FLUXO_VPS_SSH_KEY" >&2
+            exit 1
+          fi
+
+          if [[ -z "${VPS_KNOWN_HOSTS}" ]]; then
+            echo "Missing secret FLUXO_VPS_KNOWN_HOSTS" >&2
+            exit 1
+          fi
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${VPS_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${VPS_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Sync repository to VPS
+        env:
+          VPS_HOST: ${{ vars.FLUXO_VPS_HOST }}
+          VPS_PORT: ${{ vars.FLUXO_VPS_PORT }}
+          VPS_USER: ${{ vars.FLUXO_VPS_USER }}
+          VPS_DEPLOY_PATH: ${{ vars.FLUXO_VPS_DEPLOY_PATH }}
+        run: |
+          VPS_PORT="${VPS_PORT:-22}"
+          VPS_DEPLOY_PATH="${VPS_DEPLOY_PATH:-/opt/apps/fluxo/current}"
+
+          if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
+            echo "Set FLUXO_VPS_HOST and FLUXO_VPS_USER as repository variables." >&2
+            exit 1
+          fi
+
+          ssh -i ~/.ssh/id_ed25519 -p "${VPS_PORT}" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${VPS_DEPLOY_PATH}'"
+
+          rsync -az --delete \
+            --exclude '.env' \
+            --exclude '.env.local' \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.next/' \
+            --exclude 'coverage/' \
+            --exclude 'dist/' \
+            --exclude 'node_modules/' \
+            --exclude 'npm-debug.log' \
+            --exclude 'test-results/' \
+            -e "ssh -i ~/.ssh/id_ed25519 -p ${VPS_PORT}" \
+            ./ "${VPS_USER}@${VPS_HOST}:${VPS_DEPLOY_PATH}/"
+
+      - name: Deploy app on VPS
+        env:
+          VPS_HOST: ${{ vars.FLUXO_VPS_HOST }}
+          VPS_PORT: ${{ vars.FLUXO_VPS_PORT }}
+          VPS_USER: ${{ vars.FLUXO_VPS_USER }}
+          VPS_DEPLOY_PATH: ${{ vars.FLUXO_VPS_DEPLOY_PATH }}
+          VPS_ENV_FILE: ${{ vars.FLUXO_VPS_ENV_FILE }}
+        run: |
+          VPS_PORT="${VPS_PORT:-22}"
+          VPS_DEPLOY_PATH="${VPS_DEPLOY_PATH:-/opt/apps/fluxo/current}"
+          VPS_ENV_FILE="${VPS_ENV_FILE:-/opt/apps/fluxo/shared/config/fluxo.env}"
+
+          ssh -i ~/.ssh/id_ed25519 -p "${VPS_PORT}" "${VPS_USER}@${VPS_HOST}" \
+            "cd '${VPS_DEPLOY_PATH}' && chmod +x deploy/fluxo/scripts/remote-deploy-app.sh && FLUXO_ENV_FILE='${VPS_ENV_FILE}' bash deploy/fluxo/scripts/remote-deploy-app.sh"
+
+      - name: Verify public healthcheck
+        env:
+          HEALTHCHECK_URL: ${{ vars.FLUXO_HEALTHCHECK_URL }}
+        run: |
+          HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://fluxo.agenda-aqui.com/api/health}"
+          curl --silent --show-error --fail \
+            --retry 10 \
+            --retry-delay 3 \
+            --retry-all-errors \
+            "${HEALTHCHECK_URL}"

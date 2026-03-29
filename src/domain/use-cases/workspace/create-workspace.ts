@@ -9,6 +9,7 @@ const MAX_WORKSPACES_PER_USER = 5;
 export interface CreateWorkspaceInput {
   userId: string;
   workspaceName: string;
+  displayName?: string;
   currentOrgId?: string; // For analytics/tracking where they came from
 }
 
@@ -29,7 +30,7 @@ export interface CreateWorkspaceOutput {
 export async function createWorkspace(
   input: CreateWorkspaceInput
 ): Promise<CreateWorkspaceOutput> {
-  const { userId, workspaceName } = input;
+  const { userId, workspaceName, displayName } = input;
 
   // 1. Check workspace limit
   const existingOwnerships = await prisma.orgMembership.count({
@@ -101,7 +102,7 @@ export async function createWorkspace(
         data: {
           id: userId,
           orgId: org.id,
-          displayName: 'Usuário', // Fallback
+          displayName: displayName || 'Usuário',
           role: 'OWNER',
         },
       });

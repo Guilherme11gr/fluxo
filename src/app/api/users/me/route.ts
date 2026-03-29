@@ -45,13 +45,18 @@ export async function GET(request: NextRequest) {
         return jsonError('UNAUTHORIZED', 'Usuário não autenticado', 401);
       }
 
+      const displayName = typeof authUser.user_metadata.display_name === 'string'
+        ? authUser.user_metadata.display_name
+        : authUser.email?.split('@')[0] || 'Usuário';
+      const avatarUrl = typeof authUser.user_metadata.avatar_url === 'string'
+        ? authUser.user_metadata.avatar_url
+        : null;
+
       // Create profile with data from auth provider
       user = await userProfileRepository.create({
         id: authUser.id,
-        displayName: authUser.user_metadata?.display_name || 
-                     authUser.email?.split('@')[0] || 
-                     'Usuário',
-        avatarUrl: authUser.user_metadata?.avatar_url || null,
+        displayName,
+        avatarUrl,
       });
     }
 

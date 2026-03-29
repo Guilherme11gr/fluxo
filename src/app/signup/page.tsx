@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -10,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, Zap, Users } from "lucide-react";
+import { getSession, signIn, signUp } from "@/lib/auth-client";
 
 interface InviteInfo {
   orgName: string;
@@ -34,7 +34,6 @@ function SignupContent() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => createClient(), []);
 
   const inviteToken = searchParams.get("invite");
   const isInviteFlow = !!inviteToken;
@@ -69,74 +68,50 @@ function SignupContent() {
     setLoading(true);
 
     try {
-      // 1. Create user in Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const signUpResult = await signUp.email({
+        name,
         email,
         password,
-        options: {
-          data: {
-            display_name: name,
-            // Only include org_name if NOT an invite flow
-            ...(isInviteFlow ? {} : { org_name: orgName }),
-            // Store invite token to use in callback
-            invite_token: inviteToken || undefined,
-          },
-          emailRedirectTo: isInviteFlow
-            ? `${window.location.origin}/auth/callback?invite=${inviteToken}`
-            : `${window.location.origin}/auth/callback`,
-        },
       });
 
-      if (authError) {
-        toast.error("Erro ao criar conta: " + authError.message);
+      if (signUpResult.error) {
+        toast.error("Erro ao criar conta: " + signUpResult.error.message);
         return;
       }
 
-      if (authData.user && !authData.session) {
-        // Email confirmation required
-        toast.success("Conta criada! Verifique seu email para confirmar.");
-        router.push("/login?message=check-email");
-      } else if (authData.session) {
-        // Auto-confirmed - need to set cookie manually since callback won't run
-        if (inviteToken) {
-          const acceptRes = await fetch('/api/invites/accept', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: inviteToken }),
-          });
+      const currentSession = await getSession();
+      if (!currentSession.data?.user) {
+        const signInResult = await signIn.email({
+          email,
+          password,
+          rememberMe: true,
+        });
 
-          if (acceptRes.ok) {
-            const acceptData = await acceptRes.json();
-            // Set cookie for the new org
-            if (acceptData.data?.orgId) {
-              await fetch('/api/org/switch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orgId: acceptData.data.orgId }),
-              });
-            }
-            toast.success("Bem-vindo à organização!");
-          } else {
-            toast.error("Conta criada, mas erro ao aceitar convite.");
-          }
-        } else {
-          // New org flow - fetch profile to get orgId and set cookie
-          const profileRes = await fetch('/api/users/me');
-          if (profileRes.ok) {
-            const profile = await profileRes.json();
-            if (profile.data?.currentOrgId) {
-              await fetch('/api/org/switch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orgId: profile.data.currentOrgId }),
-              });
-            }
-          }
-          toast.success("Conta criada com sucesso!");
+        if (signInResult.error) {
+          toast.error("Conta criada, mas não foi possível iniciar a sessão automaticamente.");
+          router.push("/login");
+          return;
         }
-        // Hard reload to ensure clean state with cookie set
-        window.location.href = '/dashboard';
       }
+
+      const bootstrapResponse = await fetch('/api/account/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          inviteToken
+            ? { inviteToken, displayName: name }
+            : { orgName, displayName: name }
+        ),
+      });
+
+      if (!bootstrapResponse.ok) {
+        const errorData = await bootstrapResponse.json();
+        toast.error(errorData.error?.message || 'Conta criada, mas não foi possível finalizar a configuração inicial.');
+        return;
+      }
+
+      toast.success(isInviteFlow ? "Bem-vindo à organização!" : "Conta criada com sucesso!");
+      window.location.href = '/dashboard';
     } catch (error) {
       toast.error("Erro inesperado ao criar conta");
       console.error(error);
@@ -201,7 +176,7 @@ function SignupContent() {
             {isInviteFlow && inviteInfo ? (
               <>Você foi convidado para <strong>{inviteInfo.orgName}</strong></>
             ) : (
-              "Comece a usar o Jira Killer gratuitamente"
+              "Comece a usar o FluXo gratuitamente"
             )}
           </CardDescription>
         </CardHeader>

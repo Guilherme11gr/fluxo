@@ -76,16 +76,6 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
               </p>
             </div>
           </div>
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">
-                {project.name}
-              </h3>
-              <p className="text-xs font-mono text-muted-foreground">
-                {project.key}
-              </p>
-            </div>
-          </div>
 
           {/* Health Badge (Simulated) */}
           <div className={cn(
