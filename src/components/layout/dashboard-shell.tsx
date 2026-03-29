@@ -188,7 +188,7 @@ export function DashboardShell({
       </div>
 
       <main
-        className={`flex-1 pt-16 md:pt-0 min-h-screen bg-background transition-all duration-300 ${
+        className={`flex-1 pt-16 md:pt-0 min-h-screen bg-background overflow-x-hidden transition-all duration-300 ${
           isDesktopCollapsed ? 'md:ml-16' : 'md:ml-64'
         }`}
       >
