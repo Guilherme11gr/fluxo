@@ -9,6 +9,7 @@ import { UserCacheProvider } from "@/providers/user-cache-provider";
 import { PermissionsProvider } from "@/providers/permissions-provider";
 import { RealtimeProvider } from "@/providers/realtime-provider";
 import { ActivityToastsProvider } from "@/providers/activity-toasts-provider";
+import { DashboardAgentChat } from "@/components/layout/dashboard-agent-chat";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -48,6 +49,7 @@ export default function RootLayout({
                 <RealtimeProvider>
                   <ActivityToastsProvider>
                     {children}
+                    <DashboardAgentChat />
                     <Toaster />
                   </ActivityToastsProvider>
                 </RealtimeProvider>
