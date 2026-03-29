@@ -69,8 +69,8 @@ export function EpicsTableView({
               <tr
                 key={epic.id}
                 className={cn(
-                  "border-b transition-colors hover:bg-muted/50",
-                  isOpen ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06]" : "opacity-80"
+                  "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
+                  !isOpen && "opacity-80"
                 )}
               >
                 <td className="p-4 align-middle font-medium">
@@ -86,9 +86,9 @@ export function EpicsTableView({
                     </Link>
                     <div className="flex items-center gap-2">
                       {isOpen ? (
-                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-primary">
                           <PlayCircle className="h-3 w-3" />
-                          Em andamento
+                          Aberta
                         </span>
                       ) : (
                         <span className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">

@@ -571,7 +571,7 @@ export default function ProjectDetailPage({
                                     <Badge variant="outline" className="font-mono text-[10px]">
                                       E-{epic.id.slice(0, 4)}
                                     </Badge>
-                                    <Badge variant={epic.status === "OPEN" ? "outline-success" : "outline"}>
+                                    <Badge variant="outline">
                                       {epic.status === "OPEN" ? "Aberta" : "Fechada"}
                                     </Badge>
                                     {epic.risk ? (
