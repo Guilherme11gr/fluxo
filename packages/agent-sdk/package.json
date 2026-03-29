@@ -24,12 +24,25 @@
     "./next": {
       "import": "./dist/next/index.js",
       "types": "./dist/next/index.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/core/mcp.js",
+      "types": "./dist/core/mcp.d.ts"
     }
   },
   "files": [
     "dist",
     "README.md"
   ],
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
   "peerDependencies": {
     "next": ">=14",
     "react": ">=18",
@@ -48,6 +61,22 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.13.4",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "happy-dom": "^17.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.7",
+    "zod": "^3.24.2"
   },
   "keywords": [
     "ai",

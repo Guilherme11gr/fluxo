@@ -957,9 +957,13 @@ var chatStyles = `
   position: fixed;
   bottom: 24px;
   right: 24px;
-  width: 100%;
-  max-width: 420px;
+  width: 420px;
+  min-width: 320px;
+  max-width: 90vw;
   height: 580px;
+  min-height: 400px;
+  max-height: 85vh;
+  resize: both;
   background: var(--bg-primary);
   border-radius: 20px;
   border: 1px solid var(--border-color);
@@ -992,6 +996,32 @@ var chatStyles = `
 
 .agent-chat-container.minimized {
   height: auto;
+  resize: none;
+  min-height: unset;
+}
+
+/* Resize Grip */
+.agent-chat-container::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  opacity: 0.2;
+  border-radius: 0 0 6px 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.agent-chat-container:hover::after {
+  opacity: 0.45;
+}
+
+.agent-chat-container.minimized::after {
+  display: none;
 }
 
 @keyframes slide-up {
@@ -1192,26 +1222,28 @@ var chatStyles = `
 }
 
 .message-bubble {
-  max-width: 85%;
   border-radius: 18px;
   position: relative;
 }
 
 .message-bubble.user {
+  max-width: 75%;
   background: linear-gradient(135deg, var(--accent-secondary) 0%, var(--accent-primary) 100%);
   border-bottom-right-radius: 6px;
   color: white;
 }
 
 .message-bubble.assistant {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-bottom-left-radius: 6px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .message-bubble.error {
   background: var(--error-bg);
-  border-color: rgba(239, 68, 68, 0.3);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 12px;
 }
 
 .message-bubble.loading {

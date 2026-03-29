@@ -162,6 +162,16 @@ const result = await runtime.run(messages, {
 
 ## Exemplos de Tools
 
+## Demo pronto
+
+Existe um demo completo em [examples/glm-public-tools-demo](./examples/glm-public-tools-demo) com:
+
+- `glm-4.7-flash` da Z.ai
+- `AgentChat` pronto
+- `createAgentRoute`
+- tools ligadas a APIs publicas
+- smoke tests sem chave e com chave
+
 ### Chamar API existente
 
 ```typescript
