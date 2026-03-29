@@ -95,7 +95,7 @@ function ProjectCard({ project }: ProjectCardProps) {
   const hasHealthIssues = healthStatus !== 'healthy';
 
   return (
-    <Link href={`/tasks?projectId=${project.id}`}>
+    <Link href={`/tasks?projectId=${project.id}`} prefetch={false}>
       <div
         className={cn(
           'group p-4 rounded-lg border transition-all',

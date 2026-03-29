@@ -177,6 +177,7 @@ export function ProjectDocsList({ projectId, className }: ProjectDocsListProps) 
             <Link
               key={doc.id}
               href={`/projects/${projectId}/docs/${doc.id}`}
+              prefetch={false}
               className="block group relative"
             >
               <Card

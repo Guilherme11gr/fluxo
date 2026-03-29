@@ -51,7 +51,7 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
 
   return (
     <div className="group relative rounded-xl border border-border/40 bg-card hover:bg-muted/5 hover:border-primary/20 transition-all duration-300 shadow-sm hover:shadow-md cursor-pointer h-full flex flex-col">
-      <Link href={`/projects/${project.id}`} className="flex-1 p-5">
+      <Link href={`/projects/${project.id}`} prefetch={false} className="flex-1 p-5">
         {/* Header: Identity + Badge */}
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center gap-4">
