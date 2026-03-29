@@ -229,8 +229,12 @@ interface AgentRouteConfig<T = any> {
     historySize?: number;
     /** Temperatura (default: 0.5) */
     temperature?: number;
-    /** Máximo de iterações (default: 6) */
+    /** Máximo de iterações (default: 10) */
     maxIterations?: number;
+    /** Timeout por tool execution em ms (default: 30000) */
+    toolExecutionTimeout?: number;
+    /** Máximo de retries por iteração quando tool falha com erro retryable (default: 2) */
+    maxRetriesPerIteration?: number;
     /** Context window management (token-based truncation) */
     contextWindow?: ContextWindowConfig;
     /** Reasoning configuration */

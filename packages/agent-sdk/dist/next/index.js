@@ -180,11 +180,14 @@ function createSummaryMessage(summary) {
 // src/core/AgentRuntime.ts
 var AgentRuntime = class {
   constructor(config) {
+    this._iterationRetryCount = 0;
     this.config = {
       ...config,
       historySize: config.historySize ?? 20,
       temperature: config.temperature ?? 0.5,
-      maxIterations: config.maxIterations ?? 6
+      maxIterations: config.maxIterations ?? 10,
+      toolExecutionTimeout: config.toolExecutionTimeout ?? 3e4,
+      maxRetriesPerIteration: config.maxRetriesPerIteration ?? 2
     };
     this.enhancedSystemPrompt = this.buildEnhancedSystemPrompt();
   }
@@ -345,7 +348,18 @@ ${thought}
         }
         console.log("[AgentSDK] Reasoning:", thought.substring(0, 100) + "...");
       }
-      const { parallel, sequential } = this.analyzeToolDependencies(result.toolCalls);
+      const { valid: validToolCalls, invalid: invalidToolCalls } = this.validateToolCalls(result.toolCalls);
+      for (const { toolCall, error } of invalidToolCalls) {
+        console.warn("[AgentSDK] Invalid tool call:", toolCall.function.name, error);
+        iterHistory.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({ success: false, error })
+        });
+        allToolCalls.push(toolCall);
+      }
+      const { parallel, sequential } = this.analyzeToolDependencies(validToolCalls);
+      let toolResults = [];
       if (parallel.length > 0) {
         console.log("[AgentSDK] Executing", parallel.length, "tools in parallel");
         const results = await Promise.all(
@@ -362,6 +376,7 @@ ${thought}
             content: JSON.stringify(results[i])
           });
         }
+        toolResults.push(...results);
       }
       for (const toolCall of sequential) {
         console.log("[AgentSDK] Executing sequential tool:", toolCall.function.name);
@@ -373,7 +388,27 @@ ${thought}
           tool_call_id: toolCall.id,
           content: JSON.stringify(toolResult)
         });
+        toolResults.push(toolResult);
       }
+      const retryableErrors = toolResults.filter(
+        (r) => r?.success === false && !r?.cancelled && this.isToolErrorRetryable(r.error || "")
+      );
+      if (retryableErrors.length > 0) {
+        const maxRetries = this.config.maxRetriesPerIteration ?? 2;
+        if (!this._iterationRetryCount) this._iterationRetryCount = 0;
+        if (this._iterationRetryCount < maxRetries) {
+          this._iterationRetryCount++;
+          const reason = retryableErrors.map((e) => e.error).join("; ");
+          console.warn(`[AgentSDK] Iteration retry ${this._iterationRetryCount}/${maxRetries}: ${reason}`);
+          callbacks.onIterationRetry?.(reason, this._iterationRetryCount, maxRetries);
+          while (iterHistory.length > 0 && iterHistory[iterHistory.length - 1].role !== "user") {
+            iterHistory.pop();
+          }
+          maxIterations++;
+          continue;
+        }
+      }
+      this._iterationRetryCount = 0;
     }
     console.warn("[AgentSDK] Max iterations reached, returning partial result");
     const partialContent = iterHistory.filter((m) => m.role === "assistant" && m.content).map((m) => m.content).join("\n");
@@ -484,11 +519,55 @@ ${thought}
               }
             }
           }
-        } catch {
+        } catch (parseErr) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn("[AgentSDK] SSE parse warning:", parseErr);
+          }
         }
       }
     }
     return { content: fullContent, toolCalls: Object.values(toolCallAcc) };
+  }
+  /**
+   * Valida tool calls antes de executar - detecta JSON truncado/inválido
+   */
+  validateToolCalls(toolCalls) {
+    const valid = [];
+    const invalid = [];
+    for (const tc of toolCalls) {
+      const rawArgs = tc.function.arguments;
+      if (!rawArgs || rawArgs.trim() === "") {
+        invalid.push({ toolCall: tc, error: "Arguments vazios" });
+        continue;
+      }
+      try {
+        JSON.parse(rawArgs);
+        valid.push(tc);
+      } catch {
+        invalid.push({ toolCall: tc, error: `Arguments JSON inv\xE1lido (truncado): ${rawArgs.slice(0, 50)}...` });
+      }
+    }
+    return { valid, invalid };
+  }
+  /**
+   * Verifica se erro de tool é retryable (network/timeout)
+   */
+  isToolErrorRetryable(error) {
+    const retryablePatterns = [
+      "timeout",
+      "ETIMEDOUT",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "socket",
+      "network",
+      "fetch failed",
+      "500",
+      "502",
+      "503",
+      "504"
+    ];
+    const lower = error.toLowerCase();
+    return retryablePatterns.some((p) => lower.includes(p.toLowerCase()));
   }
   /**
    * Executa uma tool call
@@ -526,7 +605,13 @@ ${thought}
           };
         }
       }
-      const result = await tool.execute(args);
+      const timeout = this.config.toolExecutionTimeout ?? 3e4;
+      const result = await Promise.race([
+        tool.execute(args),
+        new Promise(
+          (_, reject) => setTimeout(() => reject(new Error(`Tool ${name} timed out after ${timeout}ms`)), timeout)
+        )
+      ]);
       return { success: true, result };
     } catch (error) {
       return {
@@ -582,7 +667,7 @@ ${thought}
     let lastError = new Error("Unknown error");
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45e3);
+      const timeoutId = setTimeout(() => controller.abort(), 9e4);
       try {
         const res = await fetch(url, { ...init, signal: controller.signal });
         clearTimeout(timeoutId);
@@ -856,6 +941,8 @@ function createAgentRoute(config) {
         historySize: config.historySize,
         temperature: config.temperature,
         maxIterations: config.maxIterations,
+        toolExecutionTimeout: config.toolExecutionTimeout,
+        maxRetriesPerIteration: config.maxRetriesPerIteration,
         contextWindow: config.contextWindow,
         reasoning: config.reasoning,
         responseSchema: config.responseSchema,
@@ -877,7 +964,8 @@ function createAgentRoute(config) {
               send({ type: "confirm", message: message2, confirmId: confirmId2 });
               return awaitConfirm(sessionId, confirmId2);
             },
-            onError: (error) => send({ type: "error", error: error.message })
+            onError: (error) => send({ type: "error", error: error.message }),
+            onIterationRetry: (reason, attempt, maxRetries) => send({ type: "iteration_retry", reason, attempt, maxRetries })
           };
           try {
             console.log("[AgentSDK] Starting runtime.run()...");

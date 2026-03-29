@@ -211,8 +211,12 @@ interface AgentConfig<T = any> {
     historySize?: number;
     /** Temperatura (padrão: 0.5) */
     temperature?: number;
-    /** Máximo de iterações de tool calling (padrão: 6) */
+    /** Máximo de iterações de tool calling (padrão: 10) */
     maxIterations?: number;
+    /** Timeout por tool execution em ms (padrão: 30000) */
+    toolExecutionTimeout?: number;
+    /** Máximo de retries por iteração quando tool falha com erro retryable (padrão: 2) */
+    maxRetriesPerIteration?: number;
     /** Context window management (token-based truncation) */
     contextWindow?: ContextWindowConfig;
     /** Reasoning configuration */
@@ -232,6 +236,8 @@ interface RuntimeCallbacks {
     onToolCall?: (toolCall: ToolCall) => void;
     onConfirm?: (message: string, confirmId: string) => Promise<boolean>;
     onError?: (error: Error) => void;
+    /** Chamado quando uma iteração vai ser retryada */
+    onIterationRetry?: (reason: string, attempt: number, maxRetries: number) => void;
 }
 /**
  * Runtime de agent com streaming e tool calling
@@ -257,6 +263,7 @@ interface RuntimeCallbacks {
 declare class AgentRuntime {
     private config;
     private enhancedSystemPrompt;
+    private _iterationRetryCount;
     constructor(config: AgentConfig);
     /**
      * Builds the enhanced system prompt with date/time context
@@ -289,6 +296,14 @@ declare class AgentRuntime {
      * Faz chamada streaming ao LLM
      */
     private callLLMStream;
+    /**
+     * Valida tool calls antes de executar - detecta JSON truncado/inválido
+     */
+    private validateToolCalls;
+    /**
+     * Verifica se erro de tool é retryable (network/timeout)
+     */
+    private isToolErrorRetryable;
     /**
      * Executa uma tool call
      */
