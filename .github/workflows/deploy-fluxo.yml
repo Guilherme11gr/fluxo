@@ -18,11 +18,6 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
-  CI_PSQL_URL: postgresql://postgres:postgres@127.0.0.1:5432/fluxo
-  CI_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/fluxo?schema=public
-  CI_DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/fluxo?schema=public
-  CI_BASE_URL: http://127.0.0.1:3000
-  CI_AUTH_SECRET: ci-build-secret-4d9dd38dc4fa4efcae9e89cf7749f9f2
 
 jobs:
   verify:
@@ -44,13 +39,14 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      DATABASE_URL: ${{ env.CI_DATABASE_URL }}
-      DIRECT_URL: ${{ env.CI_DIRECT_URL }}
-      BETTER_AUTH_URL: ${{ env.CI_BASE_URL }}
-      NEXT_PUBLIC_BETTER_AUTH_URL: ${{ env.CI_BASE_URL }}
-      NEXT_PUBLIC_APP_URL: ${{ env.CI_BASE_URL }}
-      BETTER_AUTH_SECRET: ${{ env.CI_AUTH_SECRET }}
-      AUTH_SECRET: ${{ env.CI_AUTH_SECRET }}
+      CI_PSQL_URL: postgresql://postgres:postgres@127.0.0.1:5432/fluxo
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/fluxo?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:5432/fluxo?schema=public
+      BETTER_AUTH_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_BETTER_AUTH_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      BETTER_AUTH_SECRET: ci-build-secret-4d9dd38dc4fa4efcae9e89cf7749f9f2
+      AUTH_SECRET: ci-build-secret-4d9dd38dc4fa4efcae9e89cf7749f9f2
       NODE_ENV: production
     steps:
       - name: Checkout repository
