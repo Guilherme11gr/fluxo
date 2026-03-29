@@ -215,6 +215,9 @@ export function useUpdateFeature() {
   const isRealtimeActive = useRealtimeActive();
   const broadcast = useRealtimeBroadcast();
   const { user } = useAuth();
+  const actorName = typeof user?.user_metadata?.full_name === 'string'
+    ? user.user_metadata.full_name.trim()
+    : user?.email?.split('@')[0] || 'Unknown';
 
   return useMutation({
     mutationFn: updateFeature,
@@ -229,7 +232,7 @@ export function useUpdateFeature() {
         epicId: updatedFeature.epicId,
         eventType: 'updated',
         actorType: 'user',
-        actorName: user?.user_metadata?.full_name?.trim() || user?.email?.split('@')[0] || 'Unknown',
+        actorName,
         actorId: user?.id || 'system',
         timestamp: new Date().toISOString(),
       });

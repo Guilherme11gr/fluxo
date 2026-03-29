@@ -67,6 +67,9 @@ export async function broadcastEntityEvent(
 ): Promise<void> {
   try {
     const supabase = await createClient();
+    if (typeof (supabase as { channel?: unknown }).channel !== 'function') {
+      return;
+    }
 
     // ✅ Sequence unificado: server e client usam Date.now()
     // Garante ordenação temporal e elimina sequence gaps nos logs
@@ -91,7 +94,7 @@ export async function broadcastEntityEvent(
 
     // Create channel reference (doesn't subscribe, just used for sending)
     // Note: Supabase channels must be created fresh each time in server context
-    const channel = supabase.channel(`org:${orgId}`, {
+    const channel = (supabase as unknown as { channel: (name: string, opts?: Record<string, unknown>) => RealtimeChannel }).channel(`org:${orgId}`, {
       config: {
         broadcast: { self: false }, // Don't receive own events
       },

@@ -13,7 +13,7 @@ export async function GET() {
     version: process.env.npm_package_version || '1.0.0',
     uptime: process.uptime(),
     services: {
-      supabase: false,
+      auth: false,
       database: false,
     },
     latency: {
@@ -22,10 +22,9 @@ export async function GET() {
   };
 
   try {
-    // Check Supabase connection
-    const supabase = await createClient();
-    const { error: authError } = await supabase.auth.getSession();
-    checks.services.supabase = !authError;
+    const authClient = await createClient();
+    const { error: authError } = await authClient.auth.getSession();
+    checks.services.auth = !authError;
 
     // Check Prisma/Database connection with latency
     const dbStart = Date.now();
@@ -47,4 +46,3 @@ export async function GET() {
     },
   });
 }
-

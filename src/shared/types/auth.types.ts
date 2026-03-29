@@ -1,7 +1,25 @@
-import type { User } from '@supabase/supabase-js';
-
 // User roles in organization
 export type UserRole = 'OWNER' | 'ADMIN' | 'MEMBER';
+
+export interface AppAuthUser {
+  id: string;
+  email: string | null;
+  name: string | null;
+  image: string | null;
+  emailVerified: boolean;
+  forcePasswordReset: boolean;
+  user_metadata: Record<string, unknown>;
+  app_metadata: Record<string, unknown>;
+}
+
+export interface AppAuthSession {
+  user: AppAuthUser;
+  session: {
+    id: string;
+    token: string | null;
+    expiresAt: string | null;
+  } | null;
+}
 
 // Organization membership info
 export interface OrgMembershipInfo {
@@ -31,7 +49,7 @@ export interface UserProfile {
 }
 
 // Extended user with profile
-export interface AuthenticatedUser extends User {
+export interface AuthenticatedUser extends AppAuthUser {
   profile: UserProfile;
 }
 

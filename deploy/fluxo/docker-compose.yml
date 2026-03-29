@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: fluxo-postgres
+    restart: unless-stopped
+    mem_limit: 512m
+    env_file:
+      - ${FLUXO_ENV_FILE:-/opt/apps/fluxo/shared/config/fluxo.env}
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ${FLUXO_POSTGRES_DATA_DIR:-./postgres/data}:/var/lib/postgresql/data
+      - ${FLUXO_POSTGRES_INIT_DIR:-./postgres/init}:/docker-entrypoint-initdb.d:ro
+      - ${FLUXO_POSTGRES_BACKUPS_DIR:-./postgres/backups}:/backups
+    networks:
+      - fluxo-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  app:
+    build:
+      context: ${FLUXO_APP_ROOT:-../..}
+      dockerfile: Dockerfile
+    container_name: fluxo-app
+    restart: unless-stopped
+    mem_limit: 1g
+    env_file:
+      - ${FLUXO_ENV_FILE:-/opt/apps/fluxo/shared/config/fluxo.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - proxy
+      - fluxo-internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.fluxo.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.fluxo.entrypoints=websecure"
+      - "traefik.http.routers.fluxo.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fluxo.middlewares=fluxo-security@docker"
+      - "traefik.http.services.fluxo.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.fluxo-security.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.fluxo-security.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.fluxo-security.headers.frameDeny=true"
+      - "traefik.http.middlewares.fluxo-security.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.fluxo-security.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.fluxo-security.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.fluxo-security.headers.stsPreload=true"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+networks:
+  proxy:
+    external: true
+  fluxo-internal:
+    driver: bridge
+    internal: true

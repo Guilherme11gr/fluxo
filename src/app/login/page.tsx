@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -9,13 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Loader2, Zap } from "lucide-react";
+import { getSession, signIn } from "@/lib/auth-client";
 
 function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     const message = searchParams.get("message");
@@ -49,22 +48,27 @@ function LoginContent() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const result = await signIn.email({
         email,
         password,
+        rememberMe: true,
       });
 
-      if (error) {
-        toast.error("Erro ao fazer login: " + error.message);
+      if (result.error) {
+        toast.error("Erro ao fazer login: " + result.error.message);
         return;
       }
 
       toast.success("Login realizado com sucesso!");
-      
-      // Check for redirect param (e.g., from invite page)
-      // Use hard reload to ensure clean state (clear any stale cache)
+
+      const session = await getSession();
+      const mustResetPassword = Boolean(
+        (session.data?.user as { forcePasswordReset?: boolean } | undefined)?.forcePasswordReset
+      );
       const redirect = searchParams.get("redirect");
-      const target = (redirect && redirect.startsWith('/')) ? redirect : '/dashboard';
+      const target = mustResetPassword
+        ? '/reset-password/required'
+        : (redirect && redirect.startsWith('/')) ? redirect : '/dashboard';
       window.location.href = target;
     } catch {
       toast.error("Erro inesperado");

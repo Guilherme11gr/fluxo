@@ -1,9 +1,9 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { signOut } from "@/lib/auth-client";
 
 interface LogoutButtonProps {
   isCollapsed?: boolean;
@@ -11,10 +11,9 @@ interface LogoutButtonProps {
 
 export function LogoutButton({ isCollapsed = false }: LogoutButtonProps) {
   const router = useRouter();
-  const supabase = createClient();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut();
     router.push("/login");
     router.refresh();
   };

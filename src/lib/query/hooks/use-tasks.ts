@@ -245,6 +245,9 @@ export function useUpdateTask() {
   const isRealtimeActive = useRealtimeActive();
   const broadcast = useRealtimeBroadcast();
   const { user } = useAuth();
+  const actorName = typeof user?.user_metadata?.full_name === 'string'
+    ? user.user_metadata.full_name.trim()
+    : user?.email?.split('@')[0] || 'Unknown';
 
   return useMutation({
     mutationFn: updateTask,
@@ -260,7 +263,7 @@ export function useUpdateTask() {
         epicId: updatedTask.feature?.epic?.id || undefined,
         eventType: 'updated',
         actorType: 'user',
-        actorName: user?.user_metadata?.full_name?.trim() || user?.email?.split('@')[0] || 'Unknown',
+        actorName,
         actorId: user?.id || 'system',
         timestamp: new Date().toISOString(),
       });
@@ -369,6 +372,9 @@ export function useMoveTask() {
   const isRealtimeActive = useRealtimeActive();
   const broadcast = useRealtimeBroadcast();
   const { user } = useAuth();
+  const actorName = typeof user?.user_metadata?.full_name === 'string'
+    ? user.user_metadata.full_name.trim()
+    : user?.email?.split('@')[0] || 'Unknown';
 
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: TaskStatus }) => {
@@ -429,7 +435,7 @@ export function useMoveTask() {
         epicId: movedTask.feature?.epic?.id || undefined,
         eventType: 'status_changed',
         actorType: 'user',
-        actorName: user?.user_metadata?.full_name?.trim() || user?.email?.split('@')[0] || 'Unknown',
+        actorName,
         actorId: user?.id || 'system',
         timestamp: new Date().toISOString(),
         metadata: { newStatus: status },
