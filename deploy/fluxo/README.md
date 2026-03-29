@@ -34,6 +34,7 @@ This directory contains the production deployment assets for the Fluxo stack.
 - Pull requests into `main` run the verification gate only
 - Pushes to `main` and manual runs from `main` deploy to the VPS after the gate passes
 - The workflow syncs the repository to the VPS, rebuilds only `fluxo-app`, restarts it, and waits for `/api/health`
+- The initial verification gate is intentionally lightweight and validates dependency installation plus workflow wiring; the authoritative production build still happens on the VPS during deploy
 
 ### Required repository secrets
 

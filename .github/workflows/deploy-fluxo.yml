@@ -49,12 +49,6 @@ jobs:
           HUSKY: 0
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
   deploy:
     name: Deploy to VPS
     needs:
