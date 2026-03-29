@@ -45,4 +45,19 @@ describe('agent-chat/internal-api', () => {
       'Resposta inválida ao chamar GET /api/projects'
     );
   });
+
+  it('surfaces network errors with method and path context', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:3000');
+      })
+    );
+
+    const client = new InternalAgentApiClient(context);
+
+    await expect(client.get('/api/tasks')).rejects.toThrow(
+      'Falha de rede ao chamar GET /api/tasks: connect ECONNREFUSED 127.0.0.1:3000'
+    );
+  });
 });

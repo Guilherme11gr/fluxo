@@ -16,6 +16,7 @@ import {
   createAgentChatErrorResponse,
   namespaceAgentChatSessionId,
   normalizeAgentChatSessionId,
+  resolveAgentChatInternalOrigin,
 } from '@/lib/agent-chat/route-helpers';
 
 export const dynamic = 'force-dynamic';
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     );
     rewrittenHeaders.set(
       AGENT_CHAT_HEADER_NAMES.origin,
-      encodeAgentChatHeader(request.nextUrl.origin)
+      encodeAgentChatHeader(resolveAgentChatInternalOrigin(request.nextUrl.origin))
     );
 
     const rewrittenBody = JSON.stringify({

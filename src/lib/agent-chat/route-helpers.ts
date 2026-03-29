@@ -4,6 +4,10 @@ import { AgentChatProviderConfigError } from './provider';
 
 export const MAX_AGENT_CHAT_SESSION_ID_LENGTH = 120;
 
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
 export function namespaceAgentChatSessionId(
   sessionId: string,
   tenantId: string,
@@ -23,6 +27,23 @@ export function normalizeAgentChatSessionId(value: unknown): string | null {
   }
 
   return normalized;
+}
+
+export function resolveAgentChatInternalOrigin(requestOrigin: string): string {
+  const explicitOrigin =
+    process.env.FLUXO_INTERNAL_API_ORIGIN?.trim() ||
+    process.env.INTERNAL_APP_URL?.trim();
+
+  if (explicitOrigin) {
+    return stripTrailingSlash(explicitOrigin);
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    const port = process.env.PORT?.trim() || '3000';
+    return `http://127.0.0.1:${port}`;
+  }
+
+  return stripTrailingSlash(requestOrigin);
 }
 
 export function createAgentChatErrorResponse(error: unknown) {

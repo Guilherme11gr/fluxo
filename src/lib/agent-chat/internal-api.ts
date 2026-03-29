@@ -174,12 +174,27 @@ export class InternalAgentApiClient {
       headers.set('Content-Type', 'application/json');
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      cache: 'no-store',
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        cache: 'no-store',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[AgentChat] Internal request network error', {
+        method,
+        path,
+        url: url.toString(),
+        tenantId: this.context.tenantId,
+        userId: this.context.userId,
+        message,
+      });
+
+      throw new Error(`Falha de rede ao chamar ${method} ${path}: ${message}`);
+    }
 
     if (response.status === 204) {
       return undefined as T;
@@ -190,6 +205,17 @@ export class InternalAgentApiClient {
 
     if (!response.ok) {
       const errorPayload = parsed as ApiErrorPayload | undefined;
+      console.error('[AgentChat] Internal request failed', {
+        method,
+        path,
+        url: url.toString(),
+        status: response.status,
+        statusText: response.statusText,
+        tenantId: this.context.tenantId,
+        userId: this.context.userId,
+        error: errorPayload?.error?.message || rawText,
+      });
+
       throw new Error(
         errorPayload?.error?.message ||
           rawText ||
