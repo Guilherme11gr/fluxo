@@ -25,6 +25,11 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +a
+
 if [[ -z "${APP_DOMAIN}" ]]; then
   APP_DOMAIN="$(grep -E '^APP_DOMAIN=' "${ENV_FILE}" | tail -n 1 | cut -d= -f2- || true)"
 fi
@@ -43,6 +48,9 @@ compose() {
 ensure_agent_api_keys_schema() {
   local migration_file="${STACK_DIR}/../../prisma/migrations/20260329_add_agent_api_keys/migration.sql"
   local postgres_container="${FLUXO_POSTGRES_CONTAINER_NAME:-fluxo-postgres}"
+
+  : "${POSTGRES_USER:?POSTGRES_USER must be set in ${ENV_FILE}}"
+  : "${POSTGRES_DB:?POSTGRES_DB must be set in ${ENV_FILE}}"
 
   if [[ ! -f "${migration_file}" ]]; then
     echo "Agent API key migration file not found at ${migration_file}" >&2
