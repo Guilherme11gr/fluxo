@@ -23,6 +23,7 @@ import { OrgSwitcher } from "@/components/layout/org-switcher";
 import { TaskModalProvider } from "@/providers/task-modal-provider";
 import { ConnectionBadge } from "@/components/ui/connection-badge";
 import { useAuth } from "@/hooks/use-auth";
+import { DashboardAgentChat } from "@/components/layout/dashboard-agent-chat";
 
 export function DashboardShell({
   children,
@@ -198,6 +199,8 @@ export function DashboardShell({
           </TaskModalProvider>
         </div>
       </main>
+
+      <DashboardAgentChat />
     </div>
   );
 }

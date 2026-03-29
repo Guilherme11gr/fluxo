@@ -1,0 +1,67 @@
+{
+  "name": "@guilherme/agent-sdk",
+  "version": "0.1.0",
+  "description": "SDK para criar AI agents com tools, streaming e UI pronta",
+  "author": "Guilherme Koike",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./core": {
+      "import": "./dist/core/index.js",
+      "types": "./dist/core/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
+    },
+    "./next": {
+      "import": "./dist/next/index.js",
+      "types": "./dist/next/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "next": ">=14",
+    "react": ">=18",
+    "react-dom": ">=18",
+    "zod": ">=3",
+    "@upstash/redis": ">=1",
+    "ioredis": ">=5",
+    "pg": ">=8",
+    "better-sqlite3": ">=9"
+  },
+  "peerDependenciesMeta": {
+    "@upstash/redis": { "optional": true },
+    "ioredis": { "optional": true },
+    "pg": { "optional": true },
+    "better-sqlite3": { "optional": true }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "chatbot",
+    "nextjs",
+    "react",
+    "streaming",
+    "tools",
+    "mcp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guilhermekoike/agent-sdk"
+  }
+}
