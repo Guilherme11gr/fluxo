@@ -799,6 +799,142 @@ function AgentChatSession({
     }
   );
 }
+function MarkdownRenderer({ content }) {
+  const blocks = parseMarkdownBlocks(content);
+  return /* @__PURE__ */ jsx("div", { className: "md-content", children: blocks.map((block, i) => /* @__PURE__ */ jsx(MarkdownBlock, { block }, i)) });
+}
+function parseMarkdownBlocks(content) {
+  const blocks = [];
+  const lines = content.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+    if (line.trimStart().startsWith("```")) {
+      const lang = line.trimStart().slice(3).trim();
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !lines[i].trimStart().startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++;
+      blocks.push({ type: "code", lang, code: codeLines.join("\n") });
+      continue;
+    }
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
+    if (headingMatch) {
+      blocks.push({
+        type: "heading",
+        level: headingMatch[1].length,
+        text: headingMatch[2]
+      });
+      i++;
+      continue;
+    }
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line.trim())) {
+      blocks.push({ type: "hr" });
+      i++;
+      continue;
+    }
+    if (line.trimStart().startsWith(">")) {
+      const quoteLines = [];
+      while (i < lines.length && (lines[i].trimStart().startsWith(">") || lines[i].trim() !== "" && quoteLines.length > 0 && !lines[i].trimStart().startsWith("#") && !lines[i].trimStart().startsWith("```"))) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ""));
+        i++;
+      }
+      blocks.push({ type: "blockquote", text: quoteLines.join("\n") });
+      continue;
+    }
+    if (/^[\s]*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[\s]*[-*+]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^[\s]*[-*+]\s+/, ""));
+        i++;
+      }
+      blocks.push({ type: "ul", items });
+      continue;
+    }
+    if (/^[\s]*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[\s]*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^[\s]*\d+\.\s+/, ""));
+        i++;
+      }
+      blocks.push({ type: "ol", items });
+      continue;
+    }
+    const paraLines = [];
+    while (i < lines.length && lines[i].trim() !== "" && !lines[i].trimStart().startsWith("#") && !lines[i].trimStart().startsWith("```") && !lines[i].trimStart().startsWith(">") && !/^[\s]*[-*+]\s+/.test(lines[i]) && !/^[\s]*\d+\.\s+/.test(lines[i]) && !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i].trim())) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    if (paraLines.length > 0) {
+      blocks.push({ type: "paragraph", text: paraLines.join("\n") });
+    }
+  }
+  return blocks;
+}
+function MarkdownBlock({ block }) {
+  switch (block.type) {
+    case "heading": {
+      const Tag = `h${Math.min(block.level, 6)}`;
+      return /* @__PURE__ */ jsx(Tag, { className: `md-heading md-h${block.level}`, children: renderInline(block.text) });
+    }
+    case "code":
+      return /* @__PURE__ */ jsxs("div", { className: "md-code-block", children: [
+        block.lang && /* @__PURE__ */ jsx("div", { className: "md-code-lang", children: block.lang }),
+        /* @__PURE__ */ jsx("pre", { children: /* @__PURE__ */ jsx("code", { children: block.code }) })
+      ] });
+    case "blockquote":
+      return /* @__PURE__ */ jsx("blockquote", { className: "md-blockquote", children: renderInline(block.text) });
+    case "ul":
+      return /* @__PURE__ */ jsx("ul", { className: "md-list", children: block.items.map((item, i) => /* @__PURE__ */ jsx("li", { children: renderInline(item) }, i)) });
+    case "ol":
+      return /* @__PURE__ */ jsx("ol", { className: "md-list", children: block.items.map((item, i) => /* @__PURE__ */ jsx("li", { children: renderInline(item) }, i)) });
+    case "hr":
+      return /* @__PURE__ */ jsx("hr", { className: "md-hr" });
+    case "paragraph":
+      return /* @__PURE__ */ jsx("p", { className: "md-paragraph", children: renderInline(block.text) });
+  }
+}
+function renderInline(text) {
+  const nodes = [];
+  const inlineRegex = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)]+\))/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = inlineRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    const [full] = match;
+    if (full.startsWith("`")) {
+      nodes.push(/* @__PURE__ */ jsx("code", { className: "md-inline-code", children: full.slice(1, -1) }, key++));
+    } else if (full.startsWith("**")) {
+      nodes.push(/* @__PURE__ */ jsx("strong", { children: full.slice(2, -2) }, key++));
+    } else if (full.startsWith("*")) {
+      nodes.push(/* @__PURE__ */ jsx("em", { children: full.slice(1, -1) }, key++));
+    } else if (full.startsWith("[")) {
+      const linkMatch = full.match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        nodes.push(
+          /* @__PURE__ */ jsx("a", { href: linkMatch[2], target: "_blank", rel: "noopener noreferrer", className: "md-link", children: linkMatch[1] }, key++)
+        );
+      } else {
+        nodes.push(full);
+      }
+    }
+    lastIndex = match.index + full.length;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
 function MessageBubble({
   message,
   toolLabels,
@@ -834,13 +970,7 @@ function MessageBubble({
   }) });
   const renderContent = (content, streaming) => {
     const displayContent = streaming && content ? content + "\u258C" : content;
-    const parts = displayContent.split(/(\*\*[^*]+\*\*)/g);
-    return /* @__PURE__ */ jsx("span", { className: "message-content", children: parts.map((part, i) => {
-      if (part.startsWith("**") && part.endsWith("**")) {
-        return /* @__PURE__ */ jsx("strong", { children: part.slice(2, -2) }, i);
-      }
-      return part;
-    }) });
+    return /* @__PURE__ */ jsx(MarkdownRenderer, { content: displayContent });
   };
   return /* @__PURE__ */ jsx("div", { className: `message-wrapper ${isUser ? "user" : "assistant"} ${isError ? "error" : ""}`, children: /* @__PURE__ */ jsxs("div", { className: `message-bubble ${isUser ? "user" : "assistant"} ${isError ? "error" : ""}`, children: [
     message.isStreaming && !message.pendingConfirm && message.statusSteps && message.statusSteps.length > 0 && /* @__PURE__ */ jsx("div", { className: "status-steps", children: message.statusSteps.map((step, i) => /* @__PURE__ */ jsxs(React.Fragment, { children: [
@@ -1491,11 +1621,143 @@ var chatStyles = `
   white-space: pre-wrap;
 }
 
-.message-content {
+/* Markdown Content */
+.md-content {
   font-size: 14px;
   line-height: 1.6;
-  white-space: pre-wrap;
   color: var(--text-primary);
+}
+
+.md-content > *:first-child {
+  margin-top: 0;
+}
+
+.md-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.md-paragraph {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.md-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.md-heading {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.md-h1 { font-size: 18px; }
+.md-h2 { font-size: 16px; }
+.md-h3 { font-size: 15px; }
+.md-h4, .md-h5, .md-h6 { font-size: 14px; }
+
+.md-code-block {
+  margin: 8px 0;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.md-code-lang {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.md-code-block pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+
+.md-code-block code {
+  font-family: inherit;
+  color: var(--text-primary);
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.md-inline-code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--accent-primary);
+}
+
+.md-link {
+  color: var(--accent-primary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.md-link:hover {
+  border-bottom-color: var(--accent-primary);
+}
+
+.md-list {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.md-list li {
+  margin: 3px 0;
+  line-height: 1.5;
+}
+
+.md-blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent-primary);
+  background: rgba(139, 92, 246, 0.06);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.md-hr {
+  margin: 12px 0;
+  border: none;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.agent-chat-container.light .md-blockquote {
+  background: rgba(139, 92, 246, 0.06);
+}
+
+.agent-chat-container.light .md-inline-code {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.agent-chat-container.light .md-code-block {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.agent-chat-container.light .md-code-lang {
+  background: rgba(0, 0, 0, 0.03);
+  border-bottom-color: rgba(0, 0, 0, 0.08);
 }
 
 .error-header {
