@@ -37,8 +37,8 @@ A forma mais simples de usar o MCP Server:
 ### 1. Clone e instale
 
 ```bash
-git clone https://github.com/Guilherme11gr/jt-kill.git
-cd jt-kill/mcp-server
+git clone https://github.com/Guilherme11gr/fluxo.git
+cd fluxo/mcp-server
 npm install
 ```
 
