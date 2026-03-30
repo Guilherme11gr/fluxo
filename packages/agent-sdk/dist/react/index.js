@@ -501,7 +501,8 @@ function AgentChat({
   toolLabels = {},
   onToolExecuted,
   sessionId: propSessionId,
-  labels = {}
+  labels = {},
+  icon
 }) {
   const [sessionResetVersion, setSessionResetVersion] = useState4(0);
   const [isOpen, setIsOpen] = useState4(false);
@@ -522,6 +523,7 @@ function AgentChat({
       onToolExecuted,
       sessionId: effectiveSessionId,
       labels,
+      icon,
       isOpen,
       isMinimized,
       setIsOpen,
@@ -541,6 +543,7 @@ function AgentChatSession({
   onToolExecuted,
   sessionId: propSessionId,
   labels = {},
+  icon,
   isOpen,
   isMinimized,
   setIsOpen,
@@ -632,7 +635,7 @@ function AgentChatSession({
           title: "Abrir assistente",
           "aria-label": "Abrir assistente",
           children: [
-            /* @__PURE__ */ jsx(MessageIcon, {}),
+            icon || /* @__PURE__ */ jsx(MessageIcon, {}),
             /* @__PURE__ */ jsx("span", { className: "fab-label", children: "Chat" }),
             /* @__PURE__ */ jsx("div", { className: "fab-ripple" })
           ]
@@ -653,7 +656,7 @@ function AgentChatSession({
         /* @__PURE__ */ jsxs("header", { className: "agent-chat-header", children: [
           /* @__PURE__ */ jsxs("div", { className: "header-left", children: [
             /* @__PURE__ */ jsxs("div", { className: "avatar", children: [
-              /* @__PURE__ */ jsx(SparklesIcon, {}),
+              icon || /* @__PURE__ */ jsx(SparklesIcon, {}),
               /* @__PURE__ */ jsx("div", { className: "avatar-glow" })
             ] }),
             /* @__PURE__ */ jsxs("div", { className: "header-text", children: [

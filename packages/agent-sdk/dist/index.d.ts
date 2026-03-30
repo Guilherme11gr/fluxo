@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { NextRequest } from 'next/server';
+import React$1 from 'react';
 
 /**
  * defineTool - Define uma tool com Zod schema ou JSON Schema
@@ -1025,12 +1026,6 @@ interface UseAgentChatReturn {
     sessionId: string;
 }
 
-/**
- * AgentChat - Componente de chat drop-in para agents
- *
- * Design: "Cosmic Noir" - Dark sofisticado com glassmorphism
- * e animações fluidas.
- */
 interface AgentChatProps {
     endpoint: string;
     title?: string;
@@ -1040,6 +1035,8 @@ interface AgentChatProps {
     toolLabels?: Record<string, string>;
     onToolExecuted?: () => void;
     sessionId?: string;
+    /** Custom icon rendered in the FAB button and header avatar. Falls back to default sparkles. */
+    icon?: React$1.ReactNode;
     labels?: {
         placeholder?: string;
         processing?: string;

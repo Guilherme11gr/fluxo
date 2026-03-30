@@ -1,11 +1,6 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
+import React$1 from 'react';
 
-/**
- * AgentChat - Componente de chat drop-in para agents
- *
- * Design: "Cosmic Noir" - Dark sofisticado com glassmorphism
- * e animações fluidas.
- */
 interface AgentChatProps {
     endpoint: string;
     title?: string;
@@ -15,6 +10,8 @@ interface AgentChatProps {
     toolLabels?: Record<string, string>;
     onToolExecuted?: () => void;
     sessionId?: string;
+    /** Custom icon rendered in the FAB button and header avatar. Falls back to default sparkles. */
+    icon?: React$1.ReactNode;
     labels?: {
         placeholder?: string;
         processing?: string;
@@ -25,7 +22,7 @@ interface AgentChatProps {
         cancel?: string;
     };
 }
-declare function AgentChat({ endpoint, title, subtitle, theme, examples, toolLabels, onToolExecuted, sessionId: propSessionId, labels, }: AgentChatProps): react_jsx_runtime.JSX.Element;
+declare function AgentChat({ endpoint, title, subtitle, theme, examples, toolLabels, onToolExecuted, sessionId: propSessionId, labels, icon, }: AgentChatProps): react_jsx_runtime.JSX.Element;
 
 interface BuilderAgentConfig {
     name: string;
