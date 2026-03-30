@@ -60,7 +60,7 @@ export const AI_MAX_TOKENS_FEATURE_CONTEXT = parseInt(
 // ===========================================
 
 /** Default model for fast/cheap operations */
-export const AI_MODEL_CHAT = process.env.AI_MODEL_CHAT || 'deepseek-chat';
+export const AI_MODEL_CHAT = process.env.AI_MODEL_CHAT || 'glm-4.7';
 
 /** Default model for complex reasoning */
 export const AI_MODEL_REASONER = process.env.AI_MODEL_REASONER || 'deepseek-reasoner';

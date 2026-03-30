@@ -59,7 +59,7 @@ export function getAgentChatProviderConfig(): AgentChatProviderConfig {
       process.env.FLUXO_CHAT_API_URL?.trim() ||
       process.env.ZAI_API_URL?.trim() ||
       process.env.DEEPSEEK_API_URL?.trim() ||
-      'https://api.deepseek.com',
+      'https://api.z.ai/api/coding/paas/v4',
     apiKey,
     model:
       process.env.FLUXO_CHAT_MODEL?.trim() ||

@@ -44,6 +44,7 @@ export function DashboardAgentChat() {
       subtitle={subtitle}
       theme="dark"
       icon={<Infinity className="w-5 h-5" />}
+      accentColor="#ffffff"
       examples={[
         'Liste minhas tasks em DOING e destaque as bloqueadas.',
         'Quem está no workspace e quais tasks estão com cada pessoa?',
