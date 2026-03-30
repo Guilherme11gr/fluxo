@@ -1079,5 +1079,45 @@ export function buildAgentChatTools(context: AgentChatContext) {
         return api.put(`/api/tasks/${resolvedTaskId}/tags`, { tagIds: resolvedTagIds });
       },
     }),
+    defineTool({
+      name: 'list_members',
+      description: 'Lista membros da organização atual. Retorna id, nome de exibição e email de cada membro.',
+      parameters: z.object({}),
+      execute: async () => api.get('/api/users'),
+    }),
+    defineTool({
+      name: 'search_member',
+      description: 'Busca membro da organização por nome ou parte do nome. Retorna id, displayName e email. Use para descobrir o ID de um membro antes de filtrar tasks por assigneeId.',
+      parameters: z.object({
+        name: z.string().min(1).describe('Nome ou parte do nome do membro (case-insensitive).'),
+      }),
+      execute: async ({ name }) => {
+        const members: any[] = await api.get('/api/users');
+        const query = name.toLowerCase();
+        const results = members.filter(
+          (m: any) =>
+            (m.displayName || '').toLowerCase().includes(query) ||
+            (m.email || '').toLowerCase().includes(query)
+        );
+        if (results.length === 0) {
+          return { members: [], message: `Nenhum membro encontrado para "${name}".` };
+        }
+        return { members: results };
+      },
+    }),
+    defineTool({
+      name: 'my_tasks',
+      description: 'Lista tasks atribuídas ao usuário atualmente logado. Equivalente a "quais tasks são minhas?". Retorna apenas tasks ativas (não DONE) por padrão.',
+      parameters: z.object({
+        includeDone: z.boolean().optional().default(false).describe('Se true, inclui tasks concluídas (DONE).'),
+        limit: z.number().int().min(1).max(50).optional().default(25),
+      }),
+      execute: async ({ includeDone, limit }) =>
+        api.get('/api/dashboard/my-tasks', {
+          page: 1,
+          pageSize: limit,
+          includeDone: String(includeDone),
+        }),
+    }),
   ];
 }
