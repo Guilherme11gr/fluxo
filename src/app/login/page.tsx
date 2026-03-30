@@ -83,8 +83,8 @@ function LoginContent() {
     <div className="min-h-screen flex items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center mx-auto mb-4">
-            <Infinity className="w-6 h-6 text-primary-foreground" />
+          <div className="w-14 h-14 bg-primary rounded-xl flex items-center justify-center mx-auto mb-4">
+            <Infinity className="w-8 h-8 text-primary-foreground" />
           </div>
           <CardTitle className="text-2xl">Bem-vindo ao FluXo</CardTitle>
           <CardDescription>Faça login para continuar</CardDescription>

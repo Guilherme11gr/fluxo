@@ -82,8 +82,8 @@ export function DashboardShell({
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center flex-shrink-0">
-                  <Infinity className="w-5 h-5 text-primary-foreground" />
+                <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Infinity className="w-6 h-6 text-primary-foreground" />
                 </div>
                 <h1 className="text-xl font-bold tracking-tight">
                   FluXo
@@ -139,8 +139,8 @@ export function DashboardShell({
 
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 border-b border-border bg-background z-40 flex items-center px-4 justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-            <Infinity className="w-5 h-5 text-primary-foreground" />
+          <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
+            <Infinity className="w-6 h-6 text-primary-foreground" />
           </div>
           <span className="font-bold text-lg">
             FluXo
@@ -152,8 +152,8 @@ export function DashboardShell({
           </Button>
           <SheetContent side="left" className="w-64 bg-card border-r border-border p-0">
             <div className="p-6 border-b border-border flex items-center gap-2">
-              <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-                <Infinity className="w-5 h-5 text-primary-foreground" />
+              <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
+                <Infinity className="w-6 h-6 text-primary-foreground" />
               </div>
               <h1 className="text-xl font-bold tracking-tight">
                 FluXo
