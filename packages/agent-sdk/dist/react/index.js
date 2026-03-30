@@ -1061,7 +1061,7 @@ var fabStyles = `
   height: 56px;
   border-radius: 16px;
   border: none;
-  background: linear-gradient(135deg, var(--accent-secondary) 0%, var(--accent-primary) 50%, var(--accent-tertiary) 100%);
+  background: linear-gradient(135deg, var(--accent-secondary, #6366f1) 0%, var(--accent-primary, #8b5cf6) 50%, var(--accent-tertiary, #a855f7) 100%);
   color: white;
   cursor: pointer;
   z-index: 9999;
@@ -1069,8 +1069,8 @@ var fabStyles = `
   align-items: center;
   justify-content: center;
   box-shadow:
-    0 4px 20px rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.4),
-    0 8px 40px rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.3),
+    0 4px 20px rgba(var(--accent-r, 139), var(--accent-g, 92), var(--accent-b, 246), 0.4),
+    0 8px 40px rgba(var(--accent-r, 139), var(--accent-g, 92), var(--accent-b, 246), 0.3),
     inset 0 1px 0 rgba(255,255,255,0.2);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
@@ -1079,8 +1079,8 @@ var fabStyles = `
 .agent-chat-fab:hover {
   transform: translateY(-2px) scale(1.02);
   box-shadow:
-    0 6px 24px rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.5),
-    0 12px 48px rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.4),
+    0 6px 24px rgba(var(--accent-r, 139), var(--accent-g, 92), var(--accent-b, 246), 0.5),
+    0 12px 48px rgba(var(--accent-r, 139), var(--accent-g, 92), var(--accent-b, 246), 0.4),
     inset 0 1px 0 rgba(255,255,255,0.3);
 }
 
@@ -1132,16 +1132,16 @@ var fabStyles = `
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--accent-tertiary);
+  background: var(--accent-tertiary, #a855f7);
   animation: pulse-ring 1.5s ease-out infinite;
 }
 
 @keyframes pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.7);
+    box-shadow: 0 0 0 0 rgba(var(--accent-r, 139), var(--accent-g, 92), var(--accent-b, 246), 0.7);
   }
   100% {
-    box-shadow: 0 0 0 20px rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0);
+    box-shadow: 0 0 0 20px rgba(var(--accent-r, 139), var(--accent-g, 92), var(--accent-b, 246), 0);
   }
 }
 `;
