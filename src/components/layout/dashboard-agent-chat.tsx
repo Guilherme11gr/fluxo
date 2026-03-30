@@ -32,22 +32,22 @@ export function DashboardAgentChat() {
 
   const sessionId = 'dashboard';
   const subtitle = currentMembership
-    ? `${currentMembership.orgName} • ${resolvedViewer.currentRole}`
+    ? currentMembership.orgName
     : 'Tenant atual';
 
   return (
     <AgentChat
       endpoint="/api/chat"
       sessionId={sessionId}
-      title="Fluxo Agent"
+      title="FluXo"
       subtitle={subtitle}
       theme="dark"
       examples={[
         'Liste minhas tasks em DOING e destaque as bloqueadas.',
-        'Quem está no workspace hoje e quais tasks estão com cada pessoa?',
+        'Quem está no workspace e quais tasks estão com cada pessoa?',
         'Crie uma feature para exportação CSV no épico selecionado.',
         'Mostre o contexto completo de um épico e sugira próximos passos.',
-        'Crie uma task de bug, aplique as tags certas e já deixe um comentário com o plano.',
+        'Crie uma task de bug, aplique as tags certas e deixe um comentário com o plano.',
       ]}
       labels={{
         placeholder: 'Pergunte ou peça uma ação no Fluxo...',

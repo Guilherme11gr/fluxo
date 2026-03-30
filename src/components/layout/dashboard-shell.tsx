@@ -9,7 +9,6 @@ import {
   Settings,
   Infinity,
   type LucideIcon,
-  Zap,
   Menu,
   Users,
   ChevronLeft,
@@ -37,7 +36,6 @@ export function DashboardShell({
     { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
     { icon: FolderKanban, label: "Projetos", href: "/projects" },
     { icon: CheckSquare, label: "Minhas Tasks", href: "/tasks" },
-    { icon: Zap, label: "AI Scribe", href: "/scribe" },
     { icon: Users, label: "Equipe", href: "/settings/team" },
     { icon: Settings, label: "Configurações", href: "/settings" },
   ];
