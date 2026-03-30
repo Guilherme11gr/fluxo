@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
       target_id: string | null;
       metadata: Record<string, unknown> | null;
       created_at: Date;
+      actor_type: string | null;
       display_name: string | null;
       avatar_url: string | null;
       task_title: string | null;
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     const logs = await prisma.$queryRaw<AuditLogRow[]>`
-      SELECT 
+      SELECT
         a.id,
         a.user_id,
         a.action,
@@ -76,6 +77,7 @@ export async function GET(request: NextRequest) {
         a.target_id,
         a.metadata,
         a.created_at,
+        a.actor_type,
         u.display_name,
         u.avatar_url,
         t.title as task_title,
@@ -99,7 +101,11 @@ export async function GET(request: NextRequest) {
       WHERE a.org_id = ${tenantId}::uuid
         AND a.created_at >= ${since}
         AND a.target_type = 'task'
-        AND a.user_id != ${userId}::uuid
+        -- Show agent actions even if user_id matches (e.g. Claude acting as you)
+        AND (
+          a.actor_type = 'agent'
+          OR a.user_id != ${userId}::uuid
+        )
       ORDER BY a.created_at DESC
       LIMIT ${limit}
     `;
@@ -110,11 +116,18 @@ export async function GET(request: NextRequest) {
 
     // 4. Format activities with human messages
     const items: ActivityItem[] = logs.map((log) => {
+      const meta = log.metadata as Record<string, any> | null;
+
       // Fallback to metadata if joins fail (e.g. deleted task/user)
-      const actorName = log.display_name || (log.metadata as any)?.actorName || 'Alguém';
+      const baseActorName = log.display_name || meta?.actorName || 'Alguém';
+
+      // Agent actions: show "UserName - AgentName" (e.g. "Guilherme - Claude Code")
+      const agentName = meta?.agentName || null;
+      const actorName = log.actor_type === 'agent' && agentName
+        ? `${baseActorName} - ${agentName}`
+        : baseActorName;
 
       // Try to get task info from Relation -> Metadata -> Generic ID
-      const meta = log.metadata as Record<string, any> | null;
       const targetTitle = log.task_title || meta?.taskTitle || meta?.title || null;
 
       const readableId = log.project_key && log.task_local_id
