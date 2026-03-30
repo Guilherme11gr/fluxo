@@ -49,6 +49,19 @@ const API_DOCS = {
   },
 
   endpoints: [
+    // ============ MEMBERS ============
+    {
+      method: 'GET',
+      path: '/api/agent/members',
+      description: 'List all organization members. Use ?search=Name to filter by name or email (case-insensitive partial match).',
+      auth: true,
+      query: {
+        search: { type: 'string', required: false, description: 'Partial name or email to filter (case-insensitive)' },
+        limit: { type: 'number', required: false, description: 'Max results (1-100, default 50)' },
+      },
+      response: { data: '[Member]' },
+    },
+
     // ============ TASKS ============
     {
       method: 'GET',
@@ -347,6 +360,14 @@ const API_DOCS = {
       tags: '[{ tag: { id, name } }]',
       createdAt: 'ISO 8601 datetime',
       updatedAt: 'ISO 8601 datetime',
+    },
+    Member: {
+      id: 'uuid',
+      email: 'string',
+      displayName: 'string',
+      avatarUrl: 'string | null',
+      role: 'OWNER | ADMIN | MEMBER',
+      createdAt: 'ISO 8601 datetime',
     },
     Tag: {
       id: 'uuid',
