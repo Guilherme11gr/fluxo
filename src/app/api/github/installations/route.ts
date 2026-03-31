@@ -15,7 +15,7 @@ interface GitHubRepo {
 
 export async function GET(request: NextRequest) {
   try {
-    if (!GITHUB_APP_ID) {
+    if (!GITHUB_APP_ID || !process.env.GITHUB_APP_PRIVATE_KEY) {
       return jsonError('GITHUB_NOT_CONFIGURED', 'GitHub App not configured', 503);
     }
 
