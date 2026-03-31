@@ -52,7 +52,7 @@ export function PersonalBoardCard({
     willChange: isDragging ? 'transform' : 'auto',
   };
 
-  const priorityCfg = PRIORITY_CONFIG[item.priority];
+  const priorityCfg = item.priority ? PRIORITY_CONFIG[item.priority] : PRIORITY_CONFIG.none;
 
   return (
     <div
