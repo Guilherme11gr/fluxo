@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   FolderKanban,
   CheckSquare,
+  Kanban,
   Settings,
   Infinity,
   type LucideIcon,
@@ -36,6 +37,7 @@ export function DashboardShell({
     { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
     { icon: FolderKanban, label: "Projetos", href: "/projects" },
     { icon: CheckSquare, label: "Minhas Tasks", href: "/tasks" },
+    { icon: Kanban, label: "My Board", href: "/board" },
     { icon: Users, label: "Equipe", href: "/settings/team" },
     { icon: Settings, label: "Configurações", href: "/settings" },
   ];

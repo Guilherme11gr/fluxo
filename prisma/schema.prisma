@@ -27,10 +27,11 @@ model Organization {
   pokerSessions PokerSession[]
   projectDocs   ProjectDoc[]
   projectNotes  ProjectNote[]
-  projectTags   ProjectTag[]
-  projects      Project[]
-  tasks         Task[]
-  userProfiles  UserProfile[]
+  projectTags          ProjectTag[]
+  projects             Project[]
+  tasks                Task[]
+  userProfiles         UserProfile[]
+  personalBoardColumns PersonalBoardColumn[]
 
   @@index([slug], map: "idx_organizations_slug")
   @@map("organizations")
@@ -73,8 +74,9 @@ model UserProfile {
   role         UserRole      @default(MEMBER)
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  users        users         @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  organization Organization? @relation(fields: [orgId], references: [id], onUpdate: NoAction)
+  users                 users         @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organization          Organization? @relation(fields: [orgId], references: [id], onUpdate: NoAction)
+  personalBoardColumns  PersonalBoardColumn[]
 
   @@map("user_profiles")
   @@schema("public")
@@ -1042,6 +1044,44 @@ enum TaskType {
   BUG
 
   @@map("task_type")
+  @@schema("public")
+}
+
+model PersonalBoardColumn {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId        String                @map("org_id") @db.Uuid
+  userId       String                @map("user_id") @db.Uuid
+  title        String
+  color        String                @default("#6366f1")
+  order        Int                   @default(0)
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user         UserProfile           @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  items        PersonalBoardItem[]
+
+  @@index([orgId], map: "idx_personal_board_columns_org")
+  @@index([userId], map: "idx_personal_board_columns_user")
+  @@index([orgId, userId], map: "idx_personal_board_columns_org_user")
+  @@map("personal_board_columns")
+  @@schema("public")
+}
+
+model PersonalBoardItem {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  columnId     String                @map("column_id") @db.Uuid
+  title        String
+  description  String?
+  priority     String?
+  dueDate      DateTime?             @map("due_date") @db.Timestamptz(6)
+  order        Int                   @default(0)
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  column       PersonalBoardColumn   @relation(fields: [columnId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([columnId], map: "idx_personal_board_items_column")
+  @@index([columnId, order], map: "idx_personal_board_items_column_order")
+  @@map("personal_board_items")
   @@schema("public")
 }
 
