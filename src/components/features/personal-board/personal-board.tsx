@@ -68,8 +68,9 @@ export function PersonalBoard() {
     try {
       const res = await fetch('/api/personal-board');
       if (!res.ok) throw new Error('Failed to fetch board');
-      const data = await res.json();
-      setColumns(data.data?.columns || data.columns || []);
+      const json = await res.json();
+      const columnsData = json.data?.columns || json.data || json.columns || [];
+      setColumns(Array.isArray(columnsData) ? columnsData : []);
     } catch {
       toast.error('Erro ao carregar o quadro.');
     } finally {
