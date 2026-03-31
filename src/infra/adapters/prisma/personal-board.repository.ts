@@ -143,7 +143,7 @@ export class PersonalBoardRepository {
         title: data.title,
         description: data.description,
         priority: data.priority,
-        dueDate: data.dueDate,
+        dueDate: data.dueDate ? new Date(data.dueDate) : null,
         order: (maxOrder._max.order ?? -1) + 1,
       },
     });
@@ -158,9 +158,14 @@ export class PersonalBoardRepository {
       throw new Error('Item não encontrado');
     }
 
+    const prismaData: Record<string, unknown> = { ...data };
+    if (prismaData.dueDate !== undefined && prismaData.dueDate !== null) {
+      prismaData.dueDate = new Date(prismaData.dueDate as string);
+    }
+
     return this.prisma.personalBoardItem.update({
       where: { id },
-      data,
+      data: prismaData,
     });
   }
 
