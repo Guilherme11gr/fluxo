@@ -14,6 +14,7 @@ import { AuditLogRepository } from './audit-log.repository';
 import { OrgMembershipRepository } from './org-membership.repository';
 import { AgentApiKeyRepository } from './agent-api-key.repository';
 import { GitHubEventRepository } from './github-event.repository';
+import { PersonalBoardRepository } from './personal-board.repository';
 
 // Singleton Prisma Client
 // https://www.prisma.io/docs/guides/performance-and-optimization/connection-management#prismaclient-in-long-running-applications
@@ -45,6 +46,7 @@ export const auditLogRepository = new AuditLogRepository(prisma);
 export const orgMembershipRepository = new OrgMembershipRepository(prisma);
 export const agentApiKeyRepository = new AgentApiKeyRepository(prisma);
 export const gitHubEventRepository = new GitHubEventRepository(prisma);
+export const personalBoardRepository = new PersonalBoardRepository(prisma);
 
 // Re-export for convenience
 export {
