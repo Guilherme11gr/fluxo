@@ -98,8 +98,17 @@ describe('validators', () => {
         title: 'Valid Task',
         type: 'TASK',
         priority: 'MEDIUM',
+        assigneeId: '123e4567-e89b-12d3-a456-426614174099',
       };
       expect(createTaskSchema.safeParse(input).success).toBe(true);
+    });
+
+    it('should reject task without assigneeId', () => {
+      const input = {
+        projectId: '123e4567-e89b-12d3-a456-426614174000',
+        title: 'Task without assignee',
+      };
+      expect(createTaskSchema.safeParse(input).success).toBe(false);
     });
 
     it('should reject short title', () => {
@@ -107,6 +116,7 @@ describe('validators', () => {
         projectId: '123e4567-e89b-12d3-a456-426614174000',
         featureId: '123e4567-e89b-12d3-a456-426614174001',
         title: 'No',
+        assigneeId: '123e4567-e89b-12d3-a456-426614174099',
       };
       expect(createTaskSchema.safeParse(input).success).toBe(false);
     });
@@ -120,6 +130,7 @@ describe('validators', () => {
         type: 'BUG',
         priority: 'CRITICAL',
         status: 'TODO',
+        assigneeId: '123e4567-e89b-12d3-a456-426614174099',
       };
       const result = createTaskSchema.safeParse(input);
       
@@ -135,6 +146,7 @@ describe('validators', () => {
       const input = {
         projectId: '123e4567-e89b-12d3-a456-426614174000',
         title: 'Task without explicit status',
+        assigneeId: '123e4567-e89b-12d3-a456-426614174099',
       };
       const result = createTaskSchema.safeParse(input);
       

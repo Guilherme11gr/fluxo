@@ -101,6 +101,7 @@ export function TaskDialog({
 }: TaskDialogProps) {
   const [formData, setFormData] = useState<TaskFormData>(INITIAL_FORM_DATA);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [assigneeError, setAssigneeError] = useState(false);
   // Remove local saving state, use mutation state instead
   const { data: projects } = useProjects();
 
@@ -253,6 +254,7 @@ export function TaskDialog({
 
     // JKILL-215: Validate assignee is required for new tasks
     if (!isEditing && !formData.assigneeId) {
+      setAssigneeError(true);
       toast.error("O campo Responsável é obrigatório");
       return;
     }
@@ -524,8 +526,14 @@ export function TaskDialog({
             </Label>
             <AssigneeSelect
               value={formData.assigneeId}
-              onChange={(v) => setFormData({ ...formData, assigneeId: v })}
+              onChange={(v) => {
+                setFormData({ ...formData, assigneeId: v });
+                if (v) setAssigneeError(false);
+              }}
             />
+            {assigneeError && (
+              <p className="text-sm text-red-500">Responsável é obrigatório</p>
+            )}
           </div>
 
           {/* Actions */}
@@ -538,7 +546,7 @@ export function TaskDialog({
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSaving}>
+            <Button type="submit" disabled={isSaving || (!isEditing && !formData.assigneeId)}>
               {isSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

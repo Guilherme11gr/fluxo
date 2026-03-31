@@ -88,6 +88,7 @@ export function QuickTaskDialog({
   const [featureId, setFeatureId] = useState('');
   const [type, setType] = useState<'TASK' | 'BUG'>('TASK');
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
+  const [assigneeError, setAssigneeError] = useState(false);
 
   const queryClient = useQueryClient();
   const orgId = useCurrentOrgId();
@@ -167,6 +168,7 @@ export function QuickTaskDialog({
 
     // JKILL-215: Validate assignee is required
     if (!assignedTo) {
+      setAssigneeError(true);
       toast.error('O campo Responsável é obrigatório');
       return;
     }
@@ -259,10 +261,16 @@ export function QuickTaskDialog({
             </Label>
             <AssigneeSelect
               value={assignedTo}
-              onChange={setAssignedTo}
+              onChange={(v) => {
+                setAssignedTo(v);
+                if (v) setAssigneeError(false);
+              }}
               disabled={isSaving}
               placeholder="Selecione um responsável"
             />
+            {assigneeError && (
+              <p className="text-sm text-red-500">Responsável é obrigatório</p>
+            )}
           </div>
 
           {projectFeatures.length > 1 && (
@@ -312,7 +320,7 @@ export function QuickTaskDialog({
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={isLoading || isSaving || !title.trim()}>
+            <Button type="submit" disabled={isLoading || isSaving || !title.trim() || !assignedTo}>
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

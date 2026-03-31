@@ -73,7 +73,7 @@ export const createTaskSchema = z.object({
   priority: taskPrioritySchema.default('MEDIUM'),
   points: storyPointsSchema.optional(),
   modules: z.array(z.string().max(50)).max(10).optional().default([]),
-  assigneeId: uuidSchema.nullable().optional(),
+  assigneeId: uuidSchema,
 });
 
 // Update task input validator
