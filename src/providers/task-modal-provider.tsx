@@ -72,6 +72,8 @@ function TaskModalProviderInner({ children }: TaskModalProviderProps) {
 
       // Efficiently find the updated task in the specific query that changed
       const data = event.query.state.data as TasksResponse | undefined;
+      // Skip infinite query data (different shape: { pages, pageParams })
+      if (data && !('items' in data)) return;
       const updatedTask = data?.items?.find((t) => t.id === taskId);
       
       if (updatedTask) {

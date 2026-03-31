@@ -204,7 +204,7 @@ export function useInfiniteTasks(options: UseTasksOptions = {}) {
   const resolvedFilters = resolveMeFilter(filters, currentUserId);
 
   return useInfiniteQuery({
-    queryKey: queryKeys.tasks.list(orgId, resolvedFilters),
+    queryKey: queryKeys.tasks.infiniteList(orgId, resolvedFilters),
     queryFn: ({ pageParam }) => fetchTasksCursor(resolvedFilters, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -251,6 +251,8 @@ export function useCreateTask() {
 
       if (!isRealtimeActive) {
         smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
+        smartInvalidate(queryClient, queryKeys.tasks.infiniteLists(orgId));
+        smartInvalidate(queryClient, [orgId, 'tasks', 'count']);
         if (newTask.featureId) {
           smartInvalidate(queryClient, queryKeys.features.detail(orgId, newTask.featureId));
         }
@@ -306,6 +308,8 @@ export function useUpdateTask() {
 
       if (!isRealtimeActive) {
         smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
+        smartInvalidate(queryClient, queryKeys.tasks.infiniteLists(orgId));
+        smartInvalidate(queryClient, [orgId, 'tasks', 'count']);
         if (updatedTask.featureId) {
           smartInvalidate(queryClient, queryKeys.features.detail(orgId, updatedTask.featureId));
         }
@@ -350,6 +354,8 @@ export function useDeleteTask() {
     },
     onSuccess: () => {
       smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
+      smartInvalidate(queryClient, queryKeys.tasks.infiniteLists(orgId));
+      smartInvalidate(queryClient, [orgId, 'tasks', 'count']);
       invalidateDashboardQueries(queryClient, orgId);
       toast.success('Task excluída');
     },
@@ -436,6 +442,8 @@ export function useMoveTask() {
     onSettled: () => {
       if (!isRealtimeActive) {
         smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
+        smartInvalidate(queryClient, queryKeys.tasks.infiniteLists(orgId));
+        smartInvalidate(queryClient, [orgId, 'tasks', 'count']);
         invalidateDashboardQueries(queryClient, orgId);
       }
     },

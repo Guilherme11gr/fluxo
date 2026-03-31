@@ -619,6 +619,10 @@ function AgentChatSession({
   const handleSend = () => {
     if (!chat.input.trim() || chat.isLoading) return;
     chat.sendMessage();
+    const el = inputRef.current;
+    if (el) {
+      el.style.height = "auto";
+    }
   };
   const handleKeyPress = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -796,15 +800,21 @@ function AgentChatSession({
         !isMinimized && /* @__PURE__ */ jsxs("footer", { className: "agent-chat-input", children: [
           /* @__PURE__ */ jsxs("div", { className: "input-wrapper", children: [
             /* @__PURE__ */ jsx(
-              "input",
+              "textarea",
               {
                 ref: inputRef,
-                type: "text",
                 value: chat.input,
-                onChange: chat.handleInputChange,
+                onChange: (e) => {
+                  chat.handleInputChange(e);
+                  const el = e.target;
+                  el.style.height = "auto";
+                  el.style.height = Math.min(el.scrollHeight, 120) + "px";
+                },
                 onKeyDown: handleKeyPress,
                 placeholder: chat.isLoading ? labels.processing || "Aguardando resposta..." : labels.placeholder || "Digite sua mensagem...",
-                disabled: chat.isLoading
+                disabled: chat.isLoading,
+                rows: 1,
+                style: { resize: "none", overflow: "hidden" }
               }
             ),
             chat.isLoading ? /* @__PURE__ */ jsx(
@@ -1870,7 +1880,7 @@ var chatStyles = `
   z-index: 1;
 }
 
-.input-wrapper input {
+.input-wrapper textarea {
   flex: 1;
   padding: 14px 18px;
   background: var(--bg-tertiary);

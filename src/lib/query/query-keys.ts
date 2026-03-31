@@ -26,8 +26,11 @@ export const queryKeys = {
   tasks: {
     all: (orgId: string) => [...orgKey(orgId), 'tasks'] as const,
     lists: (orgId: string) => [...queryKeys.tasks.all(orgId), 'list'] as const,
+    infiniteLists: (orgId: string) => [...queryKeys.tasks.all(orgId), 'infinite'] as const,
     list: (orgId: string, filters?: Partial<TaskFiltersState>) =>
       [...queryKeys.tasks.lists(orgId), filters ?? {}] as const,
+    infiniteList: (orgId: string, filters?: Partial<TaskFiltersState>) =>
+      [...queryKeys.tasks.infiniteLists(orgId), filters ?? {}] as const,
     details: (orgId: string) => [...queryKeys.tasks.all(orgId), 'detail'] as const,
     detail: (orgId: string, id: string) => [...queryKeys.tasks.details(orgId), id] as const,
     count: (orgId: string, filters?: Partial<TaskFiltersState>) =>
