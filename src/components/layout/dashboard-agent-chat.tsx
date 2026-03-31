@@ -32,9 +32,7 @@ export function DashboardAgentChat() {
   );
 
   const sessionId = 'dashboard';
-  const subtitle = currentMembership
-    ? currentMembership.orgName
-    : 'Tenant atual';
+  const subtitle = resolvedViewer.displayName || currentMembership?.orgName || '';
 
   return (
     <AgentChat
