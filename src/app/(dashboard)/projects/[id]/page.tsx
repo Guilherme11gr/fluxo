@@ -858,6 +858,7 @@ export default function ProjectDetailPage({
         <div className="max-w-2xl">
           <GitHubIntegrationCard
             projectId={project.id}
+            orgId={project.orgId}
             githubInstallationId={project.githubInstallationId ?? null}
             githubRepoFullName={project.githubRepoFullName ?? null}
             githubRepoUrl={project.githubRepoUrl ?? null}
