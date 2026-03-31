@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { Infinity, Brain, Target, Users } from "lucide-react";
+import { Infinity, Brain, Target, Users, ArrowRight } from "lucide-react";
 import { getServerAuthSession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +32,7 @@ export default async function Home() {
               <Button size="lg" className="gap-2">
                 <Infinity className="w-4 h-4" />
                 Começar Agora
+                <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
             <Button size="lg" variant="outline">
@@ -42,7 +43,7 @@ export default async function Home() {
 
         {/* Features Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          <Card>
+          <Card className="transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
             <CardHeader>
               <Brain className="w-10 h-10 text-primary mb-2" />
               <CardTitle>AI Scribe</CardTitle>
@@ -57,7 +58,7 @@ export default async function Home() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
             <CardHeader>
               <Target className="w-10 h-10 text-primary mb-2" />
               <CardTitle>Workflow Inteligente</CardTitle>
@@ -72,7 +73,7 @@ export default async function Home() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
             <CardHeader>
               <Users className="w-10 h-10 text-primary mb-2" />
               <CardTitle>Estimativa Colaborativa</CardTitle>

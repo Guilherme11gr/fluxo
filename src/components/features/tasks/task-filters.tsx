@@ -5,6 +5,8 @@ import { Search, X, FolderOpen, Layers, Box, ChevronRight, User, Users } from 'l
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -24,7 +26,8 @@ export interface TaskFiltersState {
   projectId: string | 'all';
   epicId: string | 'all';
   featureId: string | 'all';
-  assigneeId: string | 'all' | 'me'; // 'me' = minhas tasks
+  assigneeId: string | 'all' | 'me';
+  showDone: boolean;
 }
 
 interface ProjectOption {
@@ -149,6 +152,7 @@ export function TaskFilters({
       epicId: 'all',
       featureId: 'all',
       assigneeId: 'all',
+      showDone: false,
     });
   };
 
@@ -335,6 +339,22 @@ export function TaskFilters({
             ))}
           </SelectContent>
         </Select>
+
+        <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-input bg-background text-sm">
+          <Checkbox
+            id="show-done"
+            checked={filters.showDone}
+            onCheckedChange={(checked) =>
+              onChange({ ...filters, showDone: checked === true })
+            }
+          />
+          <Label
+            htmlFor="show-done"
+            className="text-sm cursor-pointer select-none whitespace-nowrap"
+          >
+            Concluidas
+          </Label>
+        </div>
 
         {/* Priority */}
         <Select

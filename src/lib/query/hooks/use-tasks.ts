@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { invalidateDashboardQueries, smartInvalidate } from '../helpers';
 import { queryKeys } from '../query-keys';
 import { CACHE_TIMES } from '../cache-config';
@@ -18,6 +18,7 @@ export interface TasksResponse {
   page: number;
   pageSize: number;
   totalPages: number;
+  nextCursor: string | null;
 }
 
 interface CreateTaskInput {
@@ -48,37 +49,54 @@ interface UpdateTaskInput {
     featureId: string;
     assigneeId: string | null;
     blocked: boolean;
-    blockReason: string | null; // ✅ null explícito (não undefined)
-    blockedAt: Date | null; // Timestamp do bloqueio
-    blockedBy: string | null; // User ID que bloqueou
+    blockReason: string | null;
+    blockedAt: Date | null;
+    blockedBy: string | null;
   }>;
 }
 
 // ============ Fetch Functions ============
 
-/**
- * Fetch tasks from API with server-side filtering
- * 
- * IMPORTANT: All filtering happens on the server for accuracy.
- * The 'me' assigneeId must be resolved to actual userId before calling.
- */
-async function fetchTasks(filters?: Partial<TaskFiltersState>): Promise<TasksResponse> {
+function buildTaskParams(filters?: ResolvedFilters): URLSearchParams {
   const params = new URLSearchParams();
-  
-  // Optimized for Kanban: fetch enough tasks, skip expensive count
-  params.set('pageSize', '100');
-  params.set('sortBy', 'createdAt');
-  params.set('sortOrder', 'desc');
-  params.set('skipCount', 'true'); // Signal to API to skip count query
 
-  // Add filters to params (skip 'all' and empty values)
   if (filters) {
     Object.entries(filters).forEach(([key, value]) => {
-      // Skip 'all', 'me' (handled by caller), empty strings, and undefined
       if (value && value !== 'all' && value !== 'me' && value !== '') {
         params.set(key, String(value));
       }
     });
+  }
+
+  return params;
+}
+
+async function fetchTasks(filters?: Partial<TaskFiltersState>): Promise<TasksResponse> {
+  const params = buildTaskParams(filters);
+
+  params.set('pageSize', '100');
+  params.set('sortBy', 'createdAt');
+  params.set('sortOrder', 'desc');
+  params.set('skipCount', 'true');
+
+  const res = await fetch(`/api/tasks?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch tasks');
+  const json = await res.json();
+  return json.data;
+}
+
+async function fetchTasksCursor(
+  filters: Partial<TaskFiltersState> | undefined,
+  cursor?: string
+): Promise<TasksResponse> {
+  const params = buildTaskParams(filters);
+
+  params.set('pageSize', '20');
+  params.set('sortBy', 'createdAt');
+  params.set('sortOrder', 'desc');
+
+  if (cursor) {
+    params.set('cursor', cursor);
   }
 
   const res = await fetch(`/api/tasks?${params.toString()}`);
@@ -87,10 +105,19 @@ async function fetchTasks(filters?: Partial<TaskFiltersState>): Promise<TasksRes
   return json.data;
 }
 
-/**
- * Fetch single task by ID
- * Used for selective cache updates in real-time events
- */
+async function fetchTasksCount(filters?: Partial<TaskFiltersState>): Promise<number> {
+  const params = buildTaskParams(filters);
+
+  params.set('pageSize', '1');
+  params.set('sortBy', 'createdAt');
+  params.set('sortOrder', 'desc');
+
+  const res = await fetch(`/api/tasks?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch tasks count');
+  const json = await res.json();
+  return json.data.total;
+}
+
 async function fetchTaskById(id: string): Promise<TaskWithReadableId> {
   const res = await fetch(`/api/tasks/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch task ${id}`);
@@ -98,7 +125,6 @@ async function fetchTaskById(id: string): Promise<TaskWithReadableId> {
   return json.data;
 }
 
-// Export for use in event processor
 export { fetchTaskById };
 
 async function createTask(data: CreateTaskInput): Promise<TaskWithReadableId> {
@@ -128,40 +154,33 @@ async function deleteTask(id: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete task');
 }
 
+// ============ Helpers ============
+
+type ResolvedFilters = Partial<TaskFiltersState> & { excludeStatuses?: string };
+
+function resolveMeFilter(
+  filters: Partial<TaskFiltersState> & { excludeStatuses?: string } | undefined,
+  currentUserId?: string
+): ResolvedFilters | undefined {
+  if (!filters) return undefined;
+  return {
+    ...filters,
+    assigneeId: filters.assigneeId === 'me' ? currentUserId : filters.assigneeId,
+  };
+}
+
 // ============ Hooks ============
 
 interface UseTasksOptions {
-  filters?: Partial<TaskFiltersState>;
-  /** Current user ID - required to resolve 'me' filter */
+  filters?: Partial<TaskFiltersState> & { excludeStatuses?: string };
   currentUserId?: string;
 }
 
-/**
- * Fetch tasks with server-side filtering
- * 
- * IMPORTANT: Filters are sent to the API, not applied client-side.
- * This ensures accurate results even with >100 tasks.
- * 
- * Query keys include orgId for multi-org cache isolation.
- * 
- * @example
- * const { data, isLoading } = useTasks({ 
- *   filters: { status: 'DOING', assigneeId: 'me' },
- *   currentUserId: user.id 
- * });
- */
 export function useTasks(options: UseTasksOptions = {}) {
   const { filters, currentUserId } = options;
   const orgId = useCurrentOrgId();
-  
-  // Resolve 'me' to actual userId for server-side filtering
-  const resolvedFilters = filters ? {
-    ...filters,
-    // Convert 'me' to actual UUID, or undefined if user not loaded
-    assigneeId: filters.assigneeId === 'me' 
-      ? currentUserId 
-      : filters.assigneeId,
-  } : undefined;
+
+  const resolvedFilters = resolveMeFilter(filters, currentUserId);
 
   return useQuery({
     queryKey: queryKeys.tasks.list(orgId, resolvedFilters),
@@ -169,24 +188,47 @@ export function useTasks(options: UseTasksOptions = {}) {
       const start = performance.now();
       const result = await fetchTasks(resolvedFilters);
       const end = performance.now();
-      console.log(`[Query] 🔍 fetchTasks took ${(end - start).toFixed(2)}ms`);
+      console.log(`[Query] fetchTasks took ${(end - start).toFixed(2)}ms`);
       return result;
     },
-    // Don't fetch if 'me' filter is set but user isn't loaded yet
-    // Also don't fetch if orgId is unknown (not authenticated yet)
     enabled: !(filters?.assigneeId === 'me' && !currentUserId) && isOrgIdValid(orgId),
-    // Keep previous data visible while fetching new filter results
-    // This prevents the UI from showing skeleton on every filter change
     placeholderData: keepPreviousData,
-    // Cache tasks for 5s - short to ensure UI stays fresh after mutations
-    // Trade-off: more requests vs better UX consistency
     ...CACHE_TIMES.FRESH,
   });
 }
 
-/**
- * Create a new task
- */
+export function useInfiniteTasks(options: UseTasksOptions = {}) {
+  const { filters, currentUserId } = options;
+  const orgId = useCurrentOrgId();
+
+  const resolvedFilters = resolveMeFilter(filters, currentUserId);
+
+  return useInfiniteQuery({
+    queryKey: queryKeys.tasks.list(orgId, resolvedFilters),
+    queryFn: ({ pageParam }) => fetchTasksCursor(resolvedFilters, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: !(filters?.assigneeId === 'me' && !currentUserId) && isOrgIdValid(orgId),
+    placeholderData: keepPreviousData,
+    ...CACHE_TIMES.FRESH,
+  });
+}
+
+export function useTasksCount(options: UseTasksOptions = {}) {
+  const { filters, currentUserId } = options;
+  const orgId = useCurrentOrgId();
+
+  const resolvedFilters = resolveMeFilter(filters, currentUserId);
+
+  return useQuery({
+    queryKey: queryKeys.tasks.count(orgId, resolvedFilters),
+    queryFn: () => fetchTasksCount(resolvedFilters),
+    enabled: !(filters?.assigneeId === 'me' && !currentUserId) && isOrgIdValid(orgId),
+    placeholderData: keepPreviousData,
+    ...CACHE_TIMES.FRESH,
+  });
+}
+
 export function useCreateTask() {
   const queryClient = useQueryClient();
   const orgId = useCurrentOrgId();
@@ -195,12 +237,10 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: createTask,
     onSuccess: (newTask) => {
-      // 1. Optimistic update: add to any matching list immediately
       queryClient.setQueriesData<TasksResponse>(
         { queryKey: queryKeys.tasks.lists(orgId) },
         (old) => {
           if (!old) return old;
-          // Add to beginning of list (newest first)
           return {
             ...old,
             items: [newTask, ...old.items],
@@ -209,17 +249,11 @@ export function useCreateTask() {
         }
       );
 
-      // 2. Only invalidate if real-time is disconnected
-      // If RT is active, the broadcast will handle invalidation
       if (!isRealtimeActive) {
         smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
-        
-        // 3. Invalidate feature detail to update task count
         if (newTask.featureId) {
           smartInvalidate(queryClient, queryKeys.features.detail(orgId, newTask.featureId));
         }
-
-        // 4. Invalidate Dashboard using helper
         invalidateDashboardQueries(queryClient, orgId);
       }
 
@@ -231,14 +265,6 @@ export function useCreateTask() {
   });
 }
 
-/**
- * Update a task
- * Automatically invalidates task list cache on success.
- * 
- * @example
- * const { mutate } = useUpdateTask();
- * mutate({ id: 'uuid', data: { status: 'DONE' } });
- */
 export function useUpdateTask() {
   const queryClient = useQueryClient();
   const orgId = useCurrentOrgId();
@@ -250,7 +276,6 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: updateTask,
     onSuccess: (updatedTask) => {
-      // 1. Broadcast to other clients (ALWAYS, even if RT active)
       broadcast({
         eventId: crypto.randomUUID(),
         orgId,
@@ -266,7 +291,6 @@ export function useUpdateTask() {
         timestamp: new Date().toISOString(),
       });
 
-      // 2. Optimistic update: update task in all lists immediately
       queryClient.setQueriesData<TasksResponse>(
         { queryKey: queryKeys.tasks.lists(orgId) },
         (old) => {
@@ -280,17 +304,11 @@ export function useUpdateTask() {
         }
       );
 
-      // 3. Only invalidate if real-time is disconnected
-      // If RT is active, broadcast will handle invalidation
       if (!isRealtimeActive) {
         smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
-
-        // 4. Update feature detail if task belongs to a feature (for count updates)
         if (updatedTask.featureId) {
           smartInvalidate(queryClient, queryKeys.features.detail(orgId, updatedTask.featureId));
         }
-
-        // 5. Invalidate Dashboard
         invalidateDashboardQueries(queryClient, orgId);
       }
 
@@ -303,10 +321,6 @@ export function useUpdateTask() {
   });
 }
 
-/**
- * Delete a task
- * Automatically invalidates task list cache on success.
- */
 export function useDeleteTask() {
   const queryClient = useQueryClient();
   const orgId = useCurrentOrgId();
@@ -314,15 +328,12 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: deleteTask,
     onMutate: async (taskId) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks.lists(orgId) });
 
-      // Snapshot previous data for rollback
-      const previousTasks = queryClient.getQueriesData<TasksResponse>({ 
-        queryKey: queryKeys.tasks.lists(orgId) 
+      const previousTasks = queryClient.getQueriesData<TasksResponse>({
+        queryKey: queryKeys.tasks.lists(orgId)
       });
 
-      // Optimistically remove from all lists
       queryClient.setQueriesData<TasksResponse>(
         { queryKey: queryKeys.tasks.lists(orgId) },
         (old) => {
@@ -338,16 +349,11 @@ export function useDeleteTask() {
       return { previousTasks };
     },
     onSuccess: () => {
-      // Force immediate refetch to ensure consistency
       smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
-
-      // Invalidate Dashboard using helper
       invalidateDashboardQueries(queryClient, orgId);
-
       toast.success('Task excluída');
     },
     onError: (error, _, context) => {
-      // Rollback on error
       if (context?.previousTasks) {
         context.previousTasks.forEach(([queryKey, data]) => {
           queryClient.setQueryData(queryKey, data);
@@ -359,11 +365,6 @@ export function useDeleteTask() {
   });
 }
 
-/**
- * Move task to new status (optimistic update)
- * Updates UI immediately, reverts on error.
- * Uses dedicated /status endpoint to ensure only status is changed.
- */
 export function useMoveTask() {
   const queryClient = useQueryClient();
   const orgId = useCurrentOrgId();
@@ -384,15 +385,11 @@ export function useMoveTask() {
       return json.data as TaskWithReadableId;
     },
 
-    // Optimistic update
     onMutate: async ({ id, status }) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks.lists(orgId) });
 
-      // Snapshot previous value
       const previousTasks = queryClient.getQueriesData({ queryKey: queryKeys.tasks.lists(orgId) });
 
-      // Optimistically update
       queryClient.setQueriesData(
         { queryKey: queryKeys.tasks.lists(orgId) },
         (old: TasksResponse | undefined) => {
@@ -410,7 +407,6 @@ export function useMoveTask() {
     },
 
     onError: (_err, _vars, context) => {
-      // Revert on error
       if (context?.previousTasks) {
         context.previousTasks.forEach(([queryKey, data]) => {
           queryClient.setQueryData(queryKey, data);
@@ -420,7 +416,6 @@ export function useMoveTask() {
     },
 
     onSuccess: (movedTask, { status }) => {
-      // Broadcast to other clients
       broadcast({
         eventId: crypto.randomUUID(),
         orgId,
@@ -439,8 +434,6 @@ export function useMoveTask() {
     },
 
     onSettled: () => {
-      // Only invalidate if real-time is disconnected
-      // If RT is active, broadcast will handle invalidation
       if (!isRealtimeActive) {
         smartInvalidate(queryClient, queryKeys.tasks.lists(orgId));
         invalidateDashboardQueries(queryClient, orgId);

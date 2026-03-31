@@ -18,7 +18,7 @@ const badgeVariants = cva(
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         pulse:
-          "text-primary text-primary-foreground [a&]:hover:bg-primary/90 animate-pulse",
+          "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90 animate-pulse",
         "outline-success":
           "border-green-500 text-green-500 [a&]:hover:bg-green-500/10",
         "outline-warning":

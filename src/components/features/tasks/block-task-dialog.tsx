@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -11,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { AlertTriangle, Loader2 } from 'lucide-react';
@@ -130,14 +130,14 @@ export function BlockTaskDialog({
           <AlertDialogCancel onClick={handleCancel} disabled={isPending}>
             Cancelar
           </AlertDialogCancel>
-          <AlertDialogAction
+          <Button
             onClick={handleConfirm}
             disabled={!isReasonValid || isPending}
             className="bg-red-500 hover:bg-red-600"
           >
             {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {isPending ? 'Bloqueando...' : 'Bloquear Task'}
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

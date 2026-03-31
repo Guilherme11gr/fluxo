@@ -30,6 +30,8 @@ export const queryKeys = {
       [...queryKeys.tasks.lists(orgId), filters ?? {}] as const,
     details: (orgId: string) => [...queryKeys.tasks.all(orgId), 'detail'] as const,
     detail: (orgId: string, id: string) => [...queryKeys.tasks.details(orgId), id] as const,
+    count: (orgId: string, filters?: Partial<TaskFiltersState>) =>
+      [...queryKeys.tasks.all(orgId), 'count', filters ?? {}] as const,
   },
 
   // ============ PROJECTS ============

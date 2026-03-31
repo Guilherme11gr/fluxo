@@ -25,6 +25,7 @@ import { OrgSwitcher } from "@/components/layout/org-switcher";
 import { TaskModalProvider } from "@/providers/task-modal-provider";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardAgentChat } from "@/components/layout/dashboard-agent-chat";
+import { ConnectionBadge } from "@/components/ui/connection-badge";
 
 export function DashboardShell({
   children,
@@ -131,8 +132,9 @@ export function DashboardShell({
         </nav>
 
         <div className={`border-t border-border ${
-          isDesktopCollapsed ? 'p-2 flex justify-center' : 'p-4'
+          isDesktopCollapsed ? 'p-2 flex flex-col items-center gap-2' : 'p-4 space-y-2'
         }`}>
+          <ConnectionBadge iconOnly={isDesktopCollapsed} size="sm" />
           <LogoutButton isCollapsed={isDesktopCollapsed} />
         </div>
       </aside>

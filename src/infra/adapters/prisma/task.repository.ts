@@ -115,12 +115,22 @@ export class TaskRepository {
       pageSize = 20,
       sortBy = 'createdAt',
       sortOrder = 'desc',
+      cursor,
     } = filters;
 
     const where = this.buildWhereClause(orgId, filters);
 
+    // Cursor-based pagination: use createdAt < cursor instead of skip
+    // Cursor takes precedence over page-based pagination
+    const cursorFilter = cursor
+      ? { createdAt: { lt: new Date(cursor) } }
+      : {};
+
     const tasks = await this.prisma.task.findMany({
-      where,
+      where: {
+        ...where,
+        ...cursorFilter,
+      },
       select: {
         id: true,
         orgId: true,
@@ -139,7 +149,6 @@ export class TaskRepository {
         updatedAt: true,
         blocked: true,
         statusChangedAt: true,
-        // Include tags to avoid N+1 when displaying
         tagAssignments: {
           select: {
             tag: {
@@ -147,7 +156,6 @@ export class TaskRepository {
             },
           },
         },
-        // Use direct project relation (1 JOIN instead of 3)
         project: {
           select: {
             id: true,
@@ -178,9 +186,13 @@ export class TaskRepository {
           },
         },
       },
-      skip: (page - 1) * pageSize,
+      // When cursor is provided, don't use skip (cursor handles offset)
+      skip: cursor ? 0 : (page - 1) * pageSize,
       take: pageSize,
-      orderBy: { [sortBy]: sortOrder },
+      orderBy: [
+        { [sortBy]: sortOrder },
+        { id: sortOrder },
+      ],
     });
 
     // Build readable IDs using direct project.key
@@ -449,12 +461,24 @@ export class TaskRepository {
       epicId,
       search,
       blocked,
+      excludeStatuses,
     } = filters;
 
     const where: Record<string, unknown> = { orgId };
 
     if (status) {
       where.status = Array.isArray(status) ? { in: status } : status;
+    }
+    if (excludeStatuses && excludeStatuses.length > 0) {
+      if (status) {
+        const currentStatus = where.status;
+        where.status = {
+          ...(typeof currentStatus === 'object' ? currentStatus : { equals: currentStatus }),
+          notIn: excludeStatuses,
+        };
+      } else {
+        where.status = { notIn: excludeStatuses };
+      }
     }
     if (type) where.type = type;
     if (priority) where.priority = priority;

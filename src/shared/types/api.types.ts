@@ -43,6 +43,8 @@ export interface TaskFilterParams extends PaginationParams, SortParams {
   search?: string;
   blocked?: boolean;
   skipCount?: boolean; // Performance: skip count query when not needed
+  cursor?: string; // Cursor-based pagination (ISO date string of createdAt)
+  excludeStatuses?: string[]; // Statuses to exclude from results
 }
 
 // Common list response

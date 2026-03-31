@@ -20,6 +20,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { TaskWithReadableId, TaskStatus, TaskPriority } from '@/shared/types';
 import {
   useTasks,
+  useInfiniteTasks,
+  useTasksCount,
   useProjects,
   useModules,
   useMoveTask,
@@ -32,6 +34,8 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
 
+type ApiFilters = Partial<TaskFiltersState> & { excludeStatuses?: string };
+
 function TasksPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -43,7 +47,6 @@ function TasksPageContent() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [orgSwitchHandled, setOrgSwitchHandled] = useState(false);
 
-  // Delete Task State
   const [taskToDelete, setTaskToDelete] = useState<TaskWithReadableId | null>(null);
 
   // Handle deep link with org parameter - auto-switch if needed
@@ -56,15 +59,12 @@ function TasksPageContent() {
       return;
     }
 
-    // Find org by slug
     const targetOrg = viewer.memberships.find(m => m.orgSlug === orgSlug);
     
     if (!targetOrg) {
-      // User is not a member of this org
       toast.error('Você não tem acesso a esta organização', {
         description: `Organização: ${orgSlug}`,
       });
-      // Clean org param from URL
       const params = new URLSearchParams(window.location.search);
       params.delete('org');
       const newUrl = params.toString() ? `/tasks?${params.toString()}` : '/tasks';
@@ -73,7 +73,6 @@ function TasksPageContent() {
       return;
     }
 
-    // If already in the correct org, just clean the param
     if (targetOrg.orgId === viewer.currentOrgId) {
       const params = new URLSearchParams(window.location.search);
       params.delete('org');
@@ -84,35 +83,25 @@ function TasksPageContent() {
       return;
     }
 
-    // Need to switch org - this will cause a reload
     toast.info('Trocando para a organização correta...', {
       description: targetOrg.orgName,
     });
     
-    // Build return URL with task param preserved (but without org param)
     const params = new URLSearchParams(window.location.search);
     params.delete('org');
     const taskId = params.get('task');
     const returnUrl = taskId ? `/tasks?task=${taskId}` : '/tasks';
     
-    // Switch will do hard reload, preserving task param
     switchOrg(targetOrg.orgId, returnUrl);
   }, [orgSwitchHandled, searchParams, switchOrg, viewer]);
 
-  /* 
-    Updated to sync with URL query params. 
-    We use a lazy initializer to set the initial state from the URL.
-    Sanitization: valores inválidos defaultam para 'all'
-  */
   const [filters, setFilters] = useState<TaskFiltersState>(() => {
     const params = new URLSearchParams(searchParams.toString());
 
-    // Sanitize status
     const statusParam = params.get('status');
     const validStatuses = ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE'];
     const status = statusParam && validStatuses.includes(statusParam) ? statusParam as TaskStatus : 'all';
 
-    // Sanitize priority
     const priorityParam = params.get('priority');
     const validPriorities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
     const priority = priorityParam && validPriorities.includes(priorityParam) ? priorityParam as TaskPriority : 'all';
@@ -126,17 +115,16 @@ function TasksPageContent() {
       epicId: params.get('epicId') || 'all',
       featureId: params.get('featureId') || 'all',
       assigneeId: params.get('assigneeId') || 'all',
+      showDone: false,
     };
   });
 
-  // Handler to update both state and URL explicitly
   const handleFiltersChange = useCallback((newFilters: TaskFiltersState) => {
     setFilters(newFilters);
 
     const params = new URLSearchParams(searchParams.toString());
     let hasChanges = false;
 
-    // Helper to sync specific key
     const syncParam = (key: string, value: string) => {
       const currentValue = params.get(key);
       if (value && value !== 'all') {
@@ -146,13 +134,6 @@ function TasksPageContent() {
         }
       } else {
         if (currentValue) {
-          /**
-           * Special handling for projectId:
-           * If we clear projectId (set to 'all'), we must also ensure epicId and featureId are cleared/all
-           * in the URL if they aren't already handled by the newsFilters.
-           * However, TaskFilters component usually resets them in the object it passes.
-           * So relying on newFiltersToCheck is sufficient.
-           */
           params.delete(key);
           hasChanges = true;
         }
@@ -171,7 +152,6 @@ function TasksPageContent() {
     if (hasChanges) {
       const newQuery = params.toString();
       const currentSearch = searchParams.get('search') || '';
-      // If search string changed, use replace to avoid history spam. Otherwise use push.
       if (currentSearch !== newFilters.search) {
         router.replace(newQuery ? `/tasks?${newQuery}` : '/tasks', { scroll: false });
       } else {
@@ -180,30 +160,24 @@ function TasksPageContent() {
     }
   }, [router, searchParams]);
 
-  // Sync from URL (Browser Back/Forward)
-  // We use a ref to track the last synced URL to avoid unnecessary re-renders
   const lastSyncedUrl = useRef<string>('');
 
   useEffect(() => {
     const currentUrl = searchParams.toString();
 
-    // Skip if URL hasn't changed (avoids cascading renders)
     if (lastSyncedUrl.current === currentUrl) return;
     lastSyncedUrl.current = currentUrl;
 
     const params = new URLSearchParams(currentUrl);
 
-    // Sanitize status
     const statusParam = params.get('status');
     const validStatuses = ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE'];
     const status = statusParam && validStatuses.includes(statusParam) ? statusParam as TaskStatus : 'all';
 
-    // Sanitize priority
     const priorityParam = params.get('priority');
     const validPriorities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
     const priority = priorityParam && validPriorities.includes(priorityParam) ? priorityParam as TaskPriority : 'all';
 
-    // Construct what the state SHOULD be based on URL (sanitized)
     const urlFilters: TaskFiltersState = {
       search: params.get('search') || '',
       status,
@@ -213,95 +187,135 @@ function TasksPageContent() {
       epicId: params.get('epicId') || 'all',
       featureId: params.get('featureId') || 'all',
       assigneeId: params.get('assigneeId') || 'all',
+      showDone: false,
     };
 
-    // ⚠️ INTENTIONAL: setState in effect is NECESSARY for browser back/forward sync
-    // This is the correct pattern for URL-driven state (not a data fetching effect)
     setFilters(urlFilters);
   }, [searchParams]);
 
-// Smart debounce: 100ms for filters (project, status), 300ms for search text
-// Filters like projectId should feel instant, but search needs more delay
-const searchDebounced = useDebounce(filters.search, 300);
-const filtersWithoutSearch = useMemo(() => {
-  const { search, ...rest } = filters;
-  return rest;
-}, [filters]);
-const filtersDebounced = useDebounce(filtersWithoutSearch, 100);
+  const searchDebounced = useDebounce(filters.search, 300);
+  const filtersWithoutSearch = useMemo(() => {
+    const { search, ...rest } = filters;
+    return rest;
+  }, [filters]);
+  const filtersDebounced = useDebounce(filtersWithoutSearch, 100);
 
-const debouncedFilters = useMemo(() => ({
-  ...filtersDebounced,
-  search: searchDebounced,
-}), [filtersDebounced, searchDebounced]);
+  const debouncedFilters = useMemo(() => ({
+    ...filtersDebounced,
+    search: searchDebounced,
+  }), [filtersDebounced, searchDebounced]);
 
-// Build filters for API
-const apiFilters = useMemo(() => debouncedFilters, [debouncedFilters]);
+  const apiFilters = useMemo<ApiFilters>(() => {
+    const { showDone, status, ...rest } = debouncedFilters;
+    if (!showDone && status === 'all') {
+      return { ...rest, excludeStatuses: 'DONE' };
+    }
+    return rest;
+  }, [debouncedFilters]);
 
-// Get current user first (needed for 'me' filter resolution)
-const { data: currentUser } = useCurrentUser();
+  const { data: currentUser } = useCurrentUser();
 
-  // React Query hooks for shared cache
-  // IMPORTANT: Filters are sent to server - no client-side filtering!
-  const { 
-    data: tasksData, 
-    isLoading, 
-    isFetching, 
-    isPlaceholderData,
-    error, 
-    refetch 
-  } = useTasks({
+  // Kanban view: useTasks with skipCount=true (unchanged behavior)
+  const kanbanQuery = useTasks({
     filters: apiFilters,
     currentUserId: currentUser?.id,
   });
+
+  // Table view: cursor-based infinite scroll
+  const infiniteQuery = useInfiniteTasks({
+    filters: apiFilters,
+    currentUserId: currentUser?.id,
+  });
+
+  // Accurate count for table view header
+  const countQuery = useTasksCount({
+    filters: apiFilters,
+    currentUserId: currentUser?.id,
+  });
+
+  // Select the right query based on view mode
+  const isKanban = view === 'kanban';
+  const tasksData = isKanban ? kanbanQuery.data : infiniteQuery.data?.pages[0];
+  const isLoading = isKanban ? kanbanQuery.isLoading : infiniteQuery.isLoading;
+  const isFetching = isKanban ? kanbanQuery.isFetching : infiniteQuery.isFetching;
+  const isPlaceholderData = isKanban ? kanbanQuery.isPlaceholderData : infiniteQuery.isPlaceholderData;
+  const error = isKanban ? kanbanQuery.error : infiniteQuery.error;
+  const refetch = isKanban ? kanbanQuery.refetch : infiniteQuery.refetch;
+
+  // Table-specific infinite scroll state
+  const hasNextPage = !isKanban && infiniteQuery.hasNextPage;
+  const isFetchingNextPage = !isKanban && infiniteQuery.isFetchingNextPage;
+  const fetchNextPage = !isKanban ? infiniteQuery.fetchNextPage : () => {};
+
+  // Infinite scroll sentinel
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isKanban || !loadMoreRef.current || !hasNextPage || isFetchingNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [isKanban, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const { data: projectsData } = useProjects();
   const { data: epicsData } = useAllEpics();
   const { data: featuresData } = useAllFeatures();
   const { data: modulesData } = useModules();
   const { data: usersData } = useUsers();
 
-  // Mutations
   const moveTaskMutation = useMoveTask();
   const deleteTaskMutation = useDeleteTask();
 
-  // Derived data - tasks come pre-filtered from server
-  const tasks = useMemo(() => tasksData?.items ?? [], [tasksData]);
-  // When skipCount=true, total comes as -1. Show actual items count instead.
-  const totalTasks = (tasksData?.total ?? 0) === -1 ? tasks.length : (tasksData?.total ?? 0);
+  // Build tasks list: flat map all pages for infinite, or single page for kanban
+  const tasks = useMemo(() => {
+    if (isKanban) {
+      return kanbanQuery.data?.items ?? [];
+    }
+    return infiniteQuery.data?.pages.flatMap(page => page.items) ?? [];
+  }, [isKanban, kanbanQuery.data, infiniteQuery.data]);
+
+  const totalTasks = isKanban
+    ? (tasksData?.total === -1 ? tasks.length : (tasksData?.total ?? 0))
+    : (countQuery.data ?? 0);
+
   const projects = projectsData ?? [];
   const epics = epicsData ?? [];
   const features = featuresData ?? [];
   const modules = modulesData ?? [];
   const members = usersData ?? [];
 
-  // Handle task move (Kanban drag-drop) - now uses optimistic updates
   const handleTaskMove = useCallback(async (taskId: string, newStatus: TaskStatus) => {
     await moveTaskMutation.mutateAsync({ id: taskId, status: newStatus });
   }, [moveTaskMutation]);
 
-  // Handle delete task click (opens dialog)
   const handleDeleteTaskClick = useCallback((task: TaskWithReadableId) => {
     setTaskToDelete(task);
   }, []);
 
-  // Confirm delete task implementation
   const confirmDeleteTask = async () => {
     if (!taskToDelete) return;
 
     await deleteTaskMutation.mutateAsync(taskToDelete.id);
     setTaskToDelete(null);
-    // If the deleted task was open in modal, close it
     if (selectedTask?.id === taskToDelete.id) {
       setIsDetailModalOpen(false);
     }
   };
 
-  // Handle edit task - open dialog
   const handleEditTask = useCallback((task: TaskWithReadableId) => {
     setEditingTask(task);
     setIsDialogOpen(true);
   }, []);
 
-  // Handle dialog open change
   const handleDialogChange = (open: boolean) => {
     setIsDialogOpen(open);
     if (!open) {
@@ -309,39 +323,28 @@ const { data: currentUser } = useCurrentUser();
     }
   };
 
-  // Handle task click - open detail modal and update URL without full router transition for fluidity
   const handleTaskClick = useCallback((task: TaskWithReadableId) => {
     setSelectedTask(task);
     setIsDetailModalOpen(true);
 
-    // Manually update URL to avoid Next.js router processing lag during animation
     const params = new URLSearchParams(searchParams.toString());
     params.set('task', task.id);
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     window.history.pushState(null, '', newUrl);
-  }, [searchParams]); // removed router dep as we use history API for this specific interaction
+  }, [searchParams]);
 
-  // Handle closing detail modal
   const handleDetailModalClose = useCallback((open: boolean) => {
     setIsDetailModalOpen(open);
     if (!open) {
-      // Do not clear selectedTask here to allow the modal to animate out with content
-      // setSelectedTask(null); 
-
-      // CRITICAL: Use window.location.search directly to avoid stale searchParams race condition
       const params = new URLSearchParams(window.location.search);
       params.delete('task');
       const newUrl = params.toString() ? `/tasks?${params.toString()}` : '/tasks';
-      // Use history API to clean URL without triggering Next.js navigation/re-render
       window.history.pushState(null, '', newUrl);
     }
-  }, []); // No deps - uses window.location directly
+  }, []);
 
   // Open task from URL query param (Deep Link)
   useEffect(() => {
-    // Verify against real URL because searchParams might be stale due to manual history manipulation
-    // This prevents the "Zombie Re-open" bug where closing via pushState causes this effect to re-open
-    // because Next.js searchParams hasn't updated yet.
     if (typeof window === 'undefined') return;
 
     const currentParams = new URLSearchParams(window.location.search);
@@ -349,17 +352,12 @@ const { data: currentUser } = useCurrentUser();
     const taskId = searchParams.get('task');
 
     if (taskId && urlHasTask && tasks.length > 0 && !isDetailModalOpen) {
-      // CRITICAL: Search in ALL tasks (not filteredTasks) to support deep links with filters
-      // Example: /tasks?task=uuid&assigneeId=me should open even if task is not assigned to me
       const task = tasks.find(t => t.id === taskId);
 
       if (task) {
-        // ⚠️ INTENTIONAL: setState in effect is NECESSARY for deep linking
-        // Opening task modal from URL param requires synchronous state update
         setSelectedTask(task);
         setIsDetailModalOpen(true);
       } else {
-        // Task ID not found - clean URL to avoid broken state
         const params = new URLSearchParams(window.location.search);
         params.delete('task');
         const newUrl = params.toString() ? `/tasks?${params.toString()}` : '/tasks';
@@ -368,7 +366,6 @@ const { data: currentUser } = useCurrentUser();
     }
   }, [searchParams, tasks, isDetailModalOpen]);
 
-  // Map editingTask to TaskDialog expected format
   const taskToEditForDialog = editingTask ? {
     id: editingTask.id,
     title: editingTask.title,
@@ -383,8 +380,6 @@ const { data: currentUser } = useCurrentUser();
     tags: editingTask.tags,
   } : null;
 
-  // JKILL-214: Memoize defaultValues to prevent useEffect reset on every render
-  // This ensures deep links and filters work correctly
   const defaultValues = useMemo(() => ({
     status: filters.status !== 'all' ? filters.status : undefined,
     priority: filters.priority !== 'all' ? filters.priority : undefined,
@@ -392,8 +387,6 @@ const { data: currentUser } = useCurrentUser();
     featureId: filters.featureId !== 'all' ? filters.featureId : undefined,
   }), [filters.status, filters.priority, filters.module, filters.featureId]);
 
-  // Only show full-page skeleton on FIRST load ever (no data at all)
-  // When changing filters, we keep showing previous data (placeholderData)
   const isFirstLoad = isLoading && !tasksData;
 
   if (isFirstLoad) {
@@ -401,7 +394,6 @@ const { data: currentUser } = useCurrentUser();
       <div className="space-y-6">
         <PageHeaderSkeleton />
         <div className="space-y-4">
-          {/* Filters Skeleton */}
           <div className="flex gap-4 mb-4">
             <div className="h-10 w-64 bg-muted rounded animate-pulse" />
             <div className="h-10 w-32 bg-muted rounded animate-pulse" />
@@ -421,8 +413,12 @@ const { data: currentUser } = useCurrentUser();
             Minhas Tasks
           </h1>
           <p className="text-muted-foreground flex items-center gap-2">
-            {totalTasks} tasks encontradas
-            {isFetching && !isLoading && (
+            {countQuery.isLoading && !isKanban ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              `${totalTasks} tasks encontradas`
+            )}
+            {isFetching && !isLoading && !isKanban && (
               <Loader2 className="w-3 h-3 animate-spin" />
             )}
           </p>
@@ -455,10 +451,13 @@ const { data: currentUser } = useCurrentUser();
         onOpenChange={handleDialogChange}
         projectId={filters.projectId !== 'all' ? filters.projectId : undefined}
         features={features}
-        modules={modules} // This is fallback fallbackModules, kept for comp
+        modules={modules}
         defaultValues={defaultValues}
         taskToEdit={taskToEditForDialog}
-        onSuccess={refetch}
+        onSuccess={() => {
+          refetch();
+          countQuery.refetch();
+        }}
       />
 
       {/* Filters */}
@@ -486,7 +485,6 @@ const { data: currentUser } = useCurrentUser();
       {/* View */}
       {!error && (
         <div className="relative">
-          {/* Subtle loading indicator - just a spinner, no text */}
           {isFetching && isPlaceholderData && (
             <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10">
               <div className="bg-background/95 p-2 rounded-full shadow-md border">
@@ -506,11 +504,18 @@ const { data: currentUser } = useCurrentUser();
                 isLoading={false}
               />
             ) : (
-              <TaskTable
-                tasks={tasks}
-                onTaskClick={handleTaskClick}
-                isLoading={false}
-              />
+              <>
+                <TaskTable
+                  tasks={tasks}
+                  onTaskClick={handleTaskClick}
+                  isLoading={false}
+                />
+                <div ref={loadMoreRef} className="flex justify-center py-4">
+                  {isFetchingNextPage && (
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
