@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Transpile mermaid for standalone output
+  transpilePackages: ["mermaid"],
+
   // Production optimizations
   output: "standalone",
   outputFileTracingRoot: process.cwd(),
