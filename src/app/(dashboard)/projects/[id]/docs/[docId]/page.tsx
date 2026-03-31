@@ -25,6 +25,7 @@ import { useDoc, useShareDoc, useDisableDocSharing } from "@/lib/query/hooks/use
 import { useDocTags, useProjectTags, useAssignTags, useUnassignTag } from "@/lib/query/hooks/use-doc-tags";
 import { UserAvatar } from "@/components/features/shared/user-avatar";
 import { DocTagBadge, DocTagInput } from "@/components/features/docs";
+import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
 
 export default function ProjectDocPage({
   params,
@@ -230,6 +231,10 @@ export default function ProjectDocPage({
             code: ({ className, children, ...props }) => {
               const match = /language-(\w+)/.exec(className || "");
               const isInline = !match && !String(children).includes("\n");
+
+              if (match?.[1] === "mermaid") {
+                return <MermaidDiagram chart={String(children)} />;
+              }
 
               if (isInline) {
                 return (
