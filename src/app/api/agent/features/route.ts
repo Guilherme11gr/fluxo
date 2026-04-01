@@ -19,6 +19,7 @@ const listQuerySchema = z.object({
   epicId: z.string().uuid().optional(),
   projectId: z.string().uuid().optional(),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'DONE']).optional(),
+  search: z.string().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
       epicId: searchParams.get('epicId') || undefined,
       projectId: searchParams.get('projectId') || undefined,
       status: searchParams.get('status') || undefined,
+      search: searchParams.get('search') || undefined,
       limit: searchParams.get('limit') || 50,
     });
 
@@ -38,7 +40,7 @@ export async function GET(request: NextRequest) {
       return agentError('VALIDATION_ERROR', 'Invalid query parameters', 400);
     }
 
-    const { epicId, projectId, status, limit } = query.data;
+    const { epicId, projectId, status, search, limit } = query.data;
 
     // Build filter
     let features;
@@ -52,6 +54,15 @@ export async function GET(request: NextRequest) {
     // Apply status filter if provided
     if (status) {
       features = features.filter(f => f.status === status);
+    }
+
+    // Apply search filter if provided
+    if (search) {
+      const lowerSearch = search.toLowerCase();
+      features = features.filter((f: any) =>
+        f.title?.toLowerCase().includes(lowerSearch) ||
+        f.description?.toLowerCase().includes(lowerSearch)
+      );
     }
 
     // Apply limit
