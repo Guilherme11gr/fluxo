@@ -516,6 +516,7 @@ function useAgentChat(options = {}) {
     setShowSessions(false);
     clearMessages();
     setSessionId(targetSessionId);
+    setContextUsage(null);
     try {
       const res = await fetch(`/api/chat/sessions/${encodeURIComponent(targetSessionId)}/messages`, { credentials: "include" });
       if (res.ok) {
@@ -530,12 +531,24 @@ function useAgentChat(options = {}) {
             ...m.toolResults ? { toolResults: m.toolResults } : {},
             ...m.confirmation ? { confirmation: m.confirmation } : {}
           })));
+          const totalChars = msgs.reduce((sum, m) => {
+            const content = m.content || "";
+            return sum + content.length;
+          }, 0);
+          const estimatedTokens = Math.ceil(totalChars / 4);
+          const maxTokens = 137e3;
+          setContextUsage({
+            tokens: estimatedTokens,
+            maxTokens,
+            messageCount: msgs.length,
+            usagePercent: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100)
+          });
         }
       }
     } catch (e) {
       console.error("Failed to load session messages:", e);
     }
-  }, [clearMessages, setMessages]);
+  }, [clearMessages, setMessages, setContextUsage]);
   return {
     messages,
     input,
