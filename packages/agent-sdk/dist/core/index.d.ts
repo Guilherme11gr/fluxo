@@ -424,6 +424,36 @@ interface PostgresPool {
  */
 declare function postgresStore(pool: PostgresPool): HistoryStore;
 /**
+ * Session metadata for listing/management
+ */
+interface SessionMetadata {
+    id: string;
+    title?: string;
+    createdAt: string;
+    updatedAt: string;
+    messageCount: number;
+}
+/**
+ * Session store interface for managing chat sessions
+ */
+interface SessionStore {
+    list(userId: string, tenantId: string, options?: {
+        limit?: number;
+        offset?: number;
+    }): Promise<{
+        sessions: SessionMetadata[];
+        total: number;
+    }>;
+    updateTitle(sessionId: string, title: string): Promise<void>;
+    deleteSession(sessionId: string): Promise<void>;
+}
+/**
+ * PostgreSQL-based session store for listing/managing sessions
+ *
+ * Requires the agent_sessions table to have title, user_id, tenant_id columns.
+ */
+declare function postgresSessionStore(pool: PostgresPool): SessionStore;
+/**
  * SQLite database interface (works with better-sqlite3, bun:sqlite)
  */
 interface SQLiteDatabase {
@@ -761,4 +791,4 @@ interface StreamTextResult {
  */
 declare function streamText(options: StreamTextOptions): StreamTextResult;
 
-export { APIError, type AgentConfig, AgentRuntime, AgentSDKError, type ChatMessage, type ContextWindowConfig, type DateTimeContext, type GenerateTextOptions, type GenerateTextResult, type HistoryStore, type JSONSchema, type JsonSchemaToolDefinition, MaxIterationsError, type McpServerConfig, type McpToolsResult, type PostgresPool, type PromptEnhancerConfig, type ProviderConfig, type RedisLike, type ResponseSchemaConfig, type RuntimeCallbacks, type RuntimeTool, type SQLiteDatabase, StreamAbortError, type StreamTextOptions, type StreamTextResult, type ToolCall, type ToolDefinition, ToolExecutionError, type TruncateOptions, ValidationError, type ZodSchemaLike, type ZodToolDefinition, createMcpTools, createMcpToolsFromServers, createSummaryMessage, defineTool, estimateMessagesTokens, estimateTokens, fileStore, generateText, memoryStore, postgresStore, redisStore, sqliteStore, streamText, summarizeHistory, toolsToOpenAIFormat, truncateHistory, zodToJsonSchema };
+export { APIError, type AgentConfig, AgentRuntime, AgentSDKError, type ChatMessage, type ContextWindowConfig, type DateTimeContext, type GenerateTextOptions, type GenerateTextResult, type HistoryStore, type JSONSchema, type JsonSchemaToolDefinition, MaxIterationsError, type McpServerConfig, type McpToolsResult, type PostgresPool, type PromptEnhancerConfig, type ProviderConfig, type RedisLike, type ResponseSchemaConfig, type RuntimeCallbacks, type RuntimeTool, type SQLiteDatabase, type SessionMetadata, type SessionStore, StreamAbortError, type StreamTextOptions, type StreamTextResult, type ToolCall, type ToolDefinition, ToolExecutionError, type TruncateOptions, ValidationError, type ZodSchemaLike, type ZodToolDefinition, createMcpTools, createMcpToolsFromServers, createSummaryMessage, defineTool, estimateMessagesTokens, estimateTokens, fileStore, generateText, memoryStore, postgresSessionStore, postgresStore, redisStore, sqliteStore, streamText, summarizeHistory, toolsToOpenAIFormat, truncateHistory, zodToJsonSchema };
