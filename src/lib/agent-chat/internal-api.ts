@@ -8,6 +8,7 @@ export const AGENT_CHAT_HEADER_NAMES = {
   orgSlug: 'x-fluxo-agent-org-slug',
   userDisplayName: 'x-fluxo-agent-user-display-name',
   origin: 'x-fluxo-agent-origin',
+  defaultAgentRolePrompt: 'x-fluxo-agent-role-prompt',
 } as const;
 
 export interface AgentChatContext {
@@ -19,6 +20,7 @@ export interface AgentChatContext {
   userDisplayName: string;
   origin: string;
   cookieHeader: string | null;
+  defaultAgentRolePrompt: string;
 }
 
 type QueryValue = string | number | boolean | Array<string | number | boolean> | null | undefined;
@@ -125,6 +127,7 @@ export function getAgentChatContextFromHeaders(headers: Headers): AgentChatConte
     userDisplayName: decodeAgentChatHeader(headers, AGENT_CHAT_HEADER_NAMES.userDisplayName),
     origin,
     cookieHeader: headers.get('cookie'),
+    defaultAgentRolePrompt: decodeAgentChatHeader(headers, AGENT_CHAT_HEADER_NAMES.defaultAgentRolePrompt),
   };
 }
 

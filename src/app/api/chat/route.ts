@@ -3,7 +3,7 @@ import { createAgentRoute } from '@guilherme/agent-sdk/next';
 import { createClient } from '@/lib/supabase/server';
 import { extractAuthenticatedTenant } from '@/shared/http/auth.helpers';
 import { jsonError } from '@/shared/http/responses';
-import { userProfileRepository } from '@/infra/adapters/prisma';
+import { userProfileRepository, prisma } from '@/infra/adapters/prisma';
 import { buildAgentChatSystemPrompt, buildAgentChatTools } from '@/lib/agent-chat/tools';
 import {
   AGENT_CHAT_HEADER_NAMES,
@@ -79,6 +79,16 @@ export async function POST(request: NextRequest) {
     rewrittenHeaders.set(
       AGENT_CHAT_HEADER_NAMES.origin,
       encodeAgentChatHeader(resolveAgentChatInternalOrigin(request.nextUrl.origin))
+    );
+
+    // Fetch org's default role prompt
+    const org = await prisma.organization.findUnique({
+      where: { id: tenantId },
+      select: { defaultAgentRolePrompt: true },
+    });
+    rewrittenHeaders.set(
+      AGENT_CHAT_HEADER_NAMES.defaultAgentRolePrompt,
+      encodeAgentChatHeader(org?.defaultAgentRolePrompt || '')
     );
 
     const rewrittenBody = JSON.stringify({

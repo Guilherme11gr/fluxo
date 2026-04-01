@@ -16,8 +16,9 @@ model Organization {
   slug          String          @unique
   createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  maxUsers      Int?            @map("max_users")
-  agentApiKey   AgentApiKey?
+  maxUsers               Int?            @map("max_users")
+  defaultAgentRolePrompt String?         @map("default_agent_role_prompt") @db.Text
+  agentApiKey            AgentApiKey?
   auditLogs     AuditLog[]
   comments      Comment[]
   epics         Epic[]

@@ -206,6 +206,9 @@ export function buildAgentChatSystemPrompt(context: AgentChatContext): string {
     `Org slug: ${context.orgSlug || 'n/d'}`,
     `Usuário atual: ${context.userDisplayName || context.userId}`,
     `Role atual: ${context.role}`,
+    ...(context.defaultAgentRolePrompt
+      ? ['', 'Papel/persona definido pela organização:', context.defaultAgentRolePrompt]
+      : []),
   ].join('\n');
 }
 
