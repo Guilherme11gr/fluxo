@@ -1065,17 +1065,11 @@ export function buildAgentChatTools(context: AgentChatContext) {
         name: z.string().min(1).describe('Nome ou parte do nome do membro (case-insensitive).'),
       }),
       execute: async ({ name }) => {
-        const members: any[] = await api.get('/api/users');
-        const query = name.toLowerCase();
-        const results = members.filter(
-          (m: any) =>
-            (m.displayName || '').toLowerCase().includes(query) ||
-            (m.email || '').toLowerCase().includes(query)
-        );
-        if (results.length === 0) {
+        const members = await api.get('/api/users', { search: name });
+        if ((members as any[]).length === 0) {
           return { members: [], message: `Nenhum membro encontrado para "${name}".` };
         }
-        return { members: results };
+        return { members };
       },
     }),
     defineTool({
