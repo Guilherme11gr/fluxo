@@ -512,11 +512,30 @@ function useAgentChat(options = {}) {
       console.error("Failed to delete session:", e);
     }
   }, [sessionId, clearMessages]);
-  const switchSession = useCallback3((targetSessionId) => {
-    setSessionId(targetSessionId);
-    clearMessages();
+  const switchSession = useCallback3(async (targetSessionId) => {
     setShowSessions(false);
-  }, [clearMessages]);
+    clearMessages();
+    setSessionId(targetSessionId);
+    try {
+      const res = await fetch(`/api/chat/sessions/${encodeURIComponent(targetSessionId)}/messages`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const msgs = data.data?.messages || data.messages;
+        if (Array.isArray(msgs) && msgs.length > 0) {
+          setMessages(msgs.map((m) => ({
+            id: m.id || generateId2(),
+            role: m.role || "user",
+            content: m.content || "",
+            ...m.toolCalls ? { toolCalls: m.toolCalls } : {},
+            ...m.toolResults ? { toolResults: m.toolResults } : {},
+            ...m.confirmation ? { confirmation: m.confirmation } : {}
+          })));
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load session messages:", e);
+    }
+  }, [clearMessages, setMessages]);
   return {
     messages,
     input,
