@@ -57,6 +57,7 @@ export function DashboardAgentChat() {
       onToolExecuted={() => {
         void invalidateAndRefetchAll();
       }}
+      sessionManagement={{ level: 'basic' }}
     />
   );
 }
