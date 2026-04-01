@@ -113,11 +113,10 @@ async function fetchTasks(filters?: ResolvedFilters): Promise<TasksResponse> {
 
   // Merge all items
   const allItems = results.flatMap(r => r.items);
-  const total = results.reduce((sum, r) => sum + r.total, 0);
 
   return {
     items: allItems,
-    total: total === -1 ? allItems.length : total,
+    total: allItems.length,
     page: 1,
     pageSize: allItems.length,
     totalPages: 1,
