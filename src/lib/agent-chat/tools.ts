@@ -374,26 +374,11 @@ export function buildAgentChatTools(context: AgentChatContext) {
         limit: z.number().int().min(1).max(50).optional().default(25),
       }),
       execute: async ({ search, role, limit }) => {
-        const users = await api.get<Array<Record<string, unknown>>>('/api/users');
-        const normalizedSearch = search?.trim().toLocaleLowerCase('pt-BR');
+        const query: Record<string, string | number> = { limit };
+        if (search) query.search = search;
+        if (role) query.role = role;
 
-        const filtered = users.filter((user) => {
-          const roleMatches = !role || user.role === role;
-          if (!roleMatches) {
-            return false;
-          }
-
-          if (!normalizedSearch) {
-            return true;
-          }
-
-          return (
-            matchesLooseSearch(user.displayName as string | undefined, normalizedSearch) ||
-            matchesLooseSearch(user.id as string | undefined, normalizedSearch)
-          );
-        });
-
-        return filtered.slice(0, limit);
+        return api.get<Array<Record<string, unknown>>>('/api/users', query);
       },
     }),
     defineTool({
@@ -414,15 +399,17 @@ export function buildAgentChatTools(context: AgentChatContext) {
           ? await api.resolveProjectId(projectName)
           : undefined);
 
+        const query: Record<string, string | number> = { limit };
+        if (status) query.status = status;
+        if (resolvedProjectId) query.projectId = resolvedProjectId;
+
         const epics = resolvedProjectId
           ? await api.get<Array<Record<string, unknown>>>(`/api/projects/${resolvedProjectId}/epics`)
-          : await api.get<Array<Record<string, unknown>>>('/api/epics');
+          : await api.get<Array<Record<string, unknown>>>('/api/epics', query);
 
-        const filtered = status
-          ? epics.filter((epic) => epic.status === status)
-          : epics;
-
-        return filtered.slice(0, limit);
+        return status
+          ? epics.filter((epic) => epic.status === status).slice(0, limit!)
+          : epics.slice(0, limit!);
       },
     }),
     defineTool({
@@ -445,33 +432,16 @@ export function buildAgentChatTools(context: AgentChatContext) {
       parameters: epicLookupSchema,
       execute: async ({ id, epicTitle, projectId, projectName }) => {
         const epicId = await resolveEpicIdFromLookup(api, { id, epicTitle, projectId, projectName });
-        const epic = await api.get<Record<string, unknown>>(`/api/epics/${epicId}`);
-        const features = await api.get<Array<Record<string, unknown>>>(`/api/epics/${epicId}/features`);
-
-        const featuresWithTasks = await Promise.all(
-          features.map(async (feature) => {
-            const tasks = await api.get<Array<{ status: string; priority: string; blocked?: boolean }>>(
-              `/api/features/${feature.id as string}/tasks`
-            );
-
-            return {
-              ...feature,
-              tasks,
-            };
-          })
-        );
-
-        return {
-          ...epic,
-          features: featuresWithTasks,
-          stats: buildEpicStats(
-            featuresWithTasks as Array<{
-              id: string;
-              status: string;
-              tasks: Array<{ status: string; priority: string; blocked?: boolean }>;
-            }>
-          ),
-        };
+        // Single endpoint: 2 queries instead of 2+N (no N+1 per feature)
+        return api.get<{
+          epic: Record<string, unknown>;
+          features: Array<{
+            id: string;
+            status: string;
+            tasks: Array<{ status: string; priority: string }>;
+          }>;
+          stats: Record<string, unknown>;
+        }>(`/api/epics/${epicId}/full`);
       },
     }),
     defineTool({
@@ -528,15 +498,15 @@ export function buildAgentChatTools(context: AgentChatContext) {
         limit: z.number().int().min(1).max(50).optional().default(25),
       }),
       execute: async ({ epicId, status, limit }) => {
+        const query: Record<string, string | number> = { limit };
+
         const features = epicId
           ? await api.get<Array<Record<string, unknown>>>(`/api/epics/${epicId}/features`)
-          : await api.get<Array<Record<string, unknown>>>('/api/features');
+          : await api.get<Array<Record<string, unknown>>>('/api/features', query);
 
-        const filtered = status
-          ? features.filter((feature) => feature.status === status)
-          : features;
-
-        return filtered.slice(0, limit);
+        return status
+          ? features.filter((feature) => feature.status === status).slice(0, limit!)
+          : features.slice(0, limit!);
       },
     }),
     defineTool({
