@@ -225,15 +225,9 @@ export class InternalAgentApiClient {
       return findUniqueByLabel(docs, idOrTitle, (doc) => doc.title, 'documento').id;
     }
 
-    const projects = await this.get<Array<{ id: string }>>('/api/projects');
-    const matches: Array<{ id: string; title: string }> = [];
-
-    for (const project of projects) {
-      const docs = await this.get<Array<{ id: string; title: string }>>(`/api/projects/${project.id}/docs`);
-      matches.push(...docs);
-    }
-
-    return findUniqueByLabel(matches, idOrTitle, (doc) => doc.title, 'documento').id;
+    // Global search — 1 query instead of 1+N
+    const docs = await this.get<Array<{ id: string; title: string }>>('/api/docs', { search: idOrTitle, limit: 50 });
+    return findUniqueByLabel(docs, idOrTitle, (doc) => doc.title, 'documento').id;
   }
 
   async resolveTaskTagId(projectId: string, idOrName: string): Promise<string> {
