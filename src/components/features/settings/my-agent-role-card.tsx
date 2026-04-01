@@ -187,7 +187,7 @@ export function MyAgentRoleCard() {
           </span>
         )}
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         {loading ? (
           <div className="flex items-center justify-center py-6 text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -202,7 +202,7 @@ export function MyAgentRoleCard() {
               className={`w-full rounded-lg border p-4 text-left transition-colors ${
                 selectedOption === 'none'
                   ? 'border-primary bg-primary/5'
-                  : 'border-border hover:bg-accent/50'
+                  : 'border-border hover:bg-accent/30'
               }`}
             >
               <div className="flex items-start gap-3">
@@ -213,7 +213,7 @@ export function MyAgentRoleCard() {
                     <Circle className="h-4 w-4 text-muted-foreground" />
                   )}
                 </div>
-                <div>
+                <div className="space-y-0.5">
                   <p className="font-medium">Padrão do sistema</p>
                   <p className="text-sm text-muted-foreground">
                     Usar apenas o prompt base do assistente
@@ -231,7 +231,7 @@ export function MyAgentRoleCard() {
                   className={`w-full rounded-lg border p-4 text-left transition-colors ${
                     selectedOption === 'role'
                       ? 'border-primary bg-primary/5'
-                      : 'border-border hover:bg-accent/50'
+                      : 'border-border hover:bg-accent/30'
                   }`}
                 >
                   <div className="flex items-start gap-3">
@@ -242,7 +242,7 @@ export function MyAgentRoleCard() {
                         <Circle className="h-4 w-4 text-muted-foreground" />
                       )}
                     </div>
-                    <div>
+                    <div className="space-y-0.5">
                       <p className="font-medium">Role da organização</p>
                       <p className="text-sm text-muted-foreground">
                         Selecione uma role definida pelo proprietário
@@ -252,7 +252,7 @@ export function MyAgentRoleCard() {
                 </button>
 
                 {selectedOption === 'role' && (
-                  <div className="ml-7 space-y-2">
+                  <div className="ml-9 space-y-1.5">
                     {data.availableRoles.map((role) => (
                       <button
                         key={role.id}
@@ -261,12 +261,12 @@ export function MyAgentRoleCard() {
                         className={`w-full rounded-md border px-3 py-2.5 text-left text-sm transition-colors ${
                           selectedRoleId === role.id
                             ? 'border-primary bg-primary/5'
-                            : 'border-border hover:bg-accent/50'
+                            : 'border-border hover:bg-accent/30'
                         }`}
                       >
                         <p className="font-medium">{role.name}</p>
                         {role.description && (
-                          <p className="text-xs text-muted-foreground mt-0.5">
+                          <p className="text-xs text-muted-foreground mt-1">
                             {role.description}
                           </p>
                         )}
@@ -284,7 +284,7 @@ export function MyAgentRoleCard() {
               className={`w-full rounded-lg border p-4 text-left transition-colors ${
                 selectedOption === 'custom'
                   ? 'border-primary bg-primary/5'
-                  : 'border-border hover:bg-accent/50'
+                  : 'border-border hover:bg-accent/30'
               }`}
             >
               <div className="flex items-start gap-3">
@@ -295,7 +295,7 @@ export function MyAgentRoleCard() {
                     <Circle className="h-4 w-4 text-muted-foreground" />
                   )}
                 </div>
-                <div>
+                <div className="space-y-0.5">
                   <p className="font-medium flex items-center gap-2">
                     Prompt personalizado
                     <Pencil className="h-3 w-3 text-muted-foreground" />
@@ -308,7 +308,7 @@ export function MyAgentRoleCard() {
             </button>
 
             {selectedOption === 'custom' && (
-              <div className="ml-7 space-y-2">
+              <div className="ml-9 space-y-2">
                 <Textarea
                   value={customPromptDraft}
                   onChange={(e) => handleCustomPromptChange(e.target.value)}
@@ -324,7 +324,7 @@ export function MyAgentRoleCard() {
             )}
 
             {/* Save button */}
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end border-t pt-4 mt-2">
               <Button
                 onClick={() => void handleSave()}
                 disabled={saving || !hasChanges}
