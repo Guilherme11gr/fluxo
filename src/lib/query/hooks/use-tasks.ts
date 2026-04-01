@@ -72,17 +72,49 @@ function buildTaskParams(filters?: ResolvedFilters): URLSearchParams {
 }
 
 async function fetchTasks(filters?: Partial<TaskFiltersState>): Promise<TasksResponse> {
-  const params = buildTaskParams(filters);
+  const statuses = ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE'];
+  const statusesToFetch = filters?.excludeStatuses
+    ? statuses.filter(s => !filters.excludeStatuses.includes(s))
+    : filters?.status
+    ? (Array.isArray(filters.status) ? filters.status : [filters.status])
+    : statuses.filter(s => s !== 'DONE'); // default: skip DONE
 
-  params.set('pageSize', '100');
-  params.set('sortBy', 'createdAt');
-  params.set('sortOrder', 'desc');
-  params.set('skipCount', 'true');
+  const PER_COLUMN_LIMIT = 50;
 
-  const res = await fetch(`/api/tasks?${params.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch tasks');
-  const json = await res.json();
-  return json.data;
+  // Build params once (without status) then add per-column status
+  const baseParams = buildTaskParams(filters);
+  baseParams.set('pageSize', String(PER_COLUMN_LIMIT));
+  baseParams.set('sortBy', 'createdAt');
+  baseParams.set('sortOrder', 'desc');
+  baseParams.set('skipCount', 'true');
+  // Remove status from base so each column overrides it
+  baseParams.delete('status');
+  baseParams.delete('excludeStatuses');
+
+  // Fetch all columns in parallel
+  const results = await Promise.all(
+    statusesToFetch.map(async (status) => {
+      const params = new URLSearchParams(baseParams);
+      params.set('status', status);
+      const res = await fetch(`/api/tasks?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch tasks');
+      const json = await res.json();
+      return json.data;
+    })
+  );
+
+  // Merge all items
+  const allItems = results.flatMap(r => r.items);
+  const total = results.reduce((sum, r) => sum + r.total, 0);
+
+  return {
+    items: allItems,
+    total: total === -1 ? allItems.length : total,
+    page: 1,
+    pageSize: allItems.length,
+    totalPages: 1,
+    nextCursor: null,
+  };
 }
 
 async function fetchTasksCursor(
