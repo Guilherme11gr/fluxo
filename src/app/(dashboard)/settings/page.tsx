@@ -3,18 +3,23 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, History, User, ChevronRight, Crown, Building2 } from "lucide-react";
+import { Users, History, User, ChevronRight, Crown, Building2, Bot } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useWorkspaceCTA } from "@/hooks/useWorkspaceCTA";
 import { CreateWorkspaceCTAModal } from "@/components/features/workspace-cta/CreateWorkspaceCTAModal";
 import { AgentAccessCard } from "@/components/features/settings/agent-access-card";
 import { AgentChatRolesCard } from "@/components/features/settings/agent-chat-roles-card";
 import { MyAgentRoleCard } from "@/components/features/settings/my-agent-role-card";
+import { useTabQuery } from "@/hooks/use-tab-query";
+
+const TABS = ["geral", "agente"] as const;
+type Tab = (typeof TABS)[number];
 
 export default function SettingsPage() {
   const { viewer } = useAuth();
   const isOwner = viewer?.currentRole === 'OWNER';
   const { showModal, setShowModal, handleWorkspaceCreated } = useWorkspaceCTA();
+  const { activeTab, setActiveTab } = useTabQuery<Tab>("geral", [...TABS]);
 
   const settingsLinks = [
     {
@@ -33,82 +38,113 @@ export default function SettingsPage() {
     },
   ];
 
+  const tabs: { key: Tab; label: string; icon: React.ElementType; visible: boolean }[] = [
+    { key: "geral", label: "Geral", icon: User, visible: true },
+    { key: "agente", label: "Agente", icon: Bot, visible: true },
+  ];
+
   return (
-    <div className="container max-w-4xl py-8 space-y-8">
+    <div className="container max-w-4xl py-8 space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Configurações</h1>
         <p className="text-muted-foreground">Gerencie sua organização e perfil</p>
       </div>
 
-      {/* User Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <User className="w-5 h-5" />
-            Seu Perfil
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">{viewer?.displayName || 'Usuário'}</p>
-            <p className="text-sm text-muted-foreground flex items-center gap-1">
-              {viewer?.currentRole === 'OWNER' && <Crown className="w-3 h-3" />}
-              {viewer?.currentRole === 'OWNER' ? 'Proprietário' :
-                viewer?.currentRole === 'ADMIN' ? 'Administrador' : 'Membro'}
-            </p>
-          </div>
-          <Button variant="outline" disabled>
-            Editar Perfil (em breve)
-          </Button>
-        </CardContent>
-      </Card>
+      {/* Tabs */}
+      <div className="flex gap-4 border-b border-border overflow-x-auto">
+        {tabs.filter(t => t.visible).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${
+              activeTab === tab.key
+                ? "text-primary border-b-2 border-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <tab.icon className="w-4 h-4 inline mr-2" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {/* Settings Links */}
-      <div className="grid gap-4">
-        {/* Create Workspace - Always visible */}
-        <Card 
-          className="hover:bg-accent/50 transition-colors cursor-pointer border-primary/20"
-          onClick={() => setShowModal(true)}
-        >
-          <CardContent className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Building2 className="w-5 h-5 text-primary" />
-              </div>
+      {/* Tab: Geral */}
+      {activeTab === "geral" && (
+        <div className="space-y-6">
+          {/* User Info */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="w-5 h-5" />
+                Seu Perfil
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between">
               <div>
-                <p className="font-medium">Criar Workspace</p>
-                <p className="text-sm text-muted-foreground">Gerencie seus próprios projetos</p>
+                <p className="font-medium">{viewer?.displayName || 'Usuário'}</p>
+                <p className="text-sm text-muted-foreground flex items-center gap-1">
+                  {viewer?.currentRole === 'OWNER' && <Crown className="w-3 h-3" />}
+                  {viewer?.currentRole === 'OWNER' ? 'Proprietário' :
+                    viewer?.currentRole === 'ADMIN' ? 'Administrador' : 'Membro'}
+                </p>
               </div>
-            </div>
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          </CardContent>
-        </Card>
+              <Button variant="outline" disabled>
+                Editar Perfil (em breve)
+              </Button>
+            </CardContent>
+          </Card>
 
-        {settingsLinks.filter(l => l.visible).map((link) => (
-          <Link key={link.href} href={link.href}>
-            <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+          {/* Settings Links */}
+          <div className="grid gap-4">
+            {/* Create Workspace - Always visible */}
+            <Card 
+              className="hover:bg-accent/50 transition-colors cursor-pointer border-primary/20"
+              onClick={() => setShowModal(true)}
+            >
               <CardContent className="flex items-center justify-between py-4">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <link.icon className="w-5 h-5 text-primary" />
+                    <Building2 className="w-5 h-5 text-primary" />
                   </div>
                   <div>
-                    <p className="font-medium">{link.title}</p>
-                    <p className="text-sm text-muted-foreground">{link.description}</p>
+                    <p className="font-medium">Criar Workspace</p>
+                    <p className="text-sm text-muted-foreground">Gerencie seus próprios projetos</p>
                   </div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </CardContent>
             </Card>
-          </Link>
-        ))}
-      </div>
 
-      <MyAgentRoleCard />
+            {settingsLinks.filter(l => l.visible).map((link) => (
+              <Link key={link.href} href={link.href}>
+                <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+                  <CardContent className="flex items-center justify-between py-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <link.icon className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{link.title}</p>
+                        <p className="text-sm text-muted-foreground">{link.description}</p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
-      {isOwner && <AgentAccessCard />}
-
-      {isOwner && <AgentChatRolesCard />}
+      {/* Tab: Agente */}
+      {activeTab === "agente" && (
+        <div className="space-y-6">
+          <MyAgentRoleCard />
+          {isOwner && <AgentChatRolesCard />}
+          {isOwner && <AgentAccessCard />}
+        </div>
+      )}
 
       {/* Modal for workspace creation */}
       <CreateWorkspaceCTAModal
