@@ -263,6 +263,15 @@ import { useState as useState3, useCallback as useCallback3, useEffect, useRef a
 function generateId2() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
+function persistContextUsage(sessionId, usage) {
+  fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contextUsage: usage }),
+    credentials: "include"
+  }).catch(() => {
+  });
+}
 function useAgentChat(options = {}) {
   const {
     api = "/api/chat",
@@ -409,6 +418,12 @@ function useAgentChat(options = {}) {
                   messageCount: data.messageCount,
                   usagePercent: data.usagePercent
                 });
+                persistContextUsage(sessionId, {
+                  tokens: data.tokens,
+                  maxTokens: data.maxTokens,
+                  messageCount: data.messageCount,
+                  usagePercent: data.usagePercent
+                });
                 break;
               case "done":
                 const finalToolCalls = toolCalls.length > 0 ? toolCalls : data.toolCalls ?? [];
@@ -516,6 +531,7 @@ function useAgentChat(options = {}) {
     setShowSessions(false);
     clearMessages();
     setSessionId(targetSessionId);
+    setContextUsage(null);
     try {
       const res = await fetch(`/api/chat/sessions/${encodeURIComponent(targetSessionId)}/messages`, { credentials: "include" });
       if (res.ok) {
@@ -530,12 +546,21 @@ function useAgentChat(options = {}) {
             ...m.toolResults ? { toolResults: m.toolResults } : {},
             ...m.confirmation ? { confirmation: m.confirmation } : {}
           })));
+          const persistedContext = data.data?.contextUsage || data.contextUsage;
+          if (persistedContext && typeof persistedContext === "object") {
+            setContextUsage({
+              tokens: persistedContext.tokens || 0,
+              maxTokens: persistedContext.maxTokens || 137e3,
+              messageCount: persistedContext.messageCount || msgs.length,
+              usagePercent: persistedContext.usagePercent || 0
+            });
+          }
         }
       }
     } catch (e) {
       console.error("Failed to load session messages:", e);
     }
-  }, [clearMessages, setMessages]);
+  }, [clearMessages, setMessages, setContextUsage]);
   return {
     messages,
     input,
