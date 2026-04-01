@@ -485,7 +485,7 @@ function useAgentChat(options = {}) {
     if (!sessionManagement || sessionManagement.level === "none") return;
     setSessionsLoading(true);
     try {
-      const res = await fetch("/api/chat/sessions");
+      const res = await fetch("/api/chat/sessions", { credentials: "include" });
       const data = await res.json();
       if (data.success) {
         setSessions(data.data.sessions);
@@ -498,7 +498,7 @@ function useAgentChat(options = {}) {
   }, [sessionManagement]);
   const deleteSession = useCallback3(async (targetSessionId) => {
     try {
-      const res = await fetch(`/api/chat/sessions?sessionId=${encodeURIComponent(targetSessionId)}`, { method: "DELETE" });
+      const res = await fetch(`/api/chat/sessions?sessionId=${encodeURIComponent(targetSessionId)}`, { method: "DELETE", credentials: "include" });
       const data = await res.json();
       if (data.success) {
         setSessions((prev) => prev.filter((s) => s.id !== targetSessionId));
@@ -887,7 +887,8 @@ function AgentChatSession({
                   const res = await fetch("/api/chat/compact", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId: chat.sessionId, keepLast: 12 })
+                    body: JSON.stringify({ sessionId: chat.sessionId, keepLast: 12 }),
+                    credentials: "include"
                   });
                   const data = await res.json();
                   if (data.success && data.data?.compacted) {
