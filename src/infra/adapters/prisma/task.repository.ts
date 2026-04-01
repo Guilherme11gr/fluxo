@@ -536,6 +536,18 @@ export class TaskRepository {
       where.feature = { epicId };
     }
 
+    // General board filter: exclude tasks from DONE features and CLOSED epics
+    if (!featureId && !epicId) {
+      const excludeDoneFeatures = { feature: { status: { not: 'DONE' } } };
+      const excludeClosedEpics = { feature: { epic: { status: { not: 'CLOSED' } } } };
+
+      if (where.AND && Array.isArray(where.AND)) {
+        where.AND.push(excludeDoneFeatures, excludeClosedEpics);
+      } else {
+        where.AND = [excludeDoneFeatures, excludeClosedEpics];
+      }
+    }
+
     return where;
   }
 
