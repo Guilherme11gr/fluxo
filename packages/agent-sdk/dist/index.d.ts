@@ -422,6 +422,36 @@ interface PostgresPool {
  */
 declare function postgresStore(pool: PostgresPool): HistoryStore;
 /**
+ * Session metadata for listing/management
+ */
+interface SessionMetadata {
+    id: string;
+    title?: string;
+    createdAt: string;
+    updatedAt: string;
+    messageCount: number;
+}
+/**
+ * Session store interface for managing chat sessions
+ */
+interface SessionStore {
+    list(userId: string, tenantId: string, options?: {
+        limit?: number;
+        offset?: number;
+    }): Promise<{
+        sessions: SessionMetadata[];
+        total: number;
+    }>;
+    updateTitle(sessionId: string, title: string): Promise<void>;
+    deleteSession(sessionId: string): Promise<void>;
+}
+/**
+ * PostgreSQL-based session store for listing/managing sessions
+ *
+ * Requires the agent_sessions table to have title, user_id, tenant_id columns.
+ */
+declare function postgresSessionStore(pool: PostgresPool): SessionStore;
+/**
  * SQLite database interface (works with better-sqlite3, bun:sqlite)
  */
 interface SQLiteDatabase {
@@ -996,6 +1026,12 @@ interface UseAgentChatOptions {
     headers?: Record<string, string>;
     /** Custom body fields */
     body?: Record<string, any>;
+    /** Session management configuration */
+    sessionManagement?: {
+        level: 'none' | 'basic' | 'full';
+        maxSessions?: number;
+        persistDays?: number;
+    };
 }
 interface UseAgentChatReturn {
     /** Array of chat messages */
@@ -1038,6 +1074,16 @@ interface UseAgentChatReturn {
         messageCount: number;
         usagePercent: number;
     } | null>>;
+    /** Set session ID (for switching sessions) */
+    setSessionId: (id: string) => void;
+    /** Session management */
+    sessions: SessionMetadata[];
+    showSessions: boolean;
+    setShowSessions: React.Dispatch<React.SetStateAction<boolean>>;
+    sessionsLoading: boolean;
+    loadSessions: () => Promise<void>;
+    deleteSession: (sessionId: string) => Promise<void>;
+    switchSession: (sessionId: string) => void;
 }
 
 interface AgentChatProps {
@@ -1067,6 +1113,12 @@ interface AgentChatProps {
         retry?: string;
         confirm?: string;
         cancel?: string;
+    };
+    /** Session management configuration */
+    sessionManagement?: {
+        level: 'none' | 'basic' | 'full';
+        maxSessions?: number;
+        persistDays?: number;
     };
 }
 
@@ -1113,4 +1165,4 @@ interface AgentBuilderProps {
     showPreview?: boolean;
 }
 
-export { APIError, type AgentBuilderProps, type AgentChatMessage, type AgentChatProps, type AgentConfig$1 as AgentConfig, type AgentRouteConfig, AgentRuntime, AgentSDKError, type BuilderAgentConfig, type BuilderMcpServerConfig, type BuilderToolConfig, type ChatMessage, type ContextWindowConfig, type GenerateTextOptions, type GenerateTextResult, type HistoryStore, type JSONSchema, MaxIterationsError, type McpServerConfig, type McpToolsResult, type PostgresPool, type ProviderConfig, type RedisLike, type ResponseSchemaConfig, type RuntimeCallbacks, type RuntimeTool, type SQLiteDatabase, StreamAbortError, type StreamTextOptions, type StreamTextResult, type ToolCall, type BuilderToolConfig as ToolConfig, type ToolDefinition, ToolExecutionError, type TruncateOptions, type UseAgentChatOptions, type UseAgentChatReturn, type UseChatOptions, type UseChatReturn, type UseCompletionOptions, type UseCompletionReturn, ValidationError, createAgentRoute, createMcpTools, createMcpToolsFromServers, createSummaryMessage, defineTool, estimateMessagesTokens, estimateTokens, fileStore, generateText, memoryStore, openaiProvider, postgresStore, redisStore, sqliteStore, streamText, summarizeHistory, truncateHistory, zodToJsonSchema };
+export { APIError, type AgentBuilderProps, type AgentChatMessage, type AgentChatProps, type AgentConfig$1 as AgentConfig, type AgentRouteConfig, AgentRuntime, AgentSDKError, type BuilderAgentConfig, type BuilderMcpServerConfig, type BuilderToolConfig, type ChatMessage, type ContextWindowConfig, type GenerateTextOptions, type GenerateTextResult, type HistoryStore, type JSONSchema, MaxIterationsError, type McpServerConfig, type McpToolsResult, type PostgresPool, type ProviderConfig, type RedisLike, type ResponseSchemaConfig, type RuntimeCallbacks, type RuntimeTool, type SQLiteDatabase, type SessionMetadata, type SessionStore, StreamAbortError, type StreamTextOptions, type StreamTextResult, type ToolCall, type BuilderToolConfig as ToolConfig, type ToolDefinition, ToolExecutionError, type TruncateOptions, type UseAgentChatOptions, type UseAgentChatReturn, type UseChatOptions, type UseChatReturn, type UseCompletionOptions, type UseCompletionReturn, ValidationError, createAgentRoute, createMcpTools, createMcpToolsFromServers, createSummaryMessage, defineTool, estimateMessagesTokens, estimateTokens, fileStore, generateText, memoryStore, openaiProvider, postgresSessionStore, postgresStore, redisStore, sqliteStore, streamText, summarizeHistory, truncateHistory, zodToJsonSchema };
