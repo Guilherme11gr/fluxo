@@ -945,6 +945,19 @@ function createAgentRoute(config) {
               toolCallsCount: result.toolCalls?.length
             });
             await historyStore.set(sessionId, result.history);
+            if (config.historyStore && "query" in config.historyStore) {
+              try {
+                const nsMatch = sessionId.match(/^fluxo-chat:([^:]+):([^:]+):/);
+                if (nsMatch) {
+                  await config.historyStore.query(
+                    `UPDATE agent_sessions SET user_id = $1, tenant_id = $2 WHERE id = $3 AND (user_id IS NULL OR tenant_id IS NULL)`,
+                    [nsMatch[2], nsMatch[1], sessionId]
+                  );
+                }
+              } catch (e) {
+                console.error("[AgentSDK] Failed to save session metadata:", e);
+              }
+            }
             const { estimateMessagesTokens: estimateMessagesTokens2 } = await import("../tokens-GGVVHJS3.js");
             const estimatedTokens = estimateMessagesTokens2(result.history);
             const maxTokens = config.contextWindow?.maxTokens || 128e3;
