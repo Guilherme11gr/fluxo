@@ -263,6 +263,15 @@ import { useState as useState3, useCallback as useCallback3, useEffect, useRef a
 function generateId2() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
+function persistContextUsage(sessionId, usage) {
+  fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contextUsage: usage }),
+    credentials: "include"
+  }).catch(() => {
+  });
+}
 function useAgentChat(options = {}) {
   const {
     api = "/api/chat",
@@ -409,6 +418,12 @@ function useAgentChat(options = {}) {
                   messageCount: data.messageCount,
                   usagePercent: data.usagePercent
                 });
+                persistContextUsage(sessionId, {
+                  tokens: data.tokens,
+                  maxTokens: data.maxTokens,
+                  messageCount: data.messageCount,
+                  usagePercent: data.usagePercent
+                });
                 break;
               case "done":
                 const finalToolCalls = toolCalls.length > 0 ? toolCalls : data.toolCalls ?? [];
@@ -531,18 +546,15 @@ function useAgentChat(options = {}) {
             ...m.toolResults ? { toolResults: m.toolResults } : {},
             ...m.confirmation ? { confirmation: m.confirmation } : {}
           })));
-          const totalChars = msgs.reduce((sum, m) => {
-            const content = m.content || "";
-            return sum + content.length;
-          }, 0);
-          const estimatedTokens = Math.ceil(totalChars / 4);
-          const maxTokens = 137e3;
-          setContextUsage({
-            tokens: estimatedTokens,
-            maxTokens,
-            messageCount: msgs.length,
-            usagePercent: Math.min(Math.round(estimatedTokens / maxTokens * 100), 100)
-          });
+          const persistedContext = data.data?.contextUsage || data.contextUsage;
+          if (persistedContext && typeof persistedContext === "object") {
+            setContextUsage({
+              tokens: persistedContext.tokens || 0,
+              maxTokens: persistedContext.maxTokens || 137e3,
+              messageCount: persistedContext.messageCount || msgs.length,
+              usagePercent: persistedContext.usagePercent || 0
+            });
+          }
         }
       }
     } catch (e) {
