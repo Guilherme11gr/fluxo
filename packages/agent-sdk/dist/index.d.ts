@@ -1039,6 +1039,12 @@ interface AgentChatProps {
     icon?: React$1.ReactNode;
     /** Custom accent color (hex, e.g. '#6366f1'). Overrides the default purple accent. */
     accentColor?: string;
+    /** Predefined quick prompts rendered as clickable pills above the input. */
+    quickPrompts?: {
+        label: string;
+        prompt: string;
+        icon?: string;
+    }[];
     labels?: {
         placeholder?: string;
         processing?: string;
