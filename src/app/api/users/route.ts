@@ -4,22 +4,38 @@ import { extractAuthenticatedTenant } from '@/shared/http/auth.helpers';
 import { jsonSuccess, jsonError } from '@/shared/http/responses';
 import { handleError } from '@/shared/errors';
 import { prisma } from '@/infra/adapters/prisma';
+import { z } from 'zod';
 
 // Disable Next.js cache - data depends on org cookie
 export const dynamic = 'force-dynamic';
 
+const usersQuerySchema = z.object({
+    search: z.string().optional(),
+    role: z.enum(['OWNER', 'ADMIN', 'MEMBER']).optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(50),
+});
+
 /**
  * GET /api/users - List all members of the current organization
  * Uses OrgMembership table for accurate multi-org member listing.
+ * Query params: search, role, limit
  */
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const { tenantId } = await extractAuthenticatedTenant(supabase);
 
+    const { searchParams } = new URL(request.url);
+    const parsed = usersQuerySchema.safeParse(Object.fromEntries(searchParams));
+    if (!parsed.success) {
+      return jsonError('INVALID_PARAMS', parsed.error.issues.map(i => i.message).join(', '), 400);
+    }
+
+    const { search, role, limit } = parsed.data;
+
     // Query memberships for this org, including user profile data
     const memberships = await prisma.orgMembership.findMany({
-      where: { orgId: tenantId },
+      where: { orgId: tenantId, ...(role ? { role } : {}) },
       include: {
         user: {
           select: {
@@ -43,7 +59,7 @@ export async function GET(request: NextRequest) {
     const profileMap = new Map(profiles.map(p => [p.id, p]));
 
     // Map to a simpler format for the frontend
-    const mappedUsers = memberships.map(m => {
+    let mappedUsers = memberships.map(m => {
       const profile = profileMap.get(m.userId);
       return {
         id: m.userId,
@@ -53,11 +69,18 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return jsonSuccess(mappedUsers);
+    if (search) {
+      const lowerSearch = search.toLowerCase();
+      mappedUsers = mappedUsers.filter(u =>
+        u.displayName?.toLowerCase().includes(lowerSearch) ||
+        u.id?.toLowerCase().includes(lowerSearch)
+      );
+    }
+
+    return jsonSuccess(mappedUsers.slice(0, limit));
 
   } catch (error) {
     const { status, body } = handleError(error);
     return jsonError(body.error.code, body.error.message, status);
   }
 }
-
