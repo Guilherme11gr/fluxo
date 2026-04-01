@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const authClient = createClient();
+    const authClient = await createClient();
     const { userId, tenantId } = await extractAuthenticatedTenant(authClient);
 
     await requireRole(authClient, userId, ['OWNER'], tenantId);
@@ -27,7 +27,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const authClient = createClient();
+    const authClient = await createClient();
     const { userId, tenantId } = await extractAuthenticatedTenant(authClient);
 
     await requireRole(authClient, userId, ['OWNER'], tenantId);
