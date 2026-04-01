@@ -304,6 +304,7 @@ export class InternalAgentApiClient {
     }
 
     let response: Response;
+    const startTime = Date.now();
     try {
       response = await fetch(url, {
         method,
@@ -323,6 +324,16 @@ export class InternalAgentApiClient {
       });
 
       throw new Error(`Falha de rede ao chamar ${method} ${path}: ${message}`);
+    }
+
+    const elapsed = Date.now() - startTime;
+
+    // Log slow requests (> 2s) for monitoring
+    if (elapsed > 2000) {
+      console.warn(`[AgentChat] Slow internal request: ${method} ${path} took ${elapsed}ms`, {
+        tenantId: this.context.tenantId,
+        userId: this.context.userId,
+      });
     }
 
     if (response.status === 204) {
