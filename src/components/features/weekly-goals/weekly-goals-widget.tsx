@@ -148,21 +148,6 @@ export function WeeklyGoalsWidget() {
     });
   };
 
-  const goalsByProject = useMemo(() => {
-    const map = new Map<string, { name: string; goals: WeeklyGoal[] }>();
-    for (const goal of goals) {
-      const id = goal.feature.epic?.project?.id || '_no-project';
-      const name = goal.feature.epic?.project?.name || 'Sem projeto';
-      if (!map.has(id)) map.set(id, { name, goals: [] });
-      map.get(id)!.goals.push(goal);
-    }
-    return Array.from(map.entries()).sort((a, b) => {
-      if (a[0] === '_no-project') return 1;
-      if (b[0] === '_no-project') return -1;
-      return a[1].name.localeCompare(b[1].name);
-    });
-  }, [goals]);
-
   if (loading) {
     return (
       <Card>
@@ -185,6 +170,21 @@ export function WeeklyGoalsWidget() {
 
   const goals = data?.goals ?? [];
   const weekLabel = data?.weekStart ? getWeekLabel(data.weekStart) : '';
+
+  const goalsByProject = useMemo(() => {
+    const map = new Map<string, { name: string; goals: WeeklyGoal[] }>();
+    for (const goal of goals) {
+      const id = goal.feature.epic?.project?.id || '_no-project';
+      const name = goal.feature.epic?.project?.name || 'Sem projeto';
+      if (!map.has(id)) map.set(id, { name, goals: [] });
+      map.get(id)!.goals.push(goal);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      if (a[0] === '_no-project') return 1;
+      if (b[0] === '_no-project') return -1;
+      return a[1].name.localeCompare(b[1].name);
+    });
+  }, [goals]);
 
   return (
     <>
