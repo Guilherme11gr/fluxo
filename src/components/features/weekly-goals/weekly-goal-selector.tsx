@@ -11,6 +11,13 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface Feature {
   id: string;
@@ -60,6 +67,7 @@ export function WeeklyGoalSelector({
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [fetched, setFetched] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<string>('ALL');
 
   const fetchFeatures = useCallback(async () => {
     setLoading(true);
@@ -92,6 +100,7 @@ export function WeeklyGoalSelector({
       setSaving(false);
       setFetched(false);
       setFeatures([]);
+      setProjectFilter('ALL');
     }
   }, [open]);
 
@@ -125,15 +134,31 @@ export function WeeklyGoalSelector({
   };
 
   const filteredFeatures = useMemo(() => {
-    if (!search) return features;
-    const lower = search.toLowerCase();
-    return features.filter(
-      (f) =>
-        f.title.toLowerCase().includes(lower) ||
-        f.epic?.title.toLowerCase().includes(lower) ||
-        f.epic?.project?.name.toLowerCase().includes(lower)
-    );
-  }, [features, search]);
+    return features.filter((f) => {
+      const matchesSearch = !search
+        ? true
+        : f.title.toLowerCase().includes(search.toLowerCase()) ||
+          f.epic?.title.toLowerCase().includes(search.toLowerCase()) ||
+          f.epic?.project?.name.toLowerCase().includes(search.toLowerCase());
+      const matchesProject =
+        projectFilter === 'ALL' || f.epic?.project?.id === projectFilter;
+      return matchesSearch && matchesProject;
+    });
+  }, [features, search, projectFilter]);
+
+  const projectList = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of features) {
+      const id = f.epic?.project?.id;
+      const name = f.epic?.project?.name;
+      if (id && name && !map.has(id)) {
+        map.set(id, name);
+      }
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => ({ id, name }));
+  }, [features]);
 
   const groupedByProject = useMemo(() => {
     const groups: { projectName: string; projectKey: string; features: Feature[] }[] = [];
@@ -180,14 +205,31 @@ export function WeeklyGoalSelector({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por feature, epic ou projeto..."
-              className="pl-9"
-            />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por feature, epic ou projeto..."
+                className="pl-9"
+              />
+            </div>
+            {projectList.length > 1 && (
+              <Select value={projectFilter} onValueChange={setProjectFilter}>
+                <SelectTrigger className="w-[160px] h-10">
+                  <SelectValue placeholder="Projeto" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos</SelectItem>
+                  {projectList.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           <div className="max-h-[24rem] overflow-y-auto pr-1">
