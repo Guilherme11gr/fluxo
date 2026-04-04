@@ -31,6 +31,7 @@ export function QuickCapture() {
       setFlash(true);
       toast.success('Anotado!');
       setTimeout(() => setFlash(false), 600);
+      window.dispatchEvent(new CustomEvent('personal-notes:updated'));
     } catch {
       toast.error('Erro ao salvar nota.');
     } finally {

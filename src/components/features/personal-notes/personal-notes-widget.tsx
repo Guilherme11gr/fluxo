@@ -75,6 +75,13 @@ export function PersonalNotesWidget() {
     fetchNotes();
   }, [fetchNotes]);
 
+  // Refetch when Quick Capture (or external) creates a note
+  useEffect(() => {
+    const handler = () => fetchNotes();
+    window.addEventListener('personal-notes:updated', handler);
+    return () => window.removeEventListener('personal-notes:updated', handler);
+  }, [fetchNotes]);
+
   useEffect(() => {
     if (showNewNote && textareaRef.current) {
       textareaRef.current.focus();
