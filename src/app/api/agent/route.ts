@@ -268,6 +268,21 @@ const API_DOCS = {
       params: { id: { type: 'uuid', required: true } },
       response: { data: '{ deleted: true }' },
     },
+    {
+      method: 'GET',
+      path: '/api/agent/docs/search',
+      description: 'Search docs by content using full-text search with Portuguese stemming. Returns ranked results with snippets. Falls back to fuzzy matching if no exact matches.',
+      auth: true,
+      query: {
+        q: { type: 'string', required: true, description: 'Search query (min 2 chars)' },
+        projectId: { type: 'uuid', required: false, description: 'Filter by project' },
+        limit: { type: 'number', default: 10, max: 50 },
+      },
+      response: {
+        data: '[{ id, title, snippet, rank, projectId, updatedAt }]',
+        meta: '{ total: number, query: string }',
+      },
+    },
 
     // ============ PERSONAL BOARD ============
     {

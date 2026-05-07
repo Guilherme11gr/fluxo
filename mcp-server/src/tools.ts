@@ -387,6 +387,20 @@ export const deleteDocTool: Tool = {
   },
 };
 
+export const searchDocsTool: Tool = {
+  name: 'search_docs',
+  description: 'Search project documentation by content. Returns matching docs with relevant snippets. Use when you need to find a doc by topic, decision, or keyword without knowing the exact title.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Search query (e.g. "auth decision", "deploy pipeline")' },
+      projectId: { type: 'string', format: 'uuid', description: 'Filter by project (optional)' },
+      limit: { type: 'number', description: 'Max results (default: 10)' },
+    },
+    required: ['query'],
+  },
+};
+
 // ============================================================
 // TAGS (4 tools)
 // ============================================================
@@ -605,12 +619,13 @@ export const ALL_TOOLS: Tool[] = [
   getEpicFullTool,
   // Projects (1)
   listProjectsTool,
-  // Docs (5)
+  // Docs (6)
   listDocsTool,
   getDocTool,
   createDocTool,
   updateDocTool,
   deleteDocTool,
+  searchDocsTool,
   // Tags (4)
   listTagsTool,
   getTagTool,

@@ -351,6 +351,26 @@ export async function handleDeleteDoc(args: ToolArgs): Promise<string> {
   }
 }
 
+export async function handleSearchDocs(args: ToolArgs): Promise<string> {
+  try {
+    const response = await apiRequest('GET', '/docs/search', undefined, {
+      q: args.query as string,
+      projectId: args.projectId as string,
+      limit: args.limit as number,
+    });
+    const results = response.data as Array<{ title: string; snippet: string; rank: number }>;
+    if (results.length === 0) {
+      return `No docs found for "${args.query}"`;
+    }
+    const summary = results
+      .map((r, i) => `${i + 1}. ${r.title} (rank: ${r.rank.toFixed(2)})\n   ${r.snippet}`)
+      .join('\n\n');
+    return `Found ${results.length} docs for "${args.query}":\n\n${summary}`;
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
 // ============================================================
 // TAGS HANDLERS
 // ============================================================
@@ -541,6 +561,7 @@ export const TOOL_HANDLERS: Record<string, Handler> = {
   create_doc: handleCreateDoc,
   update_doc: handleUpdateDoc,
   delete_doc: handleDeleteDoc,
+  search_docs: handleSearchDocs,
   // Tags
   list_tags: handleListTags,
   get_tag: handleGetTag,
