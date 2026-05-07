@@ -3,8 +3,8 @@
  *
  * GET /api/agent/docs/search - Full-text search across docs content
  *
- * Uses PostgreSQL tsvector with Portuguese stemming for ranked results.
- * Falls back to pg_trgm fuzzy matching when no exact matches found.
+ * Combines tsvector (Portuguese stemming) with pg_trgm (typo tolerance)
+ * in a single query. Results ranked by (ts_rank * 2) + similarity.
  */
 
 import { NextRequest, NextResponse } from 'next/server';

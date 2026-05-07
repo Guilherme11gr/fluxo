@@ -271,7 +271,7 @@ const API_DOCS = {
     {
       method: 'GET',
       path: '/api/agent/docs/search',
-      description: 'Search docs by content using full-text search with Portuguese stemming. Returns ranked results with snippets. Falls back to fuzzy matching if no exact matches.',
+      description: 'Search docs by content. Combines tsvector (Portuguese stemming) with pg_trgm (typo tolerance) in a single query. Returns ranked results with snippets.',
       auth: true,
       query: {
         q: { type: 'string', required: true, description: 'Search query (min 2 chars)' },

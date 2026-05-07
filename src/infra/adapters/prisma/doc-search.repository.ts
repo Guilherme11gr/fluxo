@@ -5,6 +5,7 @@
  * - tsvector + GIN index: semantic matching with Portuguese stemming
  * - pg_trgm: typo tolerance on titles
  *
+ * Both run in parallel via OR in the WHERE clause — no fallback, no 2 queries.
  * Ranking: (ts_rank * 2) + similarity — tsvector resolves semantic match,
  * trgm catches typos that tsvector misses.
  */
@@ -26,7 +27,7 @@ export class DocSearchRepository {
   /**
    * Unified search: tsvector matching + trgm similarity in one query.
    *
-   * The WHERE clause uses OR:
+   * The WHERE clause uses OR — both indexes run in parallel:
    *   search_vector @@ query  (semantic match via GIN index)
    *   title % query           (fuzzy match via trgm GIN index)
    *
