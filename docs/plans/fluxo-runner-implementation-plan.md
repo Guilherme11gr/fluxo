@@ -1,336 +1,110 @@
-# FluXo Runner — Implementation Plan
+# FluXo Runner — Implementation Plan (v2)
 
-> **For OpenCode:** Use este plano para implementar task por task. Cada task é autocontida.
+> **For OpenCode:** Use this plan to implement task by task. Each task is self-contained.
 
-**Goal:** Criar o sistema FluXo Runner — automação de tasks via agentes locais (OpenCode, Hermes), com acompanhamento em tempo real na UI web do FluXo.
+**Goal:** Criar o sistema FluXo Runner — automação de tasks via agentes locais (OpenCode), com acompanhamento em tempo real na UI web.
 
-**Architecture:** O FluXo (VPS) é o orquestrador. Cada usuário instala um Runner desktop local que faz polling na Agent API, spawna o agente configurado (OpenCode/Hermes), streama output em tempo real, e faz handoff via mudança de assignee/status. A UI web do FluXo acompanha tudo.
+**Architecture:** O FluXo (VPS) é o orquestrador. O Runner desktop local faz polling na Agent API, spawna OpenCode com a task description, streama output de volta, e o server faz handoff automático via mudança de status/assignee.
 
-**Tech Stack:** Next.js (App Router), Prisma, PostgreSQL, Zod, Tauri (fase 2 — app desktop).
-
----
-
-## Contexto: O que já existe
-
-### Agent API (já funciona)
-- Autenticação: `extractAgentAuth()` em `src/shared/http/agent-auth.ts`
-- Responses: `agentSuccess()`, `agentList()`, `agentError()`, `handleAgentError()` em `src/shared/http/agent-responses.ts`
-- Padrão de rota: `src/app/api/agent/[entity]/route.ts`
-- Documentação: `src/app/api/agent/route.ts` (auto-describing JSON)
-- Tarefas já suportam `assigneeId` como filtro em GET /tasks
-
-### Personal Board (já existe, só sessão)
-- Tabelas: `personal_board_columns`, `personal_board_items` (Prisma)
-- Repository: `personalBoardRepository` em `src/infra/adapters/prisma/index.ts`
-- Rotas web: `/api/personal-board/*` (usam `extractAuthenticatedTenant` com Supabase)
-- Agent API já tem os endpoints de board documentados em `src/app/api/agent/route.ts` (mas as rotas físicas precisam ser criadas)
-
-### Infra
-- Prisma com PostgreSQL
-- Migrations em `prisma/migrations/`
-- Repositories em `src/infra/adapters/prisma/`
-- Zod pra validação em tudo
-- `agentList`, `agentSuccess`, `agentError`, `handleAgentError` em `src/shared/http/agent-responses.ts`
+**Simplificações vs v1:**
+- Sem chat bidirecional (v1: só output streaming)
+- Output armazenado como resumo (últimos 10KB), não output completo
+- `workdir` só no runner local, nunca no server
+- Sem Hermes skill (fase futura)
+- SSE para UI (push de updates) em vez de polling da UI
 
 ---
 
-## FASE 1: Personal Board na Agent API
+## Contexto
 
-### Task 1: Criar rota GET /api/agent/board
+### O que já existe
+- **Agent API:** `extractAgentAuth()` em `src/shared/http/agent-auth.ts`, responses em `src/shared/http/agent-responses.ts`
+- **Pattern de rota:** `src/app/api/agent/[entity]/route.ts` com `export const dynamic = 'force-dynamic'`
+- **Repositories:** `src/infra/adapters/prisma/index.ts` — singleton pattern, um repository por entidade
+- **Task model:** `prisma/schema.prisma` — campos `status`, `assigneeId`, `type`, `priority`
+- **TaskStatus enum:** BACKLOG, TODO, DOING, REVIEW, QA_READY, DONE
+- **Task discovery:** `GET /api/agent/tasks` já suporta filtros `status` e `assigneeId` — o runner usa isso pra encontrar tasks elegíveis
+- **UpdateTask use case:** `src/domain/use-cases/tasks/update-task.ts` — usamos pra handoff (não o repository direto), pois inclui audit log
 
-**Objective:** Expor o personal board completo (colunas + items) via Agent API.
+### Fluxo do Runner Desktop (referência)
+
+O runner executa este loop. **Não faz parte do server** — é documentação pra quem for implementar o runner.
+
+```
+1. POST /agent/runner/register { name, os, architecture, version }
+   → Recebe { id, status: "online" }
+   → Salva nodeId localmente
+
+2. GET /agent/runner/configs?runnerNodeId=<nodeId>
+   → Recebe lista de configs habilitadas
+
+3. LOOP (a cada config.pollingIntervalSeconds):
+   a. POST /agent/runner/heartbeat { nodeId }
+      → Server marca runners offline se sem heartbeat há 2+ min
+
+   b. PARA CADA config habilitada:
+      i.   Descobre tasks:
+           GET /agent/tasks?status=<config.matchStatus[0]>&assigneeId=<config.matchAssigneeId>
+           → Recebe lista de tasks candidatas
+
+      ii.  Filtra tasks já em execução:
+           PARA CADA task candidata:
+             GET /agent/runner/executions?taskId=<id>&status=running
+           → Pula tasks com execução ativa
+
+      iii. Verifica limite de concorrência:
+           GET /agent/runner/executions?configId=<configId>&status=running
+           → Se count >= config.maxConcurrent, pula
+
+      iv.  Se encontrou task válida:
+           POST /agent/runner/executions {
+             configId, runnerNodeId, taskId, platform: "opencode", model
+           }
+           → Recebe executionId
+
+      v.   Executa o agente:
+           SPAWNA: opencode run "<task description + instruction>" --model <model>
+           → CWD = workdir configurado localmente
+           → Mata processo após config.timeoutMinutes
+
+      vi.  Durante execução (a cada 5s):
+           POST /agent/runner/executions/<id>/output {
+             output: <últimos 10KB do stdout>
+           }
+
+      vii. Ao terminar:
+           SE sucesso:
+             PATCH /agent/runner/executions/<id> {
+               status: "done",
+               outputSummary: <últimos 10KB>,
+               exitCode: 0
+             }
+             → Server faz handoff automático (muda status/assignee da task)
+           SE erro:
+             PATCH /agent/runner/executions/<id> {
+               status: "failed",
+               errorMessage: <erro>,
+               exitCode: <código>
+             }
+             → Server muda status da task pra onErrorStatus
+```
+
+---
+
+## FASE 1: Database
+
+### Task 1: Criar migration — runner_nodes + runner_configs + runner_executions
+
+**Objective:** Criar as 3 tabelas do sistema de runner.
 
 **Files:**
-- Create: `src/app/api/agent/board/route.ts`
-
-**Step 1: Criar o arquivo da rota**
-
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, handleAgentError } from '@/shared/http/agent-responses';
-import { personalBoardRepository } from '@/infra/adapters/prisma';
-
-export const dynamic = 'force-dynamic';
-
-export async function GET() {
-  try {
-    const { orgId, userId } = await extractAgentAuth();
-    const board = await personalBoardRepository.getBoard(orgId, userId);
-    return agentSuccess(board);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Testar**
-
-```bash
-curl -s -H "Authorization: Bearer agk_***" -H "User-Agent: Hermes/1.0" \
-  "https://fluxo.agenda-aqui.com/api/agent/board"
-```
-
-Expected: `{ "success": true, "data": { "columns": [...] } }`
-
-**Step 3: Commit**
-
-```bash
-git add src/app/api/agent/board/route.ts
-git commit -m "feat(agent-api): add GET /agent/board endpoint"
-```
-
----
-
-### Task 2: Criar rota POST /api/agent/board/columns
-
-**Objective:** Criar colunas no personal board via Agent API.
-
-**Files:**
-- Create: `src/app/api/agent/board/columns/route.ts`
-
-**Step 1: Criar a rota**
-
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { personalBoardRepository } from '@/infra/adapters/prisma';
-import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
-
-const createColumnSchema = z.object({
-  title: z.string().min(1).max(100),
-  color: z.string().optional(),
-});
-
-export async function POST(request: Request) {
-  try {
-    const { orgId, userId } = await extractAgentAuth();
-    const body = await request.json();
-    const parsed = createColumnSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return agentError('VALIDATION_ERROR', 'Invalid data', 400);
-    }
-
-    const column = await personalBoardRepository.createColumn({
-      orgId,
-      userId,
-      ...parsed.data,
-    });
-
-    return agentSuccess(column, 201);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Testar**
-
-```bash
-curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"title": "Hoje", "color": "#6366f1"}' \
-  "https://fluxo.agenda-aqui.com/api/agent/board/columns"
-```
-
-**Step 3: Commit**
-
-```bash
-git add src/app/api/agent/board/columns/route.ts
-git commit -m "feat(agent-api): add POST /agent/board/columns endpoint"
-```
-
----
-
-### Task 3: Criar rota PATCH/DELETE /api/agent/board/columns/:id
-
-**Objective:** Atualizar e deletar coluna via Agent API.
-
-**Files:**
-- Create: `src/app/api/agent/board/columns/[id]/route.ts`
-
-**Step 1: Criar a rota**
-
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { personalBoardRepository } from '@/infra/adapters/prisma';
-import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
-
-const updateColumnSchema = z.object({
-  title: z.string().min(1).max(100).optional(),
-  color: z.string().optional(),
-});
-
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const { orgId, userId } = await extractAgentAuth();
-    const body = await request.json();
-
-    if (!body || Object.keys(body).length === 0) {
-      return agentError('VALIDATION_ERROR', 'No fields provided', 400);
-    }
-
-    const parsed = updateColumnSchema.safeParse(body);
-    if (!parsed.success) {
-      return agentError('VALIDATION_ERROR', 'Invalid data', 400);
-    }
-
-    const updated = await personalBoardRepository.updateColumn(id, orgId, userId, parsed.data);
-    return agentSuccess(updated);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const { orgId, userId } = await extractAgentAuth();
-    await personalBoardRepository.deleteColumn(id, orgId, userId);
-    return new Response(null, { status: 204 });
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-> **Nota:** Verificar se `personalBoardRepository` tem os métodos `updateColumn` e `deleteColumn`. Se não, criar/adaptar seguindo o padrão do `updateItem`/`deleteItem`.
-
-**Step 2: Commit**
-
-```bash
-git add src/app/api/agent/board/columns/\[id\]/route.ts
-git commit -m "feat(agent-api): add PATCH/DELETE /agent/board/columns/:id"
-```
-
----
-
-### Task 4: Criar rota POST /api/agent/board/columns/:columnId/items
-
-**Objective:** Criar items em uma coluna via Agent API.
-
-**Files:**
-- Create: `src/app/api/agent/board/columns/[columnId]/items/route.ts`
-
-**Step 1: Criar a rota**
-
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { personalBoardRepository } from '@/infra/adapters/prisma';
-import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
-
-const createItemSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().max(1000).optional(),
-  priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
-  dueDate: z.string().optional().nullable(),
-});
-
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ columnId: string }> }
-) {
-  try {
-    const { columnId } = await params;
-    const { orgId } = await extractAgentAuth();
-    const body = await request.json();
-    const parsed = createItemSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return agentError('VALIDATION_ERROR', 'Invalid data', 400);
-    }
-
-    const item = await personalBoardRepository.createItem({
-      columnId,
-      ...parsed.data,
-    });
-
-    return agentSuccess(item, 201);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Commit**
-
-```bash
-git add src/app/api/agent/board/columns/\[columnId\]/items/route.ts
-git commit -m "feat(agent-api): add POST /agent/board/columns/:columnId/items"
-```
-
----
-
-### Task 5: Criar rotas PATCH/DELETE /api/agent/board/items/:id e POST /api/agent/board/reorder
-
-**Objective:** Completar CRUD do personal board na Agent API.
-
-**Files:**
-- Create: `src/app/api/agent/board/items/[id]/route.ts`
-- Create: `src/app/api/agent/board/reorder/route.ts`
-
-**Step 1:** Criar `items/[id]/route.ts` com PATCH e DELETE.
-- Seguir padrão de `src/app/api/personal-board/items/[itemId]/route.ts`
-- Trocar `extractAuthenticatedTenant(supabase)` por `extractAgentAuth()`
-- No PATCH, usar `extractAgentAuth()` para obter `orgId` e `userId`
-- No DELETE, mesmo padrão
-
-**Step 2:** Criar `reorder/route.ts` com POST.
-- Seguir padrão de `src/app/api/personal-board/reorder/route.ts`
-- Trocar auth para `extractAgentAuth()`
-- Passar `orgId` e `userId` do auth context
-
-**Step 3: Commit**
-
-```bash
-git add src/app/api/agent/board/
-git commit -m "feat(agent-api): complete personal board CRUD endpoints"
-```
-
----
-
-### Task 6: Atualizar documentação do Agent API
-
-**Objective:** Verificar se os endpoints de board estão documentados no JSON de docs.
-
-**Files:**
-- Modify: `src/app/api/agent/route.ts`
-
-**Step 1:** Verificar no array `endpoints` de `API_DOCS` se os endpoints de board já estão documentados. O JSON de docs já inclui board, columns, items e reorder — verificar se está completo e batendo com as rotas criadas.
-
-**Step 2:** Verificar se os models `BoardColumn` e `BoardItem` estão no objeto `models`.
-
-**Step 3: Commit se houver alterações**
-
----
-
-## FASE 2: Runner — Database + Repositories
-
-### Task 7: Criar migration — tabela runner_nodes
-
-**Objective:** Criar tabela que registra os runners desktop conectados.
-
-**Files:**
-- Create: `prisma/migrations/TIMESTAMP_add_runner_nodes/migration.sql`
 - Modify: `prisma/schema.prisma`
+- Create: `prisma/migrations/TIMESTAMP_add_runner_system/migration.sql`
 
 **Step 1: Criar migration SQL**
 
 ```sql
+-- runner_nodes: desktops conectados
 CREATE TABLE "public"."runner_nodes" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "org_id" UUID NOT NULL,
@@ -340,259 +114,153 @@ CREATE TABLE "public"."runner_nodes" (
     "version" VARCHAR(20) NOT NULL,
     "status" VARCHAR(20) NOT NULL DEFAULT 'offline',
     "last_heartbeat_at" TIMESTAMPTZ(6),
-    "metadata" JSONB DEFAULT '{}',
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
-
     CONSTRAINT "runner_nodes_pkey" PRIMARY KEY ("id")
 );
-
 CREATE INDEX "idx_runner_nodes_org" ON "public"."runner_nodes"("org_id");
-CREATE INDEX "idx_runner_nodes_status" ON "public"."runner_nodes"("status");
 CREATE UNIQUE INDEX "idx_runner_nodes_org_name" ON "public"."runner_nodes"("org_id", "name");
-
 ALTER TABLE "public"."runner_nodes" ADD CONSTRAINT "runner_nodes_org_id_fkey"
-    FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id")
-    ON DELETE CASCADE ON UPDATE NO ACTION;
-```
+    FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE;
 
-**Step 2: Adicionar no Prisma schema**
-
-```prisma
-model RunnerNode {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orgId           String        @map("org_id") @db.Uuid
-  name            String        @db.VarChar(100)
-  os              String        @db.VarChar(50)
-  architecture    String        @db.VarChar(50)
-  version         String        @db.VarChar(20)
-  status          String        @default("offline") @db.VarChar(20)
-  lastHeartbeatAt DateTime?     @map("last_heartbeat_at") @db.Timestamptz(6)
-  metadata        Json          @default("{}") @db.JsonB
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  configs         RunnerConfig[]
-  executions      RunnerExecution[]
-
-  @@unique([orgId, name], map: "idx_runner_nodes_org_name")
-  @@index([orgId], map: "idx_runner_nodes_org")
-  @@index([status], map: "idx_runner_nodes_status")
-  @@map("runner_nodes")
-  @@schema("public")
-}
-```
-
-> **Nota:** As relações `RunnerConfig[]` e `RunnerExecution[]` serão criadas nas tasks seguintes. Comentar temporariamente ou criar tudo junto.
-
-**Step 3: Rodar migration**
-
-```bash
-npx prisma migrate dev --name add_runner_nodes
-```
-
-**Step 4: Commit**
-
----
-
-### Task 8: Criar migration — tabela runner_configs
-
-**Objective:** Tabela de regras de automação por tenant.
-
-**Files:**
-- Create: `prisma/migrations/TIMESTAMP_add_runner_configs/migration.sql`
-- Modify: `prisma/schema.prisma`
-
-**Step 1: Criar migration SQL**
-
-```sql
+-- runner_configs: regras de automação
 CREATE TABLE "public"."runner_configs" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "org_id" UUID NOT NULL,
     "runner_node_id" UUID NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
-
     "match_status" TEXT[] DEFAULT '{}',
     "match_assignee_id" UUID,
-    "match_type" TEXT[] DEFAULT '{}',
-    "match_project_id" UUID,
-
     "platform" VARCHAR(20) NOT NULL DEFAULT 'opencode',
     "model" VARCHAR(100),
-    "workdir" VARCHAR(500),
     "instruction" TEXT,
-    "environment" VARCHAR(20) DEFAULT 'native',
-
     "on_done_status" VARCHAR(20),
     "on_done_assignee_id" UUID,
     "on_error_status" VARCHAR(20) DEFAULT 'BLOCKED',
-
-    "polling_interval_seconds" INTEGER NOT NULL DEFAULT 120,
+    "polling_interval_seconds" INTEGER NOT NULL DEFAULT 60,
     "max_concurrent" INTEGER NOT NULL DEFAULT 1,
-
+    "timeout_minutes" INTEGER NOT NULL DEFAULT 30,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
-
     CONSTRAINT "runner_configs_pkey" PRIMARY KEY ("id")
 );
-
 CREATE INDEX "idx_runner_configs_org" ON "public"."runner_configs"("org_id");
 CREATE INDEX "idx_runner_configs_runner_node" ON "public"."runner_configs"("runner_node_id");
-CREATE INDEX "idx_runner_configs_enabled" ON "public"."runner_configs"("enabled");
-
 ALTER TABLE "public"."runner_configs" ADD CONSTRAINT "runner_configs_org_id_fkey"
-    FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+    FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE;
 ALTER TABLE "public"."runner_configs" ADD CONSTRAINT "runner_configs_runner_node_id_fkey"
-    FOREIGN KEY ("runner_node_id") REFERENCES "public"."runner_nodes"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
-```
+    FOREIGN KEY ("runner_node_id") REFERENCES "public"."runner_nodes"("id") ON DELETE CASCADE;
 
-**Step 2: Adicionar no Prisma schema**
-
-```prisma
-model RunnerConfig {
-  id                       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orgId                    String        @map("org_id") @db.Uuid
-  runnerNodeId             String        @map("runner_node_id") @db.Uuid
-  name                     String        @db.VarChar(100)
-  enabled                  Boolean       @default(true)
-
-  matchStatus              String[]      @default([]) @map("match_status")
-  matchAssigneeId          String?       @map("match_assignee_id") @db.Uuid
-  matchType                String[]      @default([]) @map("match_type")
-  matchProjectId           String?       @map("match_project_id") @db.Uuid
-
-  platform                 String        @default("opencode") @db.VarChar(20)
-  model                    String?       @db.VarChar(100)
-  workdir                  String?       @db.VarChar(500)
-  instruction              String?       @db.Text
-  environment              String        @default("native") @db.VarChar(20)
-
-  onDoneStatus             String?       @map("on_done_status") @db.VarChar(20)
-  onDoneAssigneeId         String?       @map("on_done_assignee_id") @db.Uuid
-  onErrorStatus            String        @default("BLOCKED") @map("on_error_status") @db.VarChar(20)
-
-  pollingIntervalSeconds   Int           @default(120) @map("polling_interval_seconds")
-  maxConcurrent            Int           @default(1) @map("max_concurrent")
-
-  createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  organization             Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  runnerNode               RunnerNode    @relation(fields: [runnerNodeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  executions               RunnerExecution[]
-
-  @@index([orgId], map: "idx_runner_configs_org")
-  @@index([runnerNodeId], map: "idx_runner_configs_runner_node")
-  @@index([enabled], map: "idx_runner_configs_enabled")
-  @@map("runner_configs")
-  @@schema("public")
-}
-```
-
-**Step 3: Rodar migration e commit**
-
----
-
-### Task 9: Criar migration — tabelas runner_executions e runner_chat_messages
-
-**Objective:** Tabela de execuções (runs) com log de output e chat bidirecional.
-
-**Files:**
-- Create: `prisma/migrations/TIMESTAMP_add_runner_executions/migration.sql`
-- Modify: `prisma/schema.prisma`
-
-**Step 1: Criar migration SQL**
-
-```sql
+-- runner_executions: histórico de runs
 CREATE TABLE "public"."runner_executions" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "org_id" UUID NOT NULL,
     "config_id" UUID NOT NULL,
     "runner_node_id" UUID NOT NULL,
     "task_id" UUID,
-
     "status" VARCHAR(20) NOT NULL DEFAULT 'pending',
     "platform" VARCHAR(20) NOT NULL,
     "model" VARCHAR(100),
-    "workdir" VARCHAR(500),
-
-    "output" TEXT DEFAULT '',
-
+    "output_summary" TEXT DEFAULT '',
+    "error_message" TEXT,
+    "exit_code" INTEGER,
     "started_at" TIMESTAMPTZ(6),
     "finished_at" TIMESTAMPTZ(6),
     "duration_ms" INTEGER,
-
-    "error_message" TEXT,
-
-    "metadata" JSONB DEFAULT '{}',
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
-
     CONSTRAINT "runner_executions_pkey" PRIMARY KEY ("id")
 );
-
-CREATE TABLE "public"."runner_chat_messages" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "execution_id" UUID NOT NULL,
-    "role" VARCHAR(20) NOT NULL,
-    "content" TEXT NOT NULL,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
-
-    CONSTRAINT "runner_chat_messages_pkey" PRIMARY KEY ("id")
-);
-
 CREATE INDEX "idx_runner_executions_org" ON "public"."runner_executions"("org_id");
 CREATE INDEX "idx_runner_executions_config" ON "public"."runner_executions"("config_id");
 CREATE INDEX "idx_runner_executions_runner_node" ON "public"."runner_executions"("runner_node_id");
 CREATE INDEX "idx_runner_executions_task" ON "public"."runner_executions"("task_id");
 CREATE INDEX "idx_runner_executions_status" ON "public"."runner_executions"("status");
-CREATE INDEX "idx_runner_chat_messages_execution" ON "public"."runner_chat_messages"("execution_id");
-
 ALTER TABLE "public"."runner_executions" ADD CONSTRAINT "runner_executions_org_id_fkey"
-    FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+    FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE;
 ALTER TABLE "public"."runner_executions" ADD CONSTRAINT "runner_executions_config_id_fkey"
-    FOREIGN KEY ("config_id") REFERENCES "public"."runner_configs"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+    FOREIGN KEY ("config_id") REFERENCES "public"."runner_configs"("id") ON DELETE CASCADE;
 ALTER TABLE "public"."runner_executions" ADD CONSTRAINT "runner_executions_runner_node_id_fkey"
-    FOREIGN KEY ("runner_node_id") REFERENCES "public"."runner_nodes"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+    FOREIGN KEY ("runner_node_id") REFERENCES "public"."runner_nodes"("id") ON DELETE CASCADE;
 ALTER TABLE "public"."runner_executions" ADD CONSTRAINT "runner_executions_task_id_fkey"
-    FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
-ALTER TABLE "public"."runner_chat_messages" ADD CONSTRAINT "runner_chat_messages_execution_id_fkey"
-    FOREIGN KEY ("execution_id") REFERENCES "public"."runner_executions"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+    FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE SET NULL;
 ```
 
 **Step 2: Adicionar no Prisma schema**
 
 ```prisma
+model RunnerNode {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId           String           @map("org_id") @db.Uuid
+  name            String           @db.VarChar(100)
+  os              String           @db.VarChar(50)
+  architecture    String           @db.VarChar(50)
+  version         String           @db.VarChar(20)
+  status          String           @default("offline") @db.VarChar(20)
+  lastHeartbeatAt DateTime?        @map("last_heartbeat_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  configs         RunnerConfig[]
+  executions      RunnerExecution[]
+
+  @@unique([orgId, name], map: "idx_runner_nodes_org_name")
+  @@index([orgId], map: "idx_runner_nodes_org")
+  @@map("runner_nodes")
+  @@schema("public")
+}
+
+model RunnerConfig {
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId                  String          @map("org_id") @db.Uuid
+  runnerNodeId           String          @map("runner_node_id") @db.Uuid
+  name                   String          @db.VarChar(100)
+  enabled                Boolean         @default(true)
+  matchStatus            String[]        @default([]) @map("match_status")
+  matchAssigneeId        String?         @map("match_assignee_id") @db.Uuid
+  platform               String          @default("opencode") @db.VarChar(20)
+  model                  String?         @db.VarChar(100)
+  instruction            String?         @db.Text
+  onDoneStatus           String?         @map("on_done_status") @db.VarChar(20)
+  onDoneAssigneeId       String?         @map("on_done_assignee_id") @db.Uuid
+  onErrorStatus          String          @default("BLOCKED") @map("on_error_status") @db.VarChar(20)
+  pollingIntervalSeconds Int             @default(60) @map("polling_interval_seconds")
+  maxConcurrent          Int             @default(1) @map("max_concurrent")
+  timeoutMinutes         Int             @default(30) @map("timeout_minutes")
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization           Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runnerNode             RunnerNode      @relation(fields: [runnerNodeId], references: [id], onDelete: Cascade)
+  executions             RunnerExecution[]
+
+  @@index([orgId], map: "idx_runner_configs_org")
+  @@index([runnerNodeId], map: "idx_runner_configs_runner_node")
+  @@map("runner_configs")
+  @@schema("public")
+}
+
 model RunnerExecution {
   id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   orgId           String              @map("org_id") @db.Uuid
   configId        String              @map("config_id") @db.Uuid
   runnerNodeId    String              @map("runner_node_id") @db.Uuid
   taskId          String?             @map("task_id") @db.Uuid
-
   status          String              @default("pending") @db.VarChar(20)
   platform        String              @db.VarChar(20)
   model           String?             @db.VarChar(100)
-  workdir         String?             @db.VarChar(500)
-
-  output          String              @default("") @db.Text
-
+  outputSummary   String              @default("") @db.Text @map("output_summary")
+  errorMessage    String?             @map("error_message") @db.Text
+  exitCode        Int?                @map("exit_code")
   startedAt       DateTime?           @map("started_at") @db.Timestamptz(6)
   finishedAt      DateTime?           @map("finished_at") @db.Timestamptz(6)
   durationMs      Int?                @map("duration_ms")
-
-  errorMessage    String?             @map("error_message") @db.Text
-
-  metadata        Json                @default("{}") @db.JsonB
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  organization    Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  config          RunnerConfig        @relation(fields: [configId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  runnerNode      RunnerNode          @relation(fields: [runnerNodeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  task            Task?               @relation(fields: [taskId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  chatMessages    RunnerChatMessage[]
+  organization    Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  config          RunnerConfig        @relation(fields: [configId], references: [id], onDelete: Cascade)
+  runnerNode      RunnerNode          @relation(fields: [runnerNodeId], references: [id], onDelete: Cascade)
+  task            Task?               @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([orgId], map: "idx_runner_executions_org")
   @@index([configId], map: "idx_runner_executions_config")
@@ -602,42 +270,33 @@ model RunnerExecution {
   @@map("runner_executions")
   @@schema("public")
 }
-
-model RunnerChatMessage {
-  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  executionId  String           @map("execution_id") @db.Uuid
-  role         String           @db.VarChar(20)
-  content      String           @db.Text
-  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  execution    RunnerExecution  @relation(fields: [executionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([executionId], map: "idx_runner_chat_messages_execution")
-  @@map("runner_chat_messages")
-  @@schema("public")
-}
 ```
 
-**Step 3:** Adicionar a relation no model `Task`:
-
+**Step 3:** Adicionar no model `Organization`:
 ```prisma
-// Dentro do model Task, adicionar:
-executions    RunnerExecution[]
+runnerNodes     RunnerNode[]
 ```
 
-**Step 4:** Rodar migration e commit
+**Step 4:** Adicionar no model `Task`:
+```prisma
+executions      RunnerExecution[]
+```
+
+**Step 5:** Rodar migration e commit
 
 ---
 
-### Task 10: Criar RunnerNodeRepository
+## FASE 2: Repositories
 
-**Objective:** Repository com métodos CRUD para runner_nodes.
+### Task 2: Criar RunnerNodeRepository
+
+**Objective:** Repository CRUD para runner_nodes.
 
 **Files:**
 - Create: `src/infra/adapters/prisma/runner-node.repository.ts`
 - Modify: `src/infra/adapters/prisma/index.ts`
 
-**Step 1: Criar o repository**
+**Step 1:** Criar o repository seguindo o padrão do codebase:
 
 ```typescript
 import type { PrismaClient } from '@prisma/client';
@@ -652,12 +311,6 @@ export class RunnerNodeRepository {
     });
   }
 
-  async findByOrgAndName(orgId: string, name: string) {
-    return this.prisma.runnerNode.findUnique({
-      where: { orgId_name: { orgId, name } },
-    });
-  }
-
   async findById(id: string) {
     return this.prisma.runnerNode.findUnique({ where: { id } });
   }
@@ -668,23 +321,13 @@ export class RunnerNodeRepository {
     os: string;
     architecture: string;
     version: string;
-    metadata?: Record<string, unknown>;
   }) {
     return this.prisma.runnerNode.upsert({
       where: { orgId_name: { orgId: data.orgId, name: data.name } },
-      create: {
-        ...data,
-        status: 'online',
-        lastHeartbeatAt: new Date(),
-        metadata: data.metadata ?? {},
-      },
+      create: { ...data, status: 'online', lastHeartbeatAt: new Date() },
       update: {
-        os: data.os,
-        architecture: data.architecture,
-        version: data.version,
-        status: 'online',
-        lastHeartbeatAt: new Date(),
-        metadata: data.metadata ?? {},
+        os: data.os, architecture: data.architecture, version: data.version,
+        status: 'online', lastHeartbeatAt: new Date(),
       },
     });
   }
@@ -693,13 +336,6 @@ export class RunnerNodeRepository {
     return this.prisma.runnerNode.update({
       where: { id },
       data: { lastHeartbeatAt: new Date(), status: 'online' },
-    });
-  }
-
-  async markOffline(id: string) {
-    return this.prisma.runnerNode.update({
-      where: { id },
-      data: { status: 'offline' },
     });
   }
 
@@ -717,24 +353,21 @@ export class RunnerNodeRepository {
 ```
 
 **Step 2:** Exportar no `index.ts`:
-
 ```typescript
 export const runnerNodeRepository = new RunnerNodeRepository(prisma);
 ```
 
-**Step 3: Commit**
-
 ---
 
-### Task 11: Criar RunnerConfigRepository
+### Task 3: Criar RunnerConfigRepository
 
-**Objective:** Repository com métodos CRUD para runner_configs.
+**Objective:** Repository CRUD para runner_configs.
 
 **Files:**
 - Create: `src/infra/adapters/prisma/runner-config.repository.ts`
 - Modify: `src/infra/adapters/prisma/index.ts`
 
-**Step 1: Criar o repository**
+**Step 1:**
 
 ```typescript
 import type { PrismaClient } from '@prisma/client';
@@ -764,75 +397,42 @@ export class RunnerConfigRepository {
   }
 
   async findById(id: string) {
-    return this.prisma.runnerConfig.findUnique({
-      where: { id },
-      include: { runnerNode: { select: { id: true, name: true, status: true } } },
-    });
+    return this.prisma.runnerConfig.findUnique({ where: { id } });
   }
 
   async create(data: {
-    orgId: string;
-    runnerNodeId: string;
-    name: string;
-    enabled?: boolean;
-    matchStatus?: string[];
-    matchAssigneeId?: string;
-    matchType?: string[];
-    matchProjectId?: string;
-    platform?: string;
-    model?: string;
-    workdir?: string;
-    instruction?: string;
-    environment?: string;
-    onDoneStatus?: string;
-    onDoneAssigneeId?: string;
-    onErrorStatus?: string;
-    pollingIntervalSeconds?: number;
-    maxConcurrent?: number;
+    orgId: string; runnerNodeId: string; name: string;
+    enabled?: boolean; matchStatus?: string[]; matchAssigneeId?: string;
+    platform?: string; model?: string; instruction?: string;
+    onDoneStatus?: string; onDoneAssigneeId?: string; onErrorStatus?: string;
+    pollingIntervalSeconds?: number; maxConcurrent?: number; timeoutMinutes?: number;
   }) {
     return this.prisma.runnerConfig.create({ data });
   }
 
-  async update(id: string, orgId: string, data: Record<string, unknown>) {
-    return this.prisma.runnerConfig.update({
-      where: { id, orgId },
-      data,
-    });
+  async update(id: string, data: Record<string, unknown>) {
+    return this.prisma.runnerConfig.update({ where: { id }, data });
   }
 
-  async delete(id: string, orgId: string) {
-    return this.prisma.runnerConfig.delete({ where: { id, orgId } });
-  }
-
-  async findMatchingConfigs(orgId: string, runnerNodeId: string, status: string, assigneeId?: string) {
-    return this.prisma.runnerConfig.findMany({
-      where: {
-        orgId,
-        runnerNodeId,
-        enabled: true,
-        matchStatus: { has: status },
-        ...(assigneeId ? { matchAssigneeId: assigneeId } : {}),
-      },
-    });
+  async delete(id: string) {
+    return this.prisma.runnerConfig.delete({ where: { id } });
   }
 }
 ```
 
 **Step 2:** Exportar no `index.ts`.
 
-**Step 3: Commit**
-
 ---
 
-### Task 12: Criar RunnerExecutionRepository
+### Task 4: Criar RunnerExecutionRepository
 
-**Objective:** Repository com métodos CRUD para runner_executions e runner_chat_messages.
+**Objective:** Repository para runner_executions.
 
 **Files:**
 - Create: `src/infra/adapters/prisma/runner-execution.repository.ts`
 - Modify: `src/infra/adapters/prisma/index.ts`
 
-**Step 1: Criar o repository**
+**Step 1:**
 
 ```typescript
 import type { PrismaClient } from '@prisma/client';
@@ -846,19 +446,7 @@ export class RunnerExecutionRepository {
       include: {
         config: { select: { id: true, name: true } },
         runnerNode: { select: { id: true, name: true } },
-        task: { select: { id: true, title: true, status: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-  }
-
-  async findByRunnerNode(runnerNodeId: string, limit = 50) {
-    return this.prisma.runnerExecution.findMany({
-      where: { runnerNodeId },
-      include: {
-        config: { select: { id: true, name: true } },
-        task: { select: { id: true, title: true, status: true } },
+        task: { select: { id: true, title: true, status: true, localId: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -868,73 +456,7 @@ export class RunnerExecutionRepository {
   async findById(id: string) {
     return this.prisma.runnerExecution.findUnique({
       where: { id },
-      include: {
-        config: true,
-        runnerNode: { select: { id: true, name: true, status: true } },
-        task: true,
-        chatMessages: { orderBy: { createdAt: 'asc' } },
-      },
-    });
-  }
-
-  async create(data: {
-    orgId: string;
-    configId: string;
-    runnerNodeId: string;
-    taskId?: string;
-    platform: string;
-    model?: string;
-    workdir?: string;
-  }) {
-    return this.prisma.runnerExecution.create({
-      data: {
-        ...data,
-        status: 'running',
-        startedAt: new Date(),
-      },
-    });
-  }
-
-  async updateOutput(id: string, output: string) {
-    return this.prisma.runnerExecution.update({
-      where: { id },
-      data: { output },
-    });
-  }
-
-  async updateStatus(
-    id: string,
-    status: string,
-    extra?: { output?: string; errorMessage?: string }
-  ) {
-    const data: Record<string, unknown> = { status };
-
-    if (['done', 'failed', 'cancelled'].includes(status)) {
-      data.finishedAt = new Date();
-    }
-
-    if (extra?.output !== undefined) data.output = extra.output;
-    if (extra?.errorMessage) data.errorMessage = extra.errorMessage;
-
-    return this.prisma.runnerExecution.update({
-      where: { id },
-      data,
-    });
-  }
-
-  async addChatMessage(executionId: string, role: string, content: string) {
-    return this.prisma.runnerChatMessage.create({
-      data: { executionId, role, content },
-    });
-  }
-
-  async getChatMessages(executionId: string, since?: Date) {
-    return this.prisma.runnerChatMessage.findMany({
-      where: {
-        executionId,
-        ...(since ? { createdAt: { gt: since } } : {}),
-      },
-      orderBy: { createdAt: 'asc' },
+      include: { config: true, runnerNode: true, task: true },
     });
   }
 
@@ -949,399 +471,73 @@ export class RunnerExecutionRepository {
       where: { configId, status: 'running' },
     });
   }
+
+  async create(data: {
+    orgId: string; configId: string; runnerNodeId: string;
+    taskId?: string; platform: string; model?: string;
+  }) {
+    return this.prisma.runnerExecution.create({
+      data: { ...data, status: 'running', startedAt: new Date() },
+    });
+  }
+
+  async updateOutput(id: string, outputSummary: string) {
+    return this.prisma.runnerExecution.update({
+      where: { id },
+      data: { outputSummary },
+    });
+  }
+
+  async complete(id: string, result: {
+    status: 'done' | 'failed' | 'cancelled';
+    outputSummary?: string;
+    errorMessage?: string;
+    exitCode?: number;
+  }) {
+    const finishedAt = new Date();
+    const execution = await this.prisma.runnerExecution.findUnique({ where: { id } });
+    const durationMs = execution?.startedAt
+      ? finishedAt.getTime() - execution.startedAt.getTime()
+      : null;
+
+    return this.prisma.runnerExecution.update({
+      where: { id },
+      data: {
+        status: result.status,
+        finishedAt,
+        durationMs,
+        ...(result.outputSummary !== undefined && { outputSummary: result.outputSummary }),
+        ...(result.errorMessage && { errorMessage: result.errorMessage }),
+        ...(result.exitCode !== undefined && { exitCode: result.exitCode }),
+      },
+    });
+  }
 }
 ```
-
-> **Nota sobre output:** O runner envia o output acumulado (não incremental) em cada stream POST. O repository simplesmente substitui o campo `output`. Isso simplifica e evita problemas com concatenação no Prisma.
 
 **Step 2:** Exportar no `index.ts`.
 
-**Step 3: Commit**
-
 ---
 
-## FASE 3: Agent API Endpoints — Runner
+## FASE 3: Agent API Endpoints
 
-### Task 13: Criar POST /api/agent/runner/register
+### Task 5: POST /api/agent/runner/register + POST /api/agent/runner/heartbeat
 
-**Objective:** Runner se registra ao iniciar.
+**Objective:** Runner se registra e envia heartbeat periódico.
 
 **Files:**
 - Create: `src/app/api/agent/runner/register/route.ts`
-
-**Step 1: Criar a rota**
-
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { runnerNodeRepository } from '@/infra/adapters/prisma';
-import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
-
-const registerSchema = z.object({
-  name: z.string().min(1).max(100),
-  os: z.string().min(1).max(50),
-  architecture: z.string().min(1).max(50),
-  version: z.string().min(1).max(20),
-  metadata: z.record(z.unknown()).optional(),
-});
-
-export async function POST(request: Request) {
-  try {
-    const { orgId } = await extractAgentAuth();
-    const body = await request.json();
-    const parsed = registerSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return agentError('VALIDATION_ERROR', 'Invalid data', 400);
-    }
-
-    const node = await runnerNodeRepository.register({
-      orgId,
-      ...parsed.data,
-      metadata: parsed.data.metadata ?? {},
-    });
-
-    return agentSuccess(node, 201);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Testar**
-
-```bash
-curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"name":"Guilherme Desktop","os":"windows","architecture":"x64","version":"0.1.0"}' \
-  "https://fluxo.agenda-aqui.com/api/agent/runner/register"
-```
-
-Expected: `{ "success": true, "data": { "id": "uuid", "name": "Guilherme Desktop", "status": "online", ... } }`
-
-**Step 3: Commit**
-
----
-
-### Task 14: Criar POST /api/agent/runner/heartbeat
-
-**Objective:** Runner envia ping periódico. Marca runners offline se sem heartbeat há 2 min.
-
-**Files:**
 - Create: `src/app/api/agent/runner/heartbeat/route.ts`
 
-**Step 1: Criar a rota**
+**Step 1:** Register — POST com `extractAgentAuth()`, valida com Zod, chama `runnerNodeRepository.register()`.
 
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { runnerNodeRepository } from '@/infra/adapters/prisma';
-import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
-
-const heartbeatSchema = z.object({
-  nodeId: z.string().uuid(),
-  activeExecutions: z.number().default(0),
-});
-
-export async function POST(request: Request) {
-  try {
-    const { orgId } = await extractAgentAuth();
-    const body = await request.json();
-    const parsed = heartbeatSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return agentError('VALIDATION_ERROR', 'Invalid data', 400);
-    }
-
-    const node = await runnerNodeRepository.heartbeat(parsed.data.nodeId);
-    if (!node || node.orgId !== orgId) {
-      return agentError('NOT_FOUND', 'Runner node not found', 404);
-    }
-
-    // Marca runners offline se sem heartbeat há 2 minutos
-    await runnerNodeRepository.markOfflineStale(
-      new Date(Date.now() - 2 * 60 * 1000)
-    );
-
-    return agentSuccess({
-      id: node.id,
-      status: node.status,
-      lastHeartbeatAt: node.lastHeartbeatAt,
-    });
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Commit**
-
----
-
-### Task 15: Criar GET /api/agent/runner/configs
-
-**Objective:** Runner busca suas configs de automação.
-
-**Files:**
-- Create: `src/app/api/agent/runner/configs/route.ts`
-
-**Step 1: Criar a rota (GET)**
-
-```typescript
-import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, handleAgentError } from '@/shared/http/agent-responses';
-import { runnerConfigRepository } from '@/infra/adapters/prisma';
-
-export const dynamic = 'force-dynamic';
-
-export async function GET(request: Request) {
-  try {
-    const { orgId } = await extractAgentAuth();
-    const { searchParams } = new URL(request.url);
-    const runnerNodeId = searchParams.get('runnerNodeId');
-
-    const configs = runnerNodeId
-      ? await runnerConfigRepository.findByRunnerNode(runnerNodeId)
-      : await runnerConfigRepository.findEnabledByOrg(orgId);
-
-    return agentSuccess(configs);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Commit**
-
----
-
-### Task 16: Criar POST /api/agent/runner/configs
-
-**Objective:** Criar config de automação via Agent API.
-
-**Files:**
-- Modify: `src/app/api/agent/runner/configs/route.ts`
-
-**Step 1: Adicionar POST na rota existente**
-
-```typescript
-const createConfigSchema = z.object({
-  name: z.string().min(1).max(100),
-  runnerNodeId: z.string().uuid(),
-  enabled: z.boolean().default(true),
-
-  matchStatus: z.array(z.string()).default([]),
-  matchAssigneeId: z.string().uuid().optional(),
-  matchType: z.array(z.string()).default([]),
-  matchProjectId: z.string().uuid().optional(),
-
-  platform: z.enum(['opencode', 'hermes']).default('opencode'),
-  model: z.string().max(100).optional(),
-  workdir: z.string().max(500).optional(),
-  instruction: z.string().optional(),
-  environment: z.enum(['native', 'wsl']).default('native'),
-
-  onDoneStatus: z.string().max(20).optional(),
-  onDoneAssigneeId: z.string().uuid().optional(),
-  onErrorStatus: z.string().max(20).default('BLOCKED'),
-
-  pollingIntervalSeconds: z.number().int().min(30).max(3600).default(120),
-  maxConcurrent: z.number().int().min(1).max(5).default(1),
-});
-
-export async function POST(request: Request) {
-  try {
-    const { orgId } = await extractAgentAuth();
-    const body = await request.json();
-    const parsed = createConfigSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return agentError('VALIDATION_ERROR', 'Invalid data', 400);
-    }
-
-    const config = await runnerConfigRepository.create({
-      orgId,
-      ...parsed.data,
-    });
-
-    return agentSuccess(config, 201);
-  } catch (error) {
-    return handleAgentError(error);
-  }
-}
-```
-
-**Step 2: Commit**
-
----
-
-### Task 17: Criar PATCH/DELETE /api/agent/runner/configs/:id
-
-**Objective:** Atualizar e deletar configs.
-
-**Files:**
-- Create: `src/app/api/agent/runner/configs/[id]/route.ts`
-
-**Step 1:**
-
-PATCH com body parcial (todos os campos do create são opcionais exceto `name`). DELETE simples. Ambos verificam `orgId` do auth.
-
-```typescript
-const updateConfigSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  enabled: z.boolean().optional(),
-  matchStatus: z.array(z.string()).optional(),
-  matchAssigneeId: z.string().uuid().optional().nullable(),
-  matchType: z.array(z.string()).optional(),
-  matchProjectId: z.string().uuid().optional().nullable(),
-  platform: z.enum(['opencode', 'hermes']).optional(),
-  model: z.string().max(100).optional().nullable(),
-  workdir: z.string().max(500).optional().nullable(),
-  instruction: z.string().optional().nullable(),
-  environment: z.enum(['native', 'wsl']).optional(),
-  onDoneStatus: z.string().max(20).optional().nullable(),
-  onDoneAssigneeId: z.string().uuid().optional().nullable(),
-  onErrorStatus: z.string().max(20).optional(),
-  pollingIntervalSeconds: z.number().int().min(30).max(3600).optional(),
-  maxConcurrent: z.number().int().min(1).max(5).optional(),
-});
-```
-
-**Step 2: Commit**
-
----
-
-### Task 18: Criar GET/POST /api/agent/runner/executions
-
-**Objective:** Listar e criar execuções.
-
-**Files:**
-- Create: `src/app/api/agent/runner/executions/route.ts`
-
-**Step 1: GET — lista execuções do org**
-
-```typescript
-// Query params: ?runnerNodeId=X, ?status=Y, ?taskId=Z, ?limit=N
-// Include config name, runner name, task title
-```
-
-**Step 2: POST — cria execução**
-
-```typescript
-const createExecutionSchema = z.object({
-  configId: z.string().uuid(),
-  runnerNodeId: z.string().uuid(),
-  taskId: z.string().uuid().optional(),
-  platform: z.string(),
-  model: z.string().optional(),
-  workdir: z.string().optional(),
-});
-
-// Verifica se já existe execução rodando para a mesma task
-// Verifica se o config não excede maxConcurrent
-// Cria com status 'running' e startedAt
-```
+**Step 2:** Heartbeat — POST com `extractAgentAuth()`, recebe `nodeId`, chama `runnerNodeRepository.heartbeat()`. Também roda `markOfflineStale()` para runners sem heartbeat há 2+ minutos.
 
 **Step 3: Commit**
 
 ---
 
-### Task 19: Criar PATCH /api/agent/runner/executions/:id
-
-**Objective:** Atualizar execução (done, failed, output). **Este endpoint faz o handoff automático.**
-
-**Files:**
-- Create: `src/app/api/agent/runner/executions/[id]/route.ts`
-
-**Step 1:**
-
-```typescript
-const updateExecutionSchema = z.object({
-  status: z.enum(['running', 'done', 'failed', 'cancelled']).optional(),
-  output: z.string().optional(),
-  errorMessage: z.string().optional(),
-});
-
-// PATCH: atualiza status, output, errorMessage
-// Se status = done/failed/cancelled, seta finishedAt e calcula durationMs
-
-// HANDOFF AUTOMÁTICO (importante!):
-// 1. Busca a config da execução
-// 2. Se status = 'done' E config.onDoneStatus existe:
-//    PATCH /api/agent/tasks/:taskId { status: config.onDoneStatus }
-// 3. Se status = 'done' E config.onDoneAssigneeId existe:
-//    PATCH /api/agent/tasks/:taskId { assigneeId: config.onDoneAssigneeId }
-// 4. Se status = 'failed' E config.onErrorStatus existe:
-//    PATCH /api/agent/tasks/:taskId { status: config.onErrorStatus }
-//
-// NOTA: Usar taskRepository.update() diretamente (chamada interna),
-// não HTTP request. Ou usar o taskRepository.findUnique() + update().
-```
-
-> **Este é o endpoint mais crítico** — ele orquestra o handoff entre agentes. Quando o Hermes Dev termina, ele chama PATCH com `status: 'done'`, e este endpoint automaticamente muda a task pra "QA READY" e atribui pro Hermes QA.
-
-**Step 2: Commit**
-
----
-
-### Task 20: Criar POST /api/agent/runner/executions/:id/stream
-
-**Objective:** Runner envia chunks de output. UI web pode fazer polling aqui.
-
-**Files:**
-- Create: `src/app/api/agent/runner/executions/[id]/stream/route.ts`
-
-**Step 1:**
-
-```typescript
-const streamSchema = z.object({
-  output: z.string(),       // Output acumulado até o momento (não incremental)
-});
-
-// POST: salva o output completo no execution via updateOutput()
-// Responde com mensagens de chat pendentes (since last heartbeat do runner)
-```
-
-**Step 2: Commit**
-
----
-
-### Task 21: Criar POST/GET /api/agent/runner/executions/:id/chat
-
-**Objective:** Chat bidirecional entre UI web e agente rodando localmente.
-
-**Files:**
-- Create: `src/app/api/agent/runner/executions/[id]/chat/route.ts`
-
-**Step 1:**
-
-```typescript
-// POST: body { role: 'user' | 'agent', content: '...' }
-// Salva no runner_chat_messages via addChatMessage()
-
-// GET: ?since=<ISO timestamp>
-// Retorna mensagens do chat da execução
-// Se ?since fornecido, só mensagens após esse timestamp
-```
-
-**Fluxo do chat:**
-```
-1. Usuário escreve na UI web → POST /chat { role: 'user', content: 'troca hash pra bcrypt' }
-2. Runner faz GET /chat e vê a nova mensagem
-3. Runner escreve no stdin do processo (OpenCode/Hermes)
-4. Processo responde, runner captura stdout
-5. Runner faz POST /chat { role: 'agent', content: 'Ok, alterando...' }
-6. UI web faz GET /chat e vê a resposta
-```
-
-**Step 2: Commit**
-
----
-
-### Task 22: Criar GET /api/agent/runner/nodes
+### Task 6: GET /api/agent/runner/nodes
 
 **Objective:** Listar runners do tenant.
 
@@ -1354,47 +550,132 @@ const streamSchema = z.object({
 
 ---
 
-### Task 23: Atualizar documentação do Agent API (Runner endpoints)
+### Task 7: CRUD /api/agent/runner/configs
 
-**Objective:** Adicionar todos os endpoints de runner no JSON de docs.
+**Objective:** Gerenciar configs de automação (GET, POST, PATCH, DELETE).
 
 **Files:**
-- Modify: `src/app/api/agent/route.ts`
+- Create: `src/app/api/agent/runner/configs/route.ts` (GET + POST)
+- Create: `src/app/api/agent/runner/configs/[id]/route.ts` (PATCH + DELETE)
 
-**Step 1:** Adicionar no array `endpoints`:
+**Step 1:** GET — `runnerConfigRepository.findByOrg(orgId)`, opcionalmente filtrar por `?runnerNodeId=X`.
 
-```
-POST   /api/agent/runner/register
-POST   /api/agent/runner/heartbeat
-GET    /api/agent/runner/nodes
-GET    /api/agent/runner/configs
-POST   /api/agent/runner/configs
-PATCH  /api/agent/runner/configs/:id
-DELETE /api/agent/runner/configs/:id
-GET    /api/agent/runner/executions
-POST   /api/agent/runner/executions
-PATCH  /api/agent/runner/executions/:id
-POST   /api/agent/runner/executions/:id/stream
-GET    /api/agent/runner/executions/:id/chat
-POST   /api/agent/runner/executions/:id/chat
+**Step 2:** POST — valida com Zod, cria config. Campos:
+```typescript
+{
+  name: string, runnerNodeId: string, enabled?: boolean,
+  matchStatus?: string[], matchAssigneeId?: string,
+  platform?: 'opencode', model?: string, instruction?: string,
+  onDoneStatus?: string, onDoneAssigneeId?: string, onErrorStatus?: string,
+  pollingIntervalSeconds?: number, maxConcurrent?: number, timeoutMinutes?: number
+}
 ```
 
-**Step 2:** Adicionar models `RunnerNode`, `RunnerConfig`, `RunnerExecution`, `RunnerChatMessage`.
+**Step 3:** PATCH — atualiza qualquer campo. DELETE — deleta.
 
-**Step 3: Commit**
+**Step 4: Commit**
+
+---
+
+### Task 8: CRUD /api/agent/runner/executions
+
+**Objective:** Criar, listar e atualizar execuções. **Este é o endpoint mais crítico — orquestra o handoff.**
+
+**Files:**
+- Create: `src/app/api/agent/runner/executions/route.ts` (GET + POST)
+- Create: `src/app/api/agent/runner/executions/[id]/route.ts` (PATCH)
+
+**Imports necessários (PATCH handler):**
+```typescript
+import { updateTask } from '@/domain/use-cases/tasks/update-task';
+import { taskRepository, auditLogRepository, runnerExecutionRepository, runnerConfigRepository } from '@/infra/adapters/prisma';
+```
+
+**Step 1: GET** — lista execuções do org. Filtros: `?runnerNodeId=X`, `?status=Y`, `?taskId=Z`.
+
+**Step 2: POST** — cria execução. Validações:
+- **Validar que a task existe e pertence ao org:** `taskRepository.findById(taskId, orgId)` — retorna 404 se não encontrar
+- Verifica se não existe execução `running` para a mesma task (`runnerExecutionRepository.findRunningByTask(taskId)`)
+- Verifica se o config não excede `maxConcurrent` (`runnerExecutionRepository.countRunningByConfig(configId)`)
+- Cria com status `running`
+
+**Step 3: PATCH** — atualiza status/output/error. **HANDOFF AUTOMÁTICO:**
+
+```typescript
+// 1. Atualiza a execução via runnerExecutionRepository.complete()
+const execution = await runnerExecutionRepository.complete(id, {
+  status: parsed.data.status,
+  outputSummary: parsed.data.outputSummary,
+  errorMessage: parsed.data.errorMessage,
+  exitCode: parsed.data.exitCode,
+});
+
+// 2. Busca a config pra saber o que fazer no handoff
+const config = await runnerConfigRepository.findById(execution.configId);
+
+// 3. HANDOFF — só se a task existe
+if (execution.taskId && config) {
+  const updateData: Record<string, unknown> = {};
+
+  if (parsed.data.status === 'done') {
+    if (config.onDoneStatus) updateData.status = config.onDoneStatus;
+    if (config.onDoneAssigneeId) updateData.assigneeId = config.onDoneAssigneeId;
+  } else if (parsed.data.status === 'failed' && config.onErrorStatus) {
+    updateData.status = config.onErrorStatus;
+  }
+
+  if (Object.keys(updateData).length > 0) {
+    // Usar o use case (não o repository direto) pra ter audit log
+    await updateTask(
+      execution.taskId,
+      execution.orgId,
+      execution.orgId, // userId do org (runner não tem userId próprio)
+      updateData,
+      { taskRepository, auditLogRepository },
+      { source: 'runner', agentName: 'FluXo Runner' }
+    );
+  }
+}
+```
+
+**Nota sobre `updateTask`:** O use case `src/domain/use-cases/tasks/update-task.ts` já faz validação de status, audit log, e retorna a task atualizada. Usamos ele em vez de `taskRepository.update()` diretamente pra manter consistência com o resto do Agent API (ver `src/app/api/agent/tasks/[id]/route.ts:95`).
+
+**Step 4: Commit**
+
+---
+
+### Task 9: POST /api/agent/runner/executions/:id/output
+
+**Objective:** Runner envia output acumulado (últimos N chars).
+
+**Files:**
+- Create: `src/app/api/agent/runner/executions/[id]/output/route.ts`
+
+**Step 1:**
+```typescript
+const outputSchema = z.object({
+  output: z.string(),  // Output acumulado (runner faz slice dos últimos 10KB)
+});
+
+// POST: salva outputSummary via updateOutput()
+// Responde com { received: true, outputLength: number }
+```
+
+**Step 2: Commit**
 
 ---
 
 ## FASE 4: Deploy + Testes
 
-### Task 24: Deploy e testes end-to-end com curl
+### Task 10: Deploy e testes end-to-end com curl
 
 **Objective:** Validar fluxo completo.
 
 **Teste 1: Registrar runner**
 ```bash
-curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"name":"Test Runner","os":"windows","architecture":"x64","version":"0.1.0"}' \
+curl -s -X POST -H "Authorization: Bearer agk_***" -H "User-Agent: Runner/0.1.0" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Guilherme Desktop","os":"windows","architecture":"x64","version":"0.1.0"}' \
   "https://fluxo.agenda-aqui.com/api/agent/runner/register"
 ```
 
@@ -1415,12 +696,12 @@ curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application
     "matchAssigneeId": "<uuid>",
     "platform": "opencode",
     "model": "claude-sonnet-4",
-    "environment": "wsl",
-    "workdir": "/mnt/c/Users/guilh/projetos/fluxo",
-    "onDoneStatus": "QA READY",
+    "instruction": "Analise a task e implemente a solução",
+    "onDoneStatus": "REVIEW",
     "onDoneAssigneeId": "<uuid-qa>",
     "onErrorStatus": "BLOCKED",
-    "pollingIntervalSeconds": 120
+    "pollingIntervalSeconds": 60,
+    "timeoutMinutes": 30
   }' \
   "https://fluxo.agenda-aqui.com/api/agent/runner/configs"
 ```
@@ -1428,99 +709,41 @@ curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application
 **Teste 4: Criar execução**
 ```bash
 curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"configId":"<id>","runnerNodeId":"<id>","taskId":"<task-uuid>","platform":"opencode"}' \
+  -d '{"configId":"<id>","runnerNodeId":"<id>","taskId":"<task-uuid>","platform":"opencode","model":"claude-sonnet-4"}' \
   "https://fluxo.agenda-aqui.com/api/agent/runner/executions"
 ```
 
-**Teste 5: Stream output**
+**Teste 5: Enviar output**
 ```bash
 curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"output":"git checkout feature/auth\nnpm run test\n42 passing\n"}' \
-  "https://fluxo.agenda-aqui.com/api/agent/runner/executions/<id>/stream"
+  -d '{"output":"$ git checkout feature/auth\n$ npm run test\n42 passing\nDone."}' \
+  "https://fluxo.agenda-aqui.com/api/agent/runner/executions/<id>/output"
 ```
 
-**Teste 6: Finalizar + handoff automático**
+**Teste 6: Finalizar + handoff**
 ```bash
 curl -s -X PATCH -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"status":"done","output":"...full output..."}' \
+  -d '{"status":"done","outputSummary":"Implementado com sucesso. 42 testes passando."}' \
   "https://fluxo.agenda-aqui.com/api/agent/runner/executions/<id>"
 ```
 
-Verificar: a task deve ter mudado de status e assignee automaticamente.
+Verificar: task deve ter mudado de `TODO` para `REVIEW` e assignee para o QA.
 
-**Teste 7: Chat**
+**Teste 7: Verificar estado final**
 ```bash
-curl -s -X POST -H "Authorization: Bearer agk_***" -H "Content-Type: application/json" \
-  -d '{"role":"user","content":"troca o hash pra bcrypt"}' \
-  "https://fluxo.agenda-aqui.com/api/agent/runner/executions/<id>/chat"
+curl -s -H "Authorization: Bearer agk_***" \
+  "https://fluxo.agenda-aqui.com/api/agent/runner/executions?status=done" | jq .
 ```
 
 ---
 
-## FASE 5: Hermes Skill (Runner MVP — Opcional)
-
-### Task 25: Criar skill `fluxo-runner`
-
-**Objective:** Skill do Hermes que funciona como runner CLI.
-
-**Files:**
-- Create: `~/.hermes/profiles/personal/skills/fluxo-runner/SKILL.md`
-
-**Conteúdo:**
-
-```markdown
----
-name: fluxo-runner
-description: Act as a FluXo Runner — poll Agent API for tasks matching automation configs, execute with OpenCode/Hermes, and handoff.
----
-
-# FluXo Runner Skill
-
-## Overview
-Poll the FluXo Agent API for tasks that match automation configs, execute them locally with OpenCode or Hermes, stream output, and perform handoff.
-
-## Prerequisites
-- FLUXO_AGENT_KEY in environment
-- FLUXO_API_URL (default: https://fluxo.agenda-aqui.com/api/agent)
-
-## Workflow
-
-1. Register: POST /runner/register { name, os, architecture, version }
-2. Fetch configs: GET /runner/configs?runnerNodeId=<id>
-3. For each enabled config:
-   a. GET /tasks?assigneeId=<matchAssigneeId>&status=<matchStatus[0]>
-   b. Skip tasks with running executions
-   c. POST /runner/executions { configId, runnerNodeId, taskId, platform, model }
-   d. Spawn: `wsl -e opencode --model <model>` or `hermes` with task description as prompt
-   e. Stream output: POST /runner/executions/:id/stream every 5s
-   f. On completion: PATCH /runner/executions/:id { status: 'done', output: '...' }
-   g. Check chat: GET /runner/executions/:id/chat
-   h. If new user messages, write to stdin of running process
-4. Heartbeat: POST /runner/heartbeat { nodeId: <id> } every 30s
-
-## Security
-- NEVER execute arbitrary commands from the config
-- Only spawn allowlisted executables: opencode, hermes, git
-- Always set CWD to the configured workdir
-- Kill processes after 30min timeout
-
-## Environment Handling
-- If config.environment === 'wsl', prefix commands with `wsl -e`
-- Convert Windows paths to WSL paths when needed
-```
-
----
-
-## Resumo das Tabelas
+## Resumo
 
 | Tabela | Finalidade |
 |--------|-----------|
-| `runner_nodes` | Desktops conectados (nome, OS, status, heartbeat) |
+| `runner_nodes` | Desktops conectados (nome, OS, heartbeat) |
 | `runner_configs` | Regras de automação (match, execução, handoff) |
-| `runner_executions` | Histórico de runs (output, status, duração, erros) |
-| `runner_chat_messages` | Chat bidirecional durante execução |
-
-## Resumo dos Endpoints
+| `runner_executions` | Histórico de runs (output resumido, status, duração) |
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
@@ -1533,17 +756,26 @@ Poll the FluXo Agent API for tasks that match automation configs, execute them l
 | DELETE | /agent/runner/configs/:id | Deletar config |
 | GET | /agent/runner/executions | Listar execuções |
 | POST | /agent/runner/executions | Criar execução |
-| PATCH | /agent/runner/executions/:id | Atualizar (done/failed/output + handoff) |
-| POST | /agent/runner/executions/:id/stream | Stream output em tempo real |
-| GET | /agent/runner/executions/:id/chat | Buscar mensagens |
-| POST | /agent/runner/executions/:id/chat | Enviar mensagem |
+| PATCH | /agent/runner/executions/:id | Finalizar (handoff automático) |
+| POST | /agent/runner/executions/:id/output | Enviar output |
+
+**Total: 10 tasks** (vs 25 na v1)
 
 ## Segurança
 
-1. **Command Injection:** Runner NUNCA executa comandos do config. Monta internamente a partir de `platform` + `model` + `workdir`.
-2. **Allowlist:** Só aceita `opencode`, `hermes`, `git`.
-3. **Workdir scoped:** Processo nunca sai do workdir configurado.
-4. **Timeout:** Matar processo após 30 min.
-5. **Agent Key:** Criptografada no storage local (Tauri).
-6. **Scope:** Runner só acessa dados do seu tenant.
-7. **No inbound:** Runner só faz HTTPS outbound. Sem portas abertas.
+1. **Command Injection:** Runner NUNCA executa comandos do config. Monta internamente a partir de `platform` + `model`.
+2. **Allowlist:** Só aceita `opencode` como platform (v1).
+3. **Workdir scoped:** Runner configura workdir localmente, nunca no server.
+4. **Timeout:** Campo `timeoutMinutes` (default 30) — runner mata processo após timeout.
+5. **Agent Key:** Autenticação via Agent API key existente.
+6. **Scope:** Runner só acessa dados do seu tenant via `extractAgentAuth()`.
+7. **Task validation:** POST /executions valida que a task existe e pertence ao org antes de criar execução.
+8. **Concorrência:** Verifica se não há execução `running` pra mesma task (evita double-execution).
+
+## Futuro (não nesta implementação)
+
+- SSE para UI (push de updates quando nova execução é criada)
+- Chat bidirecional (stdin/stdout do processo)
+- Hermes como platform alternativa
+- Tauri desktop app
+- Dashboard UI com logs em tempo real
