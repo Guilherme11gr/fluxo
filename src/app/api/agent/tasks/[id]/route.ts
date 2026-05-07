@@ -89,6 +89,12 @@ export async function PATCH(
       Object.entries(parsed.data).filter(([k, v]) => k !== '_metadata' && k !== 'tagIds' && v !== undefined)
     );
 
+    // Handle tag assignment FIRST (validate before updating task fields)
+    // This ensures tag validation happens before any task mutation
+    if (tagIds !== undefined) {
+      await taskTagRepository.assignToTask(id, tagIds, orgId);
+    }
+
     // Update task fields (if any non-tag fields provided)
     let updated;
     if (Object.keys(updateData).length > 0) {
@@ -103,17 +109,10 @@ export async function PATCH(
         keyId,
         metadata: agentMetadata,
       });
-    } else {
-      updated = await taskRepository.findById(id, orgId);
-      if (!updated) {
-        return agentError('NOT_FOUND', 'Task not found', 404);
-      }
     }
 
-    // Handle tag assignment (replace behavior)
+    // Audit log for tag changes (best-effort, after successful operations)
     if (tagIds !== undefined) {
-      await taskTagRepository.assignToTask(id, tagIds, orgId);
-
       await auditLogRepository.log({
         orgId,
         userId,
@@ -129,12 +128,15 @@ export async function PATCH(
           authMethod,
           tagIds,
         },
-      }).catch(() => {});
+      }).catch((err) => console.error('[agent-api] Audit log failed for task.tags.set:', err));
     }
 
     // Return task with tags
     const result = await taskRepository.findByIdWithRelations(id, orgId);
-    return agentSuccess(result || updated);
+    if (!result) {
+      return agentError('NOT_FOUND', 'Task not found', 404);
+    }
+    return agentSuccess(result);
   } catch (error) {
     return handleAgentError(error);
   }
