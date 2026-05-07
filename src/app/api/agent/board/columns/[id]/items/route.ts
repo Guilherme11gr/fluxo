@@ -21,10 +21,10 @@ const createItemSchema = z.object({
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ columnId: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { columnId } = await params;
+    const { id: columnId } = await params;
     const { orgId, userId, agentName, keyPrefix, authMethod, keyId } = await extractAgentAuth();
 
     const body = await request.json();
