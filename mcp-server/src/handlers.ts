@@ -404,6 +404,109 @@ export async function handleDeleteTag(args: ToolArgs): Promise<string> {
 }
 
 // ============================================================
+// PERSONAL BOARD HANDLERS
+// ============================================================
+
+export async function handleGetBoard(): Promise<string> {
+  try {
+    const response = await apiRequest('GET', '/board');
+    const data = response.data as { columns: unknown[] };
+    const columns = data?.columns || [];
+    return formatResponse(response.data, `✅ Board loaded (${columns.length} columns)`);
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleCreateBoardColumn(args: ToolArgs): Promise<string> {
+  try {
+    const body = {
+      title: args.title,
+      color: args.color,
+    };
+    const response = await apiRequest('POST', '/board/columns', body);
+    const column = response.data as { title: string };
+    return formatResponse(response.data, `✅ Column created: "${column.title}"`);
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleUpdateBoardColumn(args: ToolArgs): Promise<string> {
+  try {
+    const id = args.id as string;
+    const { id: _, ...updateFields } = args;
+    const response = await apiRequest('PATCH', `/board/columns/${id}`, updateFields);
+    return formatResponse(response.data, '✅ Column updated');
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleDeleteBoardColumn(args: ToolArgs): Promise<string> {
+  try {
+    const id = args.id as string;
+    await apiRequest('DELETE', `/board/columns/${id}`);
+    return `✅ Column ${id} deleted (cascade)`;
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleCreateBoardItem(args: ToolArgs): Promise<string> {
+  try {
+    const columnId = args.columnId as string;
+    const body = {
+      title: args.title,
+      description: args.description,
+      priority: args.priority,
+      dueDate: args.dueDate,
+    };
+    const response = await apiRequest('POST', `/board/columns/${columnId}/items`, body);
+    const item = response.data as { title: string };
+    return formatResponse(response.data, `✅ Item created: "${item.title}"`);
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleUpdateBoardItem(args: ToolArgs): Promise<string> {
+  try {
+    const id = args.id as string;
+    const { id: _, ...updateFields } = args;
+    const response = await apiRequest('PATCH', `/board/items/${id}`, updateFields);
+    return formatResponse(response.data, '✅ Item updated');
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleDeleteBoardItem(args: ToolArgs): Promise<string> {
+  try {
+    const id = args.id as string;
+    await apiRequest('DELETE', `/board/items/${id}`);
+    return `✅ Item ${id} deleted`;
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+export async function handleReorderBoard(args: ToolArgs): Promise<string> {
+  try {
+    const body = {
+      columns: args.columns,
+      items: args.items,
+    };
+    const response = await apiRequest('POST', '/board/reorder', body);
+    const cols = (args.columns as unknown[])?.length || 0;
+    const items = (args.items as unknown[])?.length || 0;
+    return formatResponse(response.data, `✅ Board reordered (${cols} columns, ${items} items)`);
+  } catch (error) {
+    return formatError(error as ApiError);
+  }
+}
+
+// ============================================================
 // ROUTER - Maps tool names to handlers
 // ============================================================
 
@@ -443,4 +546,13 @@ export const TOOL_HANDLERS: Record<string, Handler> = {
   get_tag: handleGetTag,
   create_tag: handleCreateTag,
   delete_tag: handleDeleteTag,
+  // Personal Board
+  get_board: handleGetBoard,
+  create_board_column: handleCreateBoardColumn,
+  update_board_column: handleUpdateBoardColumn,
+  delete_board_column: handleDeleteBoardColumn,
+  create_board_item: handleCreateBoardItem,
+  update_board_item: handleUpdateBoardItem,
+  delete_board_item: handleDeleteBoardItem,
+  reorder_board: handleReorderBoard,
 };

@@ -442,6 +442,143 @@ export const deleteTagTool: Tool = {
 };
 
 // ============================================================
+// PERSONAL BOARD (8 tools)
+// ============================================================
+
+export const getBoardTool: Tool = {
+  name: 'get_board',
+  description: `Get the full personal board for the authenticated user.
+Returns all columns with their items (cards).
+Use this to see current personal tasks and organization.`,
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+export const createBoardColumnTool: Tool = {
+  name: 'create_board_column',
+  description: 'Create a new column on the personal board.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Column title (required, max 100 chars)' },
+      color: { type: 'string', description: 'Hex color (e.g. #6366f1). Optional.' },
+    },
+    required: ['title'],
+  },
+};
+
+export const updateBoardColumnTool: Tool = {
+  name: 'update_board_column',
+  description: 'Update a column title or color.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid', description: 'Column UUID' },
+      title: { type: 'string', description: 'New title (max 100 chars)' },
+      color: { type: 'string', description: 'New hex color' },
+    },
+    required: ['id'],
+  },
+};
+
+export const deleteBoardColumnTool: Tool = {
+  name: 'delete_board_column',
+  description: '⚠️ DANGER: Delete a column and ALL its items (cascade). Use with caution!',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid', description: 'Column UUID' },
+    },
+    required: ['id'],
+  },
+};
+
+export const createBoardItemTool: Tool = {
+  name: 'create_board_item',
+  description: 'Create a new item/card in a column.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      columnId: { type: 'string', format: 'uuid', description: 'Column UUID (required)' },
+      title: { type: 'string', description: 'Item title (required, max 200 chars)' },
+      description: { type: 'string', description: 'Item description (max 1000 chars)' },
+      priority: { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'], default: 'none' },
+      dueDate: { type: 'string', description: 'Due date (ISO date string, e.g. 2026-05-15)' },
+    },
+    required: ['columnId', 'title'],
+  },
+};
+
+export const updateBoardItemTool: Tool = {
+  name: 'update_board_item',
+  description: 'Update an item title, description, priority, or due date.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid', description: 'Item UUID' },
+      title: { type: 'string', description: 'New title (max 200 chars)' },
+      description: { type: 'string', description: 'New description (max 1000 chars)' },
+      priority: { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'] },
+      dueDate: { type: 'string', description: 'New due date (ISO date string)' },
+    },
+    required: ['id'],
+  },
+};
+
+export const deleteBoardItemTool: Tool = {
+  name: 'delete_board_item',
+  description: 'Delete an item/card from the board.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid', description: 'Item UUID' },
+    },
+    required: ['id'],
+  },
+};
+
+export const reorderBoardTool: Tool = {
+  name: 'reorder_board',
+  description: `Reorder columns and/or items on the board.
+Provide columns array (for column ordering), items array (for item ordering), or both.
+
+columns: [{ id, order }]
+items: [{ id, columnId, order }]`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      columns: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            order: { type: 'number', minimum: 0 },
+          },
+          required: ['id', 'order'],
+        },
+        description: 'Array of {id, order} for column reordering',
+      },
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            columnId: { type: 'string', format: 'uuid' },
+            order: { type: 'number', minimum: 0 },
+          },
+          required: ['id', 'columnId', 'order'],
+        },
+        description: 'Array of {id, columnId, order} for item reordering',
+      },
+    },
+  },
+};
+
+// ============================================================
 // EXPORT ALL TOOLS
 // ============================================================
 
@@ -479,4 +616,13 @@ export const ALL_TOOLS: Tool[] = [
   getTagTool,
   createTagTool,
   deleteTagTool,
+  // Personal Board (8)
+  getBoardTool,
+  createBoardColumnTool,
+  updateBoardColumnTool,
+  deleteBoardColumnTool,
+  createBoardItemTool,
+  updateBoardItemTool,
+  deleteBoardItemTool,
+  reorderBoardTool,
 ];

@@ -3,7 +3,7 @@
  * JT-Kill MCP Server
  * 
  * Model Context Protocol server for the JT-Kill Agent API.
- * Provides 27 tools for complete task management automation.
+ * Provides 35 tools for complete task management automation.
  * 
  * Usage:
  *   AGENT_API_KEY=agk_xxx node dist/index.js
