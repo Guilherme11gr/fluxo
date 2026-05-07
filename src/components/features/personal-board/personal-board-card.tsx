@@ -2,7 +2,7 @@
 
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { MoreHorizontal, Pencil, Trash2, Calendar } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, Calendar, Link as LinkIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { TagBadge } from '@/components/features/tags/tag-badge';
 import type { PersonalBoardItem } from './types';
 
 const PRIORITY_CONFIG = {
@@ -33,6 +34,7 @@ function formatDate(dateStr: string): string {
 interface PersonalBoardCardProps {
   item: PersonalBoardItem;
   isDragging?: boolean;
+  onDetail?: (item: PersonalBoardItem) => void;
   onEdit?: (item: PersonalBoardItem) => void;
   onDelete?: (item: PersonalBoardItem) => void;
 }
@@ -40,6 +42,7 @@ interface PersonalBoardCardProps {
 export function PersonalBoardCard({
   item,
   isDragging: isDraggingProp,
+  onDetail,
   onEdit,
   onDelete,
 }: PersonalBoardCardProps) {
@@ -65,7 +68,14 @@ export function PersonalBoardCard({
         (isDragging || isDraggingProp) && 'z-50 cursor-grabbing'
       )}
     >
-      <div className="relative group rounded-lg bg-card border shadow-sm hover:shadow-md transition p-3">
+      <div
+        className="relative group rounded-lg bg-card border shadow-sm hover:shadow-md transition p-3 cursor-pointer"
+        onClick={(e) => {
+          // Don't open detail if user is selecting text or interacting with dropdown
+          if (e.defaultPrevented) return;
+          onDetail?.(item);
+        }}
+      >
         {/* Title */}
         <p className="font-medium text-sm leading-snug pr-6">{item.title}</p>
 
@@ -78,6 +88,12 @@ export function PersonalBoardCard({
 
         {/* Badges row */}
         <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+          {item.tags && item.tags.length > 0 && item.tags.slice(0, 2).map((tag) => (
+            <TagBadge key={tag.id} tag={tag} size="sm" />
+          ))}
+          {item.tags && item.tags.length > 2 && (
+            <span className="text-[10px] text-muted-foreground">+{item.tags.length - 2}</span>
+          )}
           {item.priority !== 'none' && priorityCfg.label && (
             <span
               className={cn(
@@ -94,10 +110,19 @@ export function PersonalBoardCard({
               {formatDate(item.dueDate)}
             </span>
           )}
+          {item.linkedTaskId && (
+            <span className="text-[10px] px-1.5 py-0 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-medium flex items-center gap-1">
+              <LinkIcon className="w-2.5 h-2.5" />
+              Task
+            </span>
+          )}
         </div>
 
         {/* Action menu */}
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity data-[state=open]:opacity-100">
+        <div
+          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity data-[state=open]:opacity-100"
+          onClick={(e) => e.stopPropagation()}
+        >
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7">

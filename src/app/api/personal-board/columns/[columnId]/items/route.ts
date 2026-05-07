@@ -13,6 +13,7 @@ const createItemSchema = z.object({
   description: z.string().max(1000, 'Descrição deve ter no máximo 1000 caracteres').optional(),
   priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
   dueDate: z.string().min(1, 'Data inválida').optional().nullable(),
+  linkedTaskId: z.string().uuid().optional().nullable(),
 });
 
 export async function POST(

@@ -1,7 +1,7 @@
 'use client';
 
 import { useDroppable } from '@dnd-kit/core';
-import { Plus, Pencil, Trash2, X, Check, GripVertical } from 'lucide-react';
+import { Plus, Trash2, X, Check } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import type { PersonalBoardColumn, PersonalBoardItem } from './types';
 interface PersonalBoardColumnProps {
   column: PersonalBoardColumn;
   onAddItem: (columnId: string) => void;
+  onDetailItem: (item: PersonalBoardItem) => void;
   onEditItem: (item: PersonalBoardItem) => void;
   onDeleteItem: (item: PersonalBoardItem) => void;
   onEditColumnTitle: (columnId: string, title: string) => void;
@@ -20,6 +21,7 @@ interface PersonalBoardColumnProps {
 export function PersonalBoardColumn({
   column,
   onAddItem,
+  onDetailItem,
   onEditItem,
   onDeleteItem,
   onEditColumnTitle,
@@ -164,6 +166,7 @@ export function PersonalBoardColumn({
           <PersonalBoardCard
             key={item.id}
             item={item}
+            onDetail={onDetailItem}
             onEdit={onEditItem}
             onDelete={onDeleteItem}
           />

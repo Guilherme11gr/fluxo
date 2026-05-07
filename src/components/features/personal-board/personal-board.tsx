@@ -16,12 +16,13 @@ import {
 } from '@dnd-kit/core';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { Plus, Kanban as KanbanIcon, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { PersonalBoardColumn } from './personal-board-column';
 import { PersonalBoardCard } from './personal-board-card';
 import { PersonalBoardItemModal } from './personal-board-item-modal';
-import type { PersonalBoardColumn as BoardColumn, PersonalBoardItem } from './types';
+import { PersonalBoardDetailModal } from './personal-board-detail-modal';
+import { PersonalBoardLinkTaskModal } from './personal-board-link-task-modal';
+import type { PersonalBoardColumn as BoardColumn, PersonalBoardItem, PersonalBoardTagInfo } from './types';
 
 // ---- Default column colors ----
 const COLUMN_COLORS = [
@@ -47,6 +48,16 @@ export function PersonalBoard() {
   const [modalColumnId, setModalColumnId] = useState('');
   const [editingItem, setEditingItem] = useState<PersonalBoardItem | null>(null);
 
+  // Detail modal state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState<PersonalBoardItem | null>(null);
+
+  // Personal tags state
+  const [availableTags, setAvailableTags] = useState<PersonalBoardTagInfo[]>([]);
+
+  // Link task modal state
+  const [linkTaskOpen, setLinkTaskOpen] = useState(false);
+
   // New column input
   const [showNewColumnInput, setShowNewColumnInput] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState('');
@@ -70,7 +81,18 @@ export function PersonalBoard() {
       if (!res.ok) throw new Error('Failed to fetch board');
       const json = await res.json();
       const columnsData = json.data?.columns || json.data || json.columns || [];
-      setColumns(Array.isArray(columnsData) ? columnsData : []);
+      const normalized: BoardColumn[] = Array.isArray(columnsData)
+        ? columnsData.map((col: BoardColumn & { items: (PersonalBoardItem & { tagAssignments?: { tag: { id: string; name: string; color: string } }[] })[] }) => ({
+            ...col,
+            items: col.items.map((item) => ({
+              ...item,
+              tags: Array.isArray(item.tagAssignments)
+                ? item.tagAssignments.map((a) => a.tag)
+                : [],
+            })),
+          }))
+        : [];
+      setColumns(normalized);
     } catch {
       toast.error('Erro ao carregar o quadro.');
     } finally {
@@ -81,6 +103,78 @@ export function PersonalBoard() {
   useEffect(() => {
     fetchBoard();
   }, [fetchBoard]);
+
+  // ---- Fetch personal tags ----
+  const fetchTags = useCallback(async () => {
+    try {
+      const res = await fetch('/api/personal-board/tags');
+      if (!res.ok) return;
+      const json = await res.json();
+      setAvailableTags(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      // Silent fail - tags are optional
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTags();
+  }, [fetchTags]);
+
+  const handleCreateTag = useCallback(async (input: { name: string; color: string }): Promise<PersonalBoardTagInfo> => {
+    const res = await fetch('/api/personal-board/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error('Failed to create tag');
+    const json = await res.json();
+    const newTag = json.data as PersonalBoardTagInfo;
+    setAvailableTags((prev) => [...prev, newTag].sort((a, b) => a.name.localeCompare(b.name)));
+    return newTag;
+  }, []);
+
+  // ---- Link task handlers ----
+  const handleLinkTask = useCallback(async (taskId: string) => {
+    if (!detailItem) return;
+    const res = await fetch(`/api/personal-board/items/${detailItem.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linkedTaskId: taskId }),
+    });
+    if (!res.ok) throw new Error('Failed to link task');
+
+    setColumns((prev) =>
+      prev.map((c) => ({
+        ...c,
+        items: c.items.map((i) =>
+          i.id === detailItem.id ? { ...i, linkedTaskId: taskId } : i
+        ),
+      }))
+    );
+    setDetailItem((prev) => prev ? { ...prev, linkedTaskId: taskId } : null);
+    toast.success('Task vinculada.');
+  }, [detailItem]);
+
+  const handleUnlinkTask = useCallback(async () => {
+    if (!detailItem) return;
+    const res = await fetch(`/api/personal-board/items/${detailItem.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linkedTaskId: null }),
+    });
+    if (!res.ok) throw new Error('Failed to unlink task');
+
+    setColumns((prev) =>
+      prev.map((c) => ({
+        ...c,
+        items: c.items.map((i) =>
+          i.id === detailItem.id ? { ...i, linkedTaskId: null } : i
+        ),
+      }))
+    );
+    setDetailItem((prev) => prev ? { ...prev, linkedTaskId: null } : null);
+    toast.success('Task desvinculada.');
+  }, [detailItem]);
 
   // ---- Item map for quick lookup ----
   const itemsMap = useMemo(() => {
@@ -330,6 +424,11 @@ export function PersonalBoard() {
   };
 
   // ---- Item actions ----
+  const handleOpenDetail = (item: PersonalBoardItem) => {
+    setDetailItem(item);
+    setDetailOpen(true);
+  };
+
   const handleOpenAddItem = (columnId: string) => {
     setEditingItem(null);
     setModalColumnId(columnId);
@@ -366,36 +465,90 @@ export function PersonalBoard() {
     description?: string;
     priority?: string;
     dueDate?: string;
+    tagIds?: string[];
   }) => {
+    const { tagIds, ...itemData } = data;
+
     if (editingItem) {
       // Update existing
       const res = await fetch(`/api/personal-board/items/${editingItem.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(itemData),
       });
       if (!res.ok) throw new Error('Failed to update item');
+
+      // Assign tags if provided (non-blocking: item is already saved)
+      let tagsFailed = false;
+      if (tagIds !== undefined) {
+        const tagRes = await fetch(`/api/personal-board/items/${editingItem.id}/tags`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tagIds }),
+        });
+        if (!tagRes.ok) tagsFailed = true;
+      }
+
+      // Optimistic update
+      const updatedTags = tagIds !== undefined && !tagsFailed
+        ? availableTags.filter((t) => tagIds.includes(t.id))
+        : editingItem.tags || [];
+
       setColumns((prev) =>
         prev.map((c) =>
           c.id === editingItem.columnId
             ? {
                 ...c,
                 items: c.items.map((i) =>
-                  i.id === editingItem.id ? { ...i, ...data, priority: data.priority as PersonalBoardItem['priority'] } : i
+                  i.id === editingItem.id
+                    ? { ...i, ...itemData, priority: itemData.priority as PersonalBoardItem['priority'], tags: updatedTags }
+                    : i
                 ),
               }
             : c
         )
       );
-      toast.success('Item atualizado.');
+
+      // Update detail item if it's the same
+      if (detailItem?.id === editingItem.id) {
+        setDetailItem((prev) => prev ? {
+          ...prev,
+          ...itemData,
+          priority: itemData.priority as PersonalBoardItem['priority'],
+          tags: updatedTags,
+        } : null);
+      }
+
+      if (tagsFailed) {
+        toast.warning('Item atualizado, mas houve erro ao salvar as tags.');
+      } else {
+        toast.success('Item atualizado.');
+      }
     } else {
       // Create new
       const res = await fetch(`/api/personal-board/columns/${modalColumnId}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(itemData),
       });
       if (!res.ok) throw new Error('Failed to create item');
+      const json = await res.json();
+      const newItem = json.data;
+
+      // Assign tags to new item (non-blocking: item is already created)
+      if (tagIds && tagIds.length > 0 && newItem?.id) {
+        const tagRes = await fetch(`/api/personal-board/items/${newItem.id}/tags`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tagIds }),
+        });
+        if (!tagRes.ok) {
+          await fetchBoard();
+          toast.warning('Item criado, mas houve erro ao salvar as tags.');
+          return;
+        }
+      }
+
       await fetchBoard();
       toast.success('Item criado.');
     }
@@ -441,6 +594,7 @@ export function PersonalBoard() {
                     key={column.id}
                     column={column}
                     onAddItem={handleOpenAddItem}
+                    onDetailItem={handleOpenDetail}
                     onEditItem={handleOpenEditItem}
                     onDeleteItem={handleDeleteItem}
                     onEditColumnTitle={handleEditColumnTitle}
@@ -523,7 +677,32 @@ export function PersonalBoard() {
         onOpenChange={setModalOpen}
         item={editingItem}
         columnId={modalColumnId}
+        availableTags={availableTags}
+        onCreateTag={handleCreateTag}
         onSave={handleSaveItem}
+      />
+
+      {/* Detail modal */}
+      <PersonalBoardDetailModal
+        item={detailItem}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onEdit={(item) => {
+          setEditingItem(item);
+          setModalColumnId(item.columnId);
+          setModalOpen(true);
+        }}
+        onDelete={handleDeleteItem}
+        onOpenLinkTask={() => setLinkTaskOpen(true)}
+      />
+
+      {/* Link task modal */}
+      <PersonalBoardLinkTaskModal
+        open={linkTaskOpen}
+        onOpenChange={setLinkTaskOpen}
+        currentLinkedTaskId={detailItem?.linkedTaskId}
+        onLink={handleLinkTask}
+        onUnlink={handleUnlinkTask}
       />
     </div>
   );

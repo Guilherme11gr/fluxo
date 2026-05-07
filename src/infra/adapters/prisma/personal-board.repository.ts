@@ -19,9 +19,11 @@ export interface PersonalBoardItem {
   description: string | null;
   priority: string | null;
   dueDate: Date | null;
+  linkedTaskId: string | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
+  tagAssignments?: { tag: { id: string; name: string; color: string } }[];
 }
 
 export interface CreateColumnInput {
@@ -43,6 +45,7 @@ export interface CreateItemInput {
   description?: string;
   priority?: string;
   dueDate?: string | Date | null;
+  linkedTaskId?: string | null;
 }
 
 export interface UpdateItemInput {
@@ -50,6 +53,7 @@ export interface UpdateItemInput {
   description?: string | null;
   priority?: string | null;
   dueDate?: string | Date | null;
+  linkedTaskId?: string | null;
   columnId?: string;
   order?: number;
 }
@@ -77,6 +81,15 @@ export class PersonalBoardRepository {
       include: {
         items: {
           orderBy: { order: 'asc' },
+          include: {
+            tagAssignments: {
+              include: {
+                tag: {
+                  select: { id: true, name: true, color: true },
+                },
+              },
+            },
+          },
         },
       },
       orderBy: { order: 'asc' },
@@ -144,6 +157,7 @@ export class PersonalBoardRepository {
         description: data.description,
         priority: data.priority,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
+        linkedTaskId: data.linkedTaskId ?? null,
         order: (maxOrder._max.order ?? -1) + 1,
       },
     });

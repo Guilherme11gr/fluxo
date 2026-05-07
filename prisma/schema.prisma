@@ -33,6 +33,7 @@ model Organization {
   tasks                Task[]
   userProfiles         UserProfile[]
   personalBoardColumns PersonalBoardColumn[]
+  personalBoardTags    PersonalBoardItemTag[]
   personalNotes        PersonalNote[]
 
   @@index([slug], map: "idx_organizations_slug")
@@ -96,6 +97,7 @@ model UserProfile {
   users                 users         @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organization          Organization? @relation(fields: [orgId], references: [id], onUpdate: NoAction)
   personalBoardColumns  PersonalBoardColumn[]
+  personalBoardTags     PersonalBoardItemTag[]
   personalNotes         PersonalNote[]
 
   @@map("user_profiles")
@@ -1137,14 +1139,51 @@ model PersonalBoardItem {
   description  String?
   priority     String?
   dueDate      DateTime?             @map("due_date") @db.Timestamptz(6)
+  linkedTaskId String?               @map("linked_task_id") @db.Uuid
   order        Int                   @default(0)
   createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   column       PersonalBoardColumn   @relation(fields: [columnId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tagAssignments PersonalBoardItemTagAssignment[]
 
   @@index([columnId], map: "idx_personal_board_items_column")
   @@index([columnId, order], map: "idx_personal_board_items_column_order")
+  @@index([linkedTaskId], map: "idx_personal_board_items_linked_task")
   @@map("personal_board_items")
+  @@schema("public")
+}
+
+model PersonalBoardItemTag {
+  id             String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId          String                          @map("org_id") @db.Uuid
+  userId         String                          @map("user_id") @db.Uuid
+  name           String
+  color          String                          @default("#6366f1")
+  createdAt      DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization                    @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user           UserProfile                     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  itemAssignments PersonalBoardItemTagAssignment[]
+
+  @@unique([userId, name], map: "uq_personal_board_tags_user_name")
+  @@index([orgId], map: "idx_personal_board_tags_org")
+  @@index([userId], map: "idx_personal_board_tags_user")
+  @@map("personal_board_item_tags")
+  @@schema("public")
+}
+
+model PersonalBoardItemTagAssignment {
+  id        String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId    String                 @map("item_id") @db.Uuid
+  tagId     String                 @map("tag_id") @db.Uuid
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  item      PersonalBoardItem      @relation(fields: [itemId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tag       PersonalBoardItemTag   @relation(fields: [tagId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([itemId, tagId], map: "uq_personal_board_item_tag_assignments_item_tag")
+  @@index([itemId], map: "idx_pb_item_tag_assignments_item")
+  @@index([tagId], map: "idx_pb_item_tag_assignments_tag")
+  @@map("personal_board_item_tag_assignments")
   @@schema("public")
 }
 

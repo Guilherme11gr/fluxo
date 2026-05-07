@@ -20,18 +20,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import type { PersonalBoardItem } from './types';
+import { PersonalTagSelector } from './personal-tag-selector';
+import type { PersonalBoardItem, PersonalBoardTagInfo } from './types';
 
 interface PersonalBoardItemModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   item?: PersonalBoardItem | null;
   columnId: string;
+  availableTags: PersonalBoardTagInfo[];
+  onCreateTag: (input: { name: string; color: string }) => Promise<PersonalBoardTagInfo>;
   onSave: (data: {
     title: string;
     description?: string;
     priority?: string;
     dueDate?: string;
+    tagIds?: string[];
   }) => Promise<void>;
 }
 
@@ -40,12 +44,15 @@ export function PersonalBoardItemModal({
   onOpenChange,
   item,
   columnId,
+  availableTags,
+  onCreateTag,
   onSave,
 }: PersonalBoardItemModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<string>('none');
   const [dueDate, setDueDate] = useState('');
+  const [selectedTags, setSelectedTags] = useState<PersonalBoardTagInfo[]>([]);
   const [saving, setSaving] = useState(false);
 
   const isEditing = !!item;
@@ -57,11 +64,13 @@ export function PersonalBoardItemModal({
         setDescription(item.description || '');
         setPriority(item.priority || 'none');
         setDueDate(item.dueDate ? item.dueDate.split('T')[0] : '');
+        setSelectedTags(item.tags || []);
       } else {
         setTitle('');
         setDescription('');
         setPriority('none');
         setDueDate('');
+        setSelectedTags([]);
       }
       setSaving(false);
     }
@@ -81,6 +90,7 @@ export function PersonalBoardItemModal({
         description: description.trim() || undefined,
         priority: priority,
         dueDate: dueDate || undefined,
+        tagIds: selectedTags.map((t) => t.id),
       });
       onOpenChange(false);
     } catch {
@@ -155,6 +165,18 @@ export function PersonalBoardItemModal({
                 onChange={(e) => setDueDate(e.target.value)}
               />
             </div>
+          </div>
+
+          {/* Tags */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Tags pessoais</label>
+            <PersonalTagSelector
+              selectedTags={selectedTags}
+              onTagsChange={setSelectedTags}
+              availableTags={availableTags}
+              onCreateTag={onCreateTag}
+              placeholder="Adicionar tags..."
+            />
           </div>
         </div>
 
