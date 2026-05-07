@@ -2,12 +2,16 @@
  * DocSearch Repository - Full-text search for project docs
  *
  * Combines two PostgreSQL techniques in a single query:
- * - tsvector + GIN index: semantic matching with Portuguese stemming
+ * - tsvector + GIN index: semantic matching with Portuguese stemming + unaccent
  * - pg_trgm: typo tolerance on titles
  *
  * Both run in parallel via OR in the WHERE clause — no fallback, no 2 queries.
  * Ranking: (ts_rank * 2) + similarity — tsvector resolves semantic match,
  * trgm catches typos that tsvector misses.
+ *
+ * Text search config: 'public.portuguese_unaccent' (custom, created by migration)
+ * - Applies unaccent filter BEFORE stemming, so "migracao" matches "migração"
+ * - Uses websearch_to_tsquery for OR between terms (better for RAG)
  */
 import type { PrismaClient } from '@prisma/client';
 import { Prisma } from '@prisma/client';
@@ -36,6 +40,10 @@ export class DocSearchRepository {
    *
    * ts_headline extracts a snippet from content when tsvector matched,
    * falls back to content slice when only trgm matched.
+   *
+   * websearch_to_tsquery uses OR between terms by default:
+   *   "waitlist capacity" → waitlist | capacity (matches either)
+   *   Use quotes for exact: '"waitlist capacity"' (matches phrase)
    */
   async search(
     orgId: string,
@@ -48,30 +56,28 @@ export class DocSearchRepository {
       ? Prisma.sql`AND d.project_id = ${options.projectId}::uuid`
       : Prisma.empty;
 
-    const tsQuery = `plainto_tsquery('portuguese', '${query.replace(/'/g, "''")}')`;
-
     return this.prisma.$queryRaw<DocSearchResult[]>`
       SELECT
         d.id,
         d.title,
         CASE
-          WHEN d.search_vector @@ plainto_tsquery('portuguese', ${query})
+          WHEN d.search_vector @@ websearch_to_tsquery('public.portuguese_unaccent', ${query})
             THEN ts_headline(
-              'portuguese',
+              'public.portuguese_unaccent',
               d.content,
-              plainto_tsquery('portuguese', ${query}),
+              websearch_to_tsquery('public.portuguese_unaccent', ${query}),
               'MaxFragments=3, MaxWords=30, MinWords=10, StartSel=<<, StopSel=>>'
             )
           ELSE left(d.content, 300) || '...'
         END as snippet,
-        (ts_rank(d.search_vector, plainto_tsquery('portuguese', ${query})) * 2
+        (ts_rank(d.search_vector, websearch_to_tsquery('public.portuguese_unaccent', ${query})) * 2
           + similarity(d.title, ${query})) as rank,
         d.project_id as "projectId",
         d.updated_at as "updatedAt"
       FROM public.project_docs d
       WHERE d.org_id = ${orgId}::uuid
         AND (
-          d.search_vector @@ plainto_tsquery('portuguese', ${query})
+          d.search_vector @@ websearch_to_tsquery('public.portuguese_unaccent', ${query})
           OR d.title % ${query}
         )
         ${projectFilter}
