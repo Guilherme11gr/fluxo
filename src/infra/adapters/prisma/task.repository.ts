@@ -334,6 +334,13 @@ export class TaskRepository {
             },
           },
         },
+        tagAssignments: {
+          select: {
+            tag: {
+              select: { id: true, name: true, color: true },
+            },
+          },
+        },
         comments: {
           orderBy: { createdAt: 'desc' },
           take: 20,
@@ -355,6 +362,7 @@ export class TaskRepository {
         task.feature.epic.project.key,
         task.localId
       ),
+      tags: task.tagAssignments?.map((a) => a.tag) || [],
       assignee: task.assignee?.user_profiles ? {
         displayName: task.assignee.user_profiles.displayName,
         avatarUrl: task.assignee.user_profiles.avatarUrl,

@@ -10,7 +10,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { taskRepository, auditLogRepository } from '@/infra/adapters/prisma';
+import { taskRepository, taskTagRepository, auditLogRepository } from '@/infra/adapters/prisma';
 import { updateTask } from '@/domain/use-cases/tasks/update-task';
 
 export const dynamic = 'force-dynamic';
@@ -56,6 +56,7 @@ const updateTaskSchema = z.object({
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE']).optional(),
   blocked: z.boolean().optional(),
   assigneeId: z.string().uuid().nullable().optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
   // Agent-provided metadata (optional)
   _metadata: agentMetadataSchema,
 });
@@ -81,30 +82,59 @@ export async function PATCH(
 
     // Extract metadata before filtering
     const agentMetadata = parsed.data._metadata;
+    const tagIds = parsed.data.tagIds;
 
-    // Filter out undefined values and _metadata
+    // Filter out undefined values, _metadata, and tagIds
     const updateData = Object.fromEntries(
-      Object.entries(parsed.data).filter(([k, v]) => k !== '_metadata' && v !== undefined)
+      Object.entries(parsed.data).filter(([k, v]) => k !== '_metadata' && k !== 'tagIds' && v !== undefined)
     );
 
-    if (Object.keys(updateData).length === 0) {
-      return agentError('VALIDATION_ERROR', 'No fields to update', 400);
+    // Update task fields (if any non-tag fields provided)
+    let updated;
+    if (Object.keys(updateData).length > 0) {
+      updated = await updateTask(id, orgId, userId, updateData, { 
+        taskRepository,
+        auditLogRepository
+      }, {
+        source: 'agent',
+        agentName,
+        keyPrefix,
+        authMethod,
+        keyId,
+        metadata: agentMetadata,
+      });
+    } else {
+      updated = await taskRepository.findById(id, orgId);
+      if (!updated) {
+        return agentError('NOT_FOUND', 'Task not found', 404);
+      }
     }
 
-    // Use updateTask use case with agent context for rich audit logs
-    const updated = await updateTask(id, orgId, userId, updateData, { 
-      taskRepository,
-      auditLogRepository
-    }, {
-      source: 'agent',
-      agentName,
-      keyPrefix,
-      authMethod,
-      keyId,
-      metadata: agentMetadata,
-    });
+    // Handle tag assignment (replace behavior)
+    if (tagIds !== undefined) {
+      await taskTagRepository.assignToTask(id, tagIds, orgId);
 
-    return agentSuccess(updated);
+      await auditLogRepository.log({
+        orgId,
+        userId,
+        action: 'task.tags.set',
+        targetType: 'task',
+        targetId: id,
+        actorType: 'agent',
+        clientId: keyId,
+        metadata: {
+          source: 'agent',
+          agentName,
+          keyPrefix,
+          authMethod,
+          tagIds,
+        },
+      }).catch(() => {});
+    }
+
+    // Return task with tags
+    const result = await taskRepository.findByIdWithRelations(id, orgId);
+    return agentSuccess(result || updated);
   } catch (error) {
     return handleAgentError(error);
   }
