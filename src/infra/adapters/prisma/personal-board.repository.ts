@@ -216,8 +216,8 @@ export class PersonalBoardRepository {
     await this.prisma.$transaction(
       data.items.map((item) =>
         this.prisma.personalBoardItem.updateMany({
-          where: { id: item.id, columnId: item.columnId },
-          data: { order: item.order },
+          where: { id: item.id },
+          data: { order: item.order, columnId: item.columnId },
         })
       )
     );
