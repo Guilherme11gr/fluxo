@@ -1,19 +1,17 @@
 /**
- * Agent API - Doc Tags List & Create
- * 
+ * Agent API - Task Tags List & Create
+ *
  * GET /api/agent/tags - List tags for a project
- * POST /api/agent/tags - Create a new tag
+ * POST /api/agent/tags - Create a new tag (with optional color)
  */
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentList, agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { docTagRepository, projectRepository, auditLogRepository } from '@/infra/adapters/prisma';
+import { taskTagRepository, auditLogRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
-
-// ============ GET - List Tags ============
 
 const listQuerySchema = z.object({
   projectId: z.string().uuid(),
@@ -36,7 +34,7 @@ export async function GET(request: NextRequest) {
 
     const { projectId, limit } = query.data;
 
-    const tags = await docTagRepository.findByProjectId(projectId, orgId);
+    const tags = await taskTagRepository.findByProject(projectId, orgId);
     const limited = tags.slice(0, limit);
 
     return agentList(limited, tags.length);
@@ -45,11 +43,10 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// ============ POST - Create Tag ============
-
 const createTagSchema = z.object({
   name: z.string().min(1, 'Name is required').max(50, 'Name too long'),
   projectId: z.string().uuid('Invalid project ID'),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -63,24 +60,17 @@ export async function POST(request: NextRequest) {
       return agentError('VALIDATION_ERROR', parsed.error.issues[0].message, 400);
     }
 
-    const { name, projectId } = parsed.data;
+    const { name, projectId, color } = parsed.data;
 
-    // Verify project exists
-    const project = await projectRepository.findById(projectId, orgId);
-    if (!project) {
-      return agentError('NOT_FOUND', 'Project not found', 404);
-    }
-
-    // Check for duplicate name
-    const existing = await docTagRepository.findByName(name, projectId, orgId);
-    if (existing) {
+    const existing = await taskTagRepository.findByProject(projectId, orgId);
+    if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
       return agentError('CONFLICT', 'Tag with this name already exists', 409);
     }
 
-    const tag = await docTagRepository.create({
+    const tag = await taskTagRepository.create(orgId, {
       name,
       projectId,
-      orgId,
+      color: color ?? '#6366f1',
     });
 
     await auditLogRepository.log({
