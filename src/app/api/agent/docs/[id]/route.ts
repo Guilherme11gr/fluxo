@@ -10,7 +10,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { projectDocRepository, auditLogRepository } from '@/infra/adapters/prisma';
+import { projectDocRepository, auditLogRepository, docChunksRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,6 +81,16 @@ export async function PATCH(
     }
 
     const updated = await projectDocRepository.update(id, orgId, updateData);
+
+    // Re-index chunks if title or content changed (fire-and-forget)
+    if (updateData.title !== undefined || updateData.content !== undefined) {
+      const freshDoc = await projectDocRepository.findById(id, orgId);
+      if (freshDoc) {
+        docChunksRepository.indexDoc(id, orgId, freshDoc.title, freshDoc.content || '').catch((err) => {
+          console.error('[Agent Docs] Chunk re-indexing failed for doc', id, err);
+        });
+      }
+    }
 
     await auditLogRepository.log({
       orgId,

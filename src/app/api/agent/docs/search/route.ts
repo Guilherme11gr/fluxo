@@ -1,24 +1,27 @@
 /**
  * Agent API - Doc Search
  *
- * GET /api/agent/docs/search - Full-text search across docs content
+ * GET /api/agent/docs/search - Hybrid search across docs content
  *
- * Combines tsvector (Portuguese stemming) with pg_trgm (typo tolerance)
- * in a single query. Results ranked by (ts_rank * 2) + similarity.
+ * Uses pg_vector cosine similarity (semantic) + tsvector (keyword)
+ * in a single query. Returns top chunks (~500 chars each) instead of
+ * full docs to minimize token consumption.
+ *
+ * Ranking: (ts_rank * 2) + (1 - cosine_distance) * 3
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { docSearchRepository } from '@/infra/adapters/prisma';
+import { docChunksRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
 const searchQuerySchema = z.object({
   q: z.string().min(2, 'Query must be at least 2 characters'),
   projectId: z.string().uuid().optional(),
-  limit: z.coerce.number().min(1).max(50).default(10),
+  limit: z.coerce.number().min(1).max(50).default(5),
 });
 
 export async function GET(request: NextRequest) {
@@ -29,7 +32,7 @@ export async function GET(request: NextRequest) {
     const query = searchQuerySchema.safeParse({
       q: searchParams.get('q'),
       projectId: searchParams.get('projectId') || undefined,
-      limit: searchParams.get('limit') || 10,
+      limit: searchParams.get('limit') || 5,
     });
 
     if (!query.success) {
@@ -38,7 +41,7 @@ export async function GET(request: NextRequest) {
 
     const { q, projectId, limit } = query.data;
 
-    const results = await docSearchRepository.search(orgId, q, {
+    const results = await docChunksRepository.hybridSearch(orgId, q, {
       projectId,
       limit,
     });

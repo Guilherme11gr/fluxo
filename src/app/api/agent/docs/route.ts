@@ -9,7 +9,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentList, agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { projectDocRepository, projectRepository, auditLogRepository } from '@/infra/adapters/prisma';
+import { projectDocRepository, projectRepository, auditLogRepository, docChunksRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +77,11 @@ export async function POST(request: NextRequest) {
       projectId,
       content,
       orgId,
+    });
+
+    // Index chunks for semantic search (fire-and-forget, non-blocking)
+    docChunksRepository.indexDoc(doc.id, orgId, title, content).catch((err) => {
+      console.error('[Agent Docs] Chunk indexing failed for new doc', doc.id, err);
     });
 
     await auditLogRepository.log({
