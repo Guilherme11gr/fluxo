@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, History, User, ChevronRight, Crown, Building2, Bot } from "lucide-react";
+import { Users, History, User, ChevronRight, Crown, Building2, Bot, Server } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useWorkspaceCTA } from "@/hooks/useWorkspaceCTA";
 import { CreateWorkspaceCTAModal } from "@/components/features/workspace-cta/CreateWorkspaceCTAModal";
@@ -22,6 +22,13 @@ export default function SettingsPage() {
   const { activeTab, setActiveTab } = useTabQuery<Tab>("geral", [...TABS]);
 
   const settingsLinks = [
+    {
+      title: "Runners",
+      description: "Configure agents e runners",
+      href: "/settings/runners",
+      icon: Server,
+      visible: true,
+    },
     {
       title: "Equipe",
       description: "Gerencie membros e convites",

@@ -134,6 +134,13 @@ export const queryKeys = {
     all: (orgId: string) => [...orgKey(orgId), 'invites'] as const,
     list: (orgId: string) => [...queryKeys.invites.all(orgId), 'list'] as const,
   },
+
+  // ============ AGENTS ============
+  agents: {
+    all: (orgId: string) => [...orgKey(orgId), 'agents'] as const,
+    list: (orgId: string) => [...queryKeys.agents.all(orgId), 'list'] as const,
+    detail: (orgId: string, id: string) => [...queryKeys.agents.all(orgId), 'detail', id] as const,
+  },
 } as const;
 
 // Type helper for extracting query key types
