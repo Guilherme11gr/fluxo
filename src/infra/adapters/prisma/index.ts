@@ -19,6 +19,7 @@ import { PersonalBoardTagRepository } from './personal-board-tag.repository';
 import { PersonalNoteRepository } from './personal-note.repository';
 import { DocSearchRepository } from './doc-search.repository';
 import { DocChunksRepository } from './doc-chunks.repository';
+import { AgentRepository } from './agent.repository';
 
 // Singleton Prisma Client
 // https://www.prisma.io/docs/guides/performance-and-optimization/connection-management#prismaclient-in-long-running-applications
@@ -82,6 +83,7 @@ export const personalBoardTagRepository = new PersonalBoardTagRepository(prisma)
 export const personalNoteRepository = new PersonalNoteRepository(prisma);
 export const docSearchRepository = new DocSearchRepository(prisma);
 export const docChunksRepository = new DocChunksRepository(prisma);
+export const agentRepository = new AgentRepository(prisma);
 
 // Re-export for convenience
 export {
