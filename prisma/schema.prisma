@@ -32,6 +32,7 @@ model Organization {
   projectTags          ProjectTag[]
   projects             Project[]
   tasks                Task[]
+  executions           AgentExecution[]
   userProfiles         UserProfile[]
   personalBoardColumns PersonalBoardColumn[]
   personalBoardTags    PersonalBoardItemTag[]
@@ -90,6 +91,7 @@ model Agent {
   createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  executions    AgentExecution[]
 
   @@unique([orgId, name])
   @@index([orgId, status], map: "idx_agents_org_status")
@@ -207,7 +209,7 @@ model Project {
   projectDocs     ProjectDoc[]
   projectNotes    ProjectNote[]
   projectTags     ProjectTag[]
-  kaiCommands     KaiCommand[]
+  executions      AgentExecution[]
   creator         users?        @relation("ProjectCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
   organization    Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tasks           Task[]
@@ -383,7 +385,7 @@ model Task {
   comments        Comment[]
   pokerSession    PokerSession?
   tagAssignments  TaskTagAssignment[]
-  kaiCommands     KaiCommand[]
+  executions      AgentExecution[]
   assignee        users?              @relation("TaskAssignee", fields: [assigneeId], references: [id], onUpdate: NoAction)
   creator         users?              @relation("TaskCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
   feature         Feature             @relation(fields: [featureId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1006,27 +1008,38 @@ model KaiMessage {
   @@schema("public")
 }
 
-model KaiCommand {
-  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  projectId      String           @map("project_id") @db.Uuid
-  taskId         String           @map("task_id") @db.Uuid
-  commandType    KaiCommandType   @map("command_type")
-  status         KaiCommandStatus @default(PENDING)
-  output         String?
-  resultSummary  String?          @map("result_summary")
-  branchName     String?          @map("branch_name")
-  prUrl          String?          @map("pr_url")
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  
-  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  task           Task             @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+model AgentExecution {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId           String           @map("org_id") @db.Uuid
+  agentId         String           @map("agent_id") @db.Uuid
+  taskId          String           @map("task_id") @db.Uuid
+  projectId       String           @map("project_id") @db.Uuid
+  status          AgentExecStatus  @default(CLAIMED)
+  tool            String?          @db.VarChar(50)
+  model           String?          @db.VarChar(100)
+  output          String?
+  resultSummary   String?          @map("result_summary")
+  errorMessage    String?          @map("error_message")
+  exitCode       Int?             @map("exit_code")
+  duration        Int?
+  metadata        Json             @default("{}")
+  startedAt       DateTime         @map("started_at") @db.Timestamptz(6)
+  finishedAt      DateTime?        @map("finished_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([projectId], map: "idx_kai_commands_project")
-  @@index([taskId], map: "idx_kai_commands_task")
-  @@index([status], map: "idx_kai_commands_status")
-  @@index([createdAt], map: "idx_kai_commands_created")
-  @@map("kai_commands")
+  agent           Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  task            Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organization    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId], map: "idx_agent_executions_org")
+  @@index([agentId], map: "idx_agent_executions_agent")
+  @@index([taskId], map: "idx_agent_executions_task")
+  @@index([projectId], map: "idx_agent_executions_project")
+  @@index([status], map: "idx_agent_executions_status")
+  @@index([orgId, createdAt(sort: Desc)], map: "idx_agent_executions_org_created")
+  @@map("agent_executions")
   @@schema("public")
 }
 
@@ -1268,23 +1281,15 @@ enum NoteStatus {
   @@schema("public")
 }
 
-enum KaiCommandType {
-  FIX
-  REFACTOR
-  TEST
-  DOCS
-
-  @@map("kai_command_type")
-  @@schema("public")
-}
-
-enum KaiCommandStatus {
-  PENDING
+enum AgentExecStatus {
+  CLAIMED
   RUNNING
-  COMPLETED
+  SUCCESS
   FAILED
+  TIMEOUT
+  CANCELLED
 
-  @@map("kai_command_status")
+  @@map("agent_exec_status")
   @@schema("public")
 }
 

@@ -141,6 +141,13 @@ export const queryKeys = {
     list: (orgId: string) => [...queryKeys.agents.all(orgId), 'list'] as const,
     detail: (orgId: string, id: string) => [...queryKeys.agents.all(orgId), 'detail', id] as const,
   },
+
+  // ============ EXECUTIONS ============
+  executions: {
+    all: (orgId: string) => [...orgKey(orgId), 'executions'] as const,
+    list: (orgId: string, filters?: Record<string, string>) => [...queryKeys.executions.all(orgId), 'list', filters ?? {}] as const,
+    detail: (orgId: string, id: string) => [...queryKeys.executions.all(orgId), 'detail', id] as const,
+  },
 } as const;
 
 // Type helper for extracting query key types

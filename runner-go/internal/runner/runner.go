@@ -154,6 +154,19 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	}
 	fmt.Printf("  \033[32m[%s]\033[0m Found: \"%s\" (%s...)\n", agent.Name, task.Title, shortID)
 
+	// Step 1.5: Create execution record (CLAIMED)
+	agentMu.Lock()
+	agentID := agentRegistryIDs[agent.Name]
+	agentMu.Unlock()
+
+	execID, execErr := api.CreateExecution(client, task.ID, agentID, task.ProjectID, agent.Tool, agent.Model)
+	if execErr != nil {
+		fmt.Printf("  \033[33m[%s] Execution record failed: %v\033[0m\n", agent.Name, execErr)
+		// Non-fatal — continue without execution tracking
+	} else {
+		fmt.Printf("  \033[90m[%s] Execution: %s...\033[0m\n", agent.Name, execID[:8])
+	}
+
 	// Step 2: Claim
 	claimStatus := defaultStr(agent.ClaimStatus, "DOING")
 	fmt.Printf("  [%s] Claiming → %s\n", agent.Name, claimStatus)
@@ -173,6 +186,13 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{
 		"content": fmt.Sprintf("[FluXo Runner][%s] Task claimed. Starting execution with %s...", agent.Name, agent.Tool),
 	})
+
+	// Update execution: RUNNING
+	if execID != "" {
+		api.UpdateExecution(client, execID, map[string]interface{}{
+			"status": "RUNNING",
+		})
+	}
 
 	// Step 3: Fetch RAG context
 	fmt.Printf("  \033[90m[%s] Fetching RAG context...\033[0m\n", agent.Name)
@@ -204,14 +224,44 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	ctx := context.Background()
 	result := exec.Execute(ctx, prompt, agent.Workdir, timeout)
 	elapsed := time.Since(startTime).Seconds()
+	elapsedInt := int(elapsed)
 
 	statusIcon := "\033[32m✓\033[0m"
 	statusText := "SUCCESS"
+	execStatus := "SUCCESS"
 	if !result.Success {
 		statusIcon = "\033[31m✗\033[0m"
 		statusText = "FAILED"
+		execStatus = "FAILED"
 	}
 	fmt.Printf("  %s [%s] %s in %.1fs\n", statusIcon, agent.Name, statusText, elapsed)
+
+	// Update execution: SUCCESS/FAILED
+	if execID != "" {
+		execResult := map[string]interface{}{
+			"status":     execStatus,
+			"duration":   elapsedInt,
+			"finishedAt": time.Now().UTC().Format(time.RFC3339),
+		}
+		if result.ExitCode != 0 {
+			execResult["exitCode"] = result.ExitCode
+		}
+		if !result.Success && len(result.Output) > 0 {
+			errMsg := result.Output
+			if len(errMsg) > 2000 {
+				errMsg = errMsg[:2000]
+			}
+			execResult["errorMessage"] = errMsg
+		}
+		if result.Success {
+			summary := result.Output
+			if len(summary) > 500 {
+				summary = summary[:500]
+			}
+			execResult["resultSummary"] = summary
+		}
+		api.UpdateExecution(client, execID, execResult)
+	}
 
 	// Step 5: Post result
 	const maxLen = 4000

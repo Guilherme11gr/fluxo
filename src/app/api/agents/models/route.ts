@@ -6,14 +6,16 @@
  * dynamic model suggestions for agent configuration forms.
  */
 
-import { extractAuthenticatedTenant } from '@/shared/http';
+import { createClient } from '@/lib/supabase/server';
+import { extractAuthenticatedTenant } from '@/shared/http/auth.helpers';
 import { agentRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const { tenantId } = await extractAuthenticatedTenant();
+    const supabase = await createClient();
+    const { tenantId } = await extractAuthenticatedTenant(supabase);
     const agents = await agentRepository.findByOrgId(tenantId);
 
     const modelsSet = new Set<string>();
