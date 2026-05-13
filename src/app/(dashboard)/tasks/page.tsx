@@ -17,7 +17,7 @@ import { TaskTable } from '@/lib/views/table';
 import { PageHeaderSkeleton } from '@/components/layout/page-skeleton';
 import { KanbanBoardSkeleton } from '@/components/features/tasks';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { TaskWithReadableId, TaskStatus, TaskPriority } from '@/shared/types';
+import type { TaskWithReadableId, TaskStatus, TaskPriority, TaskFocus } from '@/shared/types';
 import {
   useTasks,
   useInfiniteTasks,
@@ -106,6 +106,10 @@ function TasksPageContent() {
     const validPriorities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
     const priority = priorityParam && validPriorities.includes(priorityParam) ? priorityParam as TaskPriority : 'all';
 
+    const focusParam = params.get('focus');
+    const validFocuses = ['TODAY', 'THIS_WEEK'];
+    const focus = focusParam && validFocuses.includes(focusParam) ? focusParam as TaskFocus : 'all';
+
     return {
       search: params.get('search') || '',
       status,
@@ -116,6 +120,7 @@ function TasksPageContent() {
       featureId: params.get('featureId') || 'all',
       assigneeId: params.get('assigneeId') || 'all',
       showDone: false,
+      focus,
     };
   });
 
@@ -148,6 +153,7 @@ function TasksPageContent() {
     syncParam('epicId', newFilters.epicId);
     syncParam('featureId', newFilters.featureId);
     syncParam('assigneeId', newFilters.assigneeId);
+    syncParam('focus', newFilters.focus);
 
     if (hasChanges) {
       const newQuery = params.toString();
@@ -178,6 +184,10 @@ function TasksPageContent() {
     const validPriorities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
     const priority = priorityParam && validPriorities.includes(priorityParam) ? priorityParam as TaskPriority : 'all';
 
+    const focusParam = params.get('focus');
+    const validFocuses = ['TODAY', 'THIS_WEEK'];
+    const focus = focusParam && validFocuses.includes(focusParam) ? focusParam as TaskFocus : 'all';
+
     const urlFilters: TaskFiltersState = {
       search: params.get('search') || '',
       status,
@@ -188,6 +198,7 @@ function TasksPageContent() {
       featureId: params.get('featureId') || 'all',
       assigneeId: params.get('assigneeId') || 'all',
       showDone: false,
+      focus,
     };
 
     setFilters(urlFilters);
@@ -378,6 +389,7 @@ function TasksPageContent() {
     featureId: editingTask.feature.id,
     assigneeId: editingTask.assigneeId,
     tags: editingTask.tags,
+    focus: editingTask.focus,
   } : null;
 
   const defaultValues = useMemo(() => ({

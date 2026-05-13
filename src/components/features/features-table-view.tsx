@@ -30,8 +30,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FeatureHealthBadge } from "@/components/features/features/feature-health-badge";
+import { FocusBadge } from "@/components/features/tasks/focus-badge";
 import { cn } from "@/lib/utils";
-import type { FeatureHealth } from "@/shared/types/project.types";
+import type { FeatureHealth, TaskFocus } from "@/shared/types/project.types";
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useUpdateFeature } from "@/lib/query";
@@ -55,6 +56,7 @@ export interface FeatureTableItem {
   health?: FeatureHealth;
   healthReason?: string | null;
   healthUpdatedAt?: string | Date | null;
+  focus?: TaskFocus | null;
 }
 
 interface FeaturesTableViewProps {
@@ -137,12 +139,17 @@ export function FeaturesTableView({
                       <span className="text-muted-foreground font-mono text-xs">F-{feature.id.slice(0, 4)}</span>
                       {feature.title}
                     </Link>
-                    {feature.status === 'DOING' && (
-                      <div className="flex items-center gap-1.5 text-[10px] text-blue-500 font-medium">
-                        <PlayCircle className="w-3 h-3" />
-                        Em Desenvolvimento
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {feature.status === 'DOING' && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-blue-500 font-medium">
+                          <PlayCircle className="w-3 h-3" />
+                          Em Desenvolvimento
+                        </div>
+                      )}
+                      {feature.focus && (
+                        <FocusBadge focus={feature.focus} size="sm" />
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="p-4 align-middle">
@@ -229,6 +236,28 @@ export function FeaturesTableView({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={() => {
+                          const newFocus = feature.focus === 'TODAY' ? null : 'TODAY';
+                          updateFeature.mutate({
+                            id: feature.id,
+                            data: { focus: newFocus as any },
+                          });
+                        }}
+                      >
+                        🔥 {feature.focus === 'TODAY' ? 'Remover Hoje' : 'Fazer Hoje'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          const newFocus = feature.focus === 'THIS_WEEK' ? null : 'THIS_WEEK';
+                          updateFeature.mutate({
+                            id: feature.id,
+                            data: { focus: newFocus as any },
+                          });
+                        }}
+                      >
+                        📅 {feature.focus === 'THIS_WEEK' ? 'Remover Semana' : 'Fazer Esta Semana'}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => onEdit(feature)}>
                         <Pencil className="mr-2 h-4 w-4" />
                         Editar

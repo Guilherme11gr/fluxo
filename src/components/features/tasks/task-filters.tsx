@@ -16,7 +16,7 @@ import {
   SelectSeparator,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { TaskStatus, TaskPriority } from '@/shared/types';
+import type { TaskStatus, TaskPriority, TaskFocus } from '@/shared/types';
 
 export interface TaskFiltersState {
   search: string;
@@ -28,6 +28,7 @@ export interface TaskFiltersState {
   featureId: string | 'all';
   assigneeId: string | 'all' | 'me';
   showDone: boolean;
+  focus: TaskFocus | 'all';
 }
 
 interface ProjectOption {
@@ -130,6 +131,7 @@ export function TaskFilters({
       filters.priority !== 'all' ||
       filters.module !== 'all' ||
       filters.assigneeId !== 'all' ||
+      filters.focus !== 'all' ||
       hasHierarchyFilter
     );
   }, [filters, hasHierarchyFilter]);
@@ -153,6 +155,7 @@ export function TaskFilters({
       featureId: 'all',
       assigneeId: 'all',
       showDone: false,
+      focus: 'all',
     });
   };
 
@@ -356,6 +359,40 @@ export function TaskFilters({
           </Label>
         </div>
 
+        {/* Focus Filter */}
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onChange({ ...filters, focus: filters.focus === 'TODAY' ? 'all' : 'TODAY' })}
+            className={cn(
+              'h-9 text-xs gap-1.5 transition-all',
+              filters.focus === 'TODAY'
+                ? 'bg-orange-500/20 text-orange-400 border-orange-500/50 hover:bg-orange-500/30'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <span>🔥</span>
+            <span className="hidden sm:inline">Hoje</span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onChange({ ...filters, focus: filters.focus === 'THIS_WEEK' ? 'all' : 'THIS_WEEK' })}
+            className={cn(
+              'h-9 text-xs gap-1.5 transition-all',
+              filters.focus === 'THIS_WEEK'
+                ? 'bg-blue-500/20 text-blue-400 border-blue-500/50 hover:bg-blue-500/30'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <span>📅</span>
+            <span className="hidden sm:inline">Esta Semana</span>
+          </Button>
+        </div>
+
         {/* Priority */}
         <Select
           value={filters.priority}
@@ -454,7 +491,7 @@ export function TaskFilters({
       </div>
 
       {/* Active non-hierarchy filters badges */}
-      {(filters.search || filters.status !== 'all' || filters.priority !== 'all' || filters.module !== 'all' || filters.assigneeId !== 'all') && (
+      {(filters.search || filters.status !== 'all' || filters.priority !== 'all' || filters.module !== 'all' || filters.assigneeId !== 'all' || filters.focus !== 'all') && (
         <div className="flex flex-wrap items-center gap-2 mt-3">
           {filters.search && (
             <Badge variant="outline" className="gap-1">
@@ -512,6 +549,25 @@ export function TaskFilters({
               )}
               <button
                 onClick={() => onChange({ ...filters, assigneeId: 'all' })}
+                className="ml-1 hover:text-destructive"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          )}
+          {filters.focus !== 'all' && (
+            <Badge
+              variant="outline"
+              className={cn(
+                'gap-1',
+                filters.focus === 'TODAY'
+                  ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+                  : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+              )}
+            >
+              {filters.focus === 'TODAY' ? '🔥 Hoje' : '📅 Esta Semana'}
+              <button
+                onClick={() => onChange({ ...filters, focus: 'all' })}
                 className="ml-1 hover:text-destructive"
               >
                 <X className="w-3 h-3" />

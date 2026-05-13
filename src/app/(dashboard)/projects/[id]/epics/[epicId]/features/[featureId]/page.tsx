@@ -20,6 +20,7 @@ import type { TaskWithReadableId, TaskStatus } from "@/shared/types";
 import { useFeature, useTasks, useProject, useMoveTask, useDeleteTask, useModules } from "@/lib/query";
 import { FeatureHealthBadge } from "@/components/features/features";
 import { FeatureAISummaryCard } from "@/components/features/feature-ai-summary-card";
+import { FocusBadge } from "@/components/features/tasks/focus-badge";
 
 export default function FeatureDetailPage({
   params,
@@ -139,6 +140,7 @@ export default function FeatureDetailPage({
     featureId: editingTask.feature?.id || feature?.id || "",
     assigneeId: editingTask.assigneeId,
     tags: editingTask.tags,
+    focus: editingTask.focus,
   } : null;
 
   // Only show skeleton on initial load (no cached data yet)
@@ -199,6 +201,9 @@ export default function FeatureDetailPage({
                   healthReason={feature.healthReason}
                   healthUpdatedAt={feature.healthUpdatedAt}
                 />
+              )}
+              {feature.focus && (
+                <FocusBadge focus={feature.focus} size="md" />
               )}
             </div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-2">

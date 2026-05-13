@@ -18,7 +18,7 @@ import { useProjects, useCreateTask, useUpdateTask, useGenerateDescription, useI
 import { useAssignTaskTags } from "@/lib/query/hooks/use-task-tags";
 import { useTaskStreaming } from "@/lib/hooks/use-task-streaming";
 import { StopCircle } from "lucide-react";
-import { TaskStatus } from "@/shared/types";
+import { TaskStatus, TaskFocus } from "@/shared/types";
 import type { TagInfo } from "@/shared/types/tag.types";
 
 interface Feature {
@@ -44,6 +44,7 @@ interface Task {
   modules?: string[];
   assigneeId?: string | null;
   tags?: TagInfo[];
+  focus?: TaskFocus | null;
 }
 
 interface TaskFormData {
@@ -57,6 +58,7 @@ interface TaskFormData {
   modules: string[];
   tags: TagInfo[];
   assigneeId: string | null;
+  focus: TaskFocus | null;
 }
 
 interface TaskDialogProps {
@@ -87,6 +89,7 @@ const INITIAL_FORM_DATA: TaskFormData = {
   modules: [],
   tags: [],
   assigneeId: null,
+  focus: null,
 };
 
 export function TaskDialog({
@@ -162,6 +165,7 @@ export function TaskDialog({
           modules: taskToEdit.modules || [],
           tags: taskToEdit.tags || [],
           assigneeId: taskToEdit.assigneeId || null,
+          focus: taskToEdit.focus || null,
         });
       } else {
         // Merge defaults (reset form when dialog opens for new task)
@@ -267,13 +271,14 @@ export function TaskDialog({
           data: {
             title: formData.title,
             description: formData.description,
-            type: formData.type as any, // Type cast or fix interface properly
+            type: formData.type as any,
             priority: formData.priority,
             status: formData.status as TaskStatus,
             featureId: formData.featureId,
             points: formData.points === "Sem estimativa" ? null : Number(formData.points),
             modules: formData.modules,
-            assigneeId: formData.assigneeId
+            assigneeId: formData.assigneeId,
+            focus: formData.focus,
           }
         });
         // Assign tags after update
@@ -462,6 +467,14 @@ export function TaskDialog({
                   <SelectItem value="DONE">Done</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Foco</Label>
+              <FocusSelector
+                value={formData.focus}
+                onChange={(focus) => setFormData({ ...formData, focus })}
+              />
             </div>
           </div>
 
