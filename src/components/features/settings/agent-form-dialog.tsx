@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useProjects } from '@/lib/query/hooks';
 import type { Agent } from '@/lib/query/hooks/use-agents';
 
 const AGENT_TYPES = [
@@ -55,6 +56,19 @@ const SUGGESTED_TOOLS = [
   { value: 'codex', label: 'Codex CLI' },
 ];
 
+const EXEC_AGENT_TYPES = [
+  { value: 'build', label: 'Build' },
+  { value: 'plan', label: 'Plan' },
+  { value: 'explore', label: 'Explore' },
+];
+
+const EXEC_VARIANTS = [
+  { value: '', label: 'Padrão' },
+  { value: 'high', label: 'High' },
+  { value: 'max', label: 'Max' },
+  { value: 'minimal', label: 'Minimal' },
+];
+
 interface AgentFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -76,27 +90,46 @@ export function AgentFormDialog({
   isSubmitting = false,
 }: AgentFormDialogProps) {
   const isEditing = Boolean(agent);
+  const config = agent?.config ?? {};
+
   const [name, setName] = useState(agent?.name ?? '');
   const [type, setType] = useState(agent?.type ?? 'RUNNER');
   const [tool, setTool] = useState(agent?.tool ?? '');
-  const [model, setModel] = useState((agent?.config?.model as string) ?? '');
+  const [model, setModel] = useState((config.model as string) ?? '');
   const [modelOpen, setModelOpen] = useState(false);
 
+  // Execution fields
+  const [projectId, setProjectId] = useState((config.project_id as string) ?? '');
+  const [agentType, setAgentType] = useState((config.agent_type as string) ?? 'build');
+  const [variant, setVariant] = useState((config.variant as string) ?? '');
+  const [pickStatus, setPickStatus] = useState((config.pick_status as string) ?? 'TODO');
+  const [claimStatus, setClaimStatus] = useState((config.claim_status as string) ?? 'DOING');
+  const [doneStatus, setDoneStatus] = useState((config.done_status as string) ?? 'DONE');
+  const [timeout, setTimeout_] = useState(String(config.timeout ?? 300));
+
+  const { data: projects } = useProjects();
   const filteredModels = SUGGESTED_MODELS.filter((m) =>
     m.toLowerCase().includes(model.toLowerCase())
   );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const config: Record<string, unknown> = { ...agent?.config };
-    if (model) config.model = model;
-    else delete config.model;
+    const cfg: Record<string, unknown> = {};
+    if (model) cfg.model = model;
+    cfg.agent_type = agentType;
+    if (variant) cfg.variant = variant;
+    if (projectId) cfg.project_id = projectId;
+    cfg.pick_status = pickStatus;
+    cfg.claim_status = claimStatus;
+    cfg.done_status = doneStatus;
+    const timeoutNum = parseInt(timeout, 10);
+    if (!isNaN(timeoutNum) && timeoutNum > 0) cfg.timeout = timeoutNum;
 
     onSubmit({
       name: name.trim(),
       type,
       tool: tool || undefined,
-      config: Object.keys(config).length > 0 ? config : undefined,
+      config: Object.keys(cfg).length > 0 ? cfg : undefined,
     });
   };
 
@@ -104,123 +137,240 @@ export function AgentFormDialog({
     setName(agent?.name ?? '');
     setType(agent?.type ?? 'RUNNER');
     setTool(agent?.tool ?? '');
-    setModel((agent?.config?.model as string) ?? '');
+    setModel((config.model as string) ?? '');
+    setProjectId((config.project_id as string) ?? '');
+    setAgentType((config.agent_type as string) ?? 'build');
+    setVariant((config.variant as string) ?? '');
+    setPickStatus((config.pick_status as string) ?? 'TODO');
+    setClaimStatus((config.claim_status as string) ?? 'DOING');
+    setDoneStatus((config.done_status as string) ?? 'DONE');
+    setTimeout_(String(config.timeout ?? 300));
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Editar Agent' : 'Novo Agent'}</DialogTitle>
           <DialogDescription>
             {isEditing
               ? 'Atualize as configurações do agent.'
-              : 'Configure um novo agent para executar tarefas automaticamente.'}
+              : 'Configure um novo agent. O runner vai buscar este profile automaticamente via API.'}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="agent-name">Nome</Label>
-            <Input
-              id="agent-name"
-              placeholder="ex: dev-agent, review-agent"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
+          {/* Agent Identity */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium text-muted-foreground">Identidade</h4>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="agent-name">Nome</Label>
+                <Input
+                  id="agent-name"
+                  placeholder="ex: dev-agent"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agent-type">Tipo</Label>
+                <Select value={type} onValueChange={setType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGENT_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="agent-type">Tipo</Label>
-            <Select value={type} onValueChange={setType}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {AGENT_TYPES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Tool & Model */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium text-muted-foreground">Ferramenta & Modelo</h4>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="agent-tool">Ferramenta</Label>
+                <Select value={tool} onValueChange={setTool}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUGGESTED_TOOLS.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Agente</Label>
+                <Select value={agentType} onValueChange={setAgentType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXEC_AGENT_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="agent-tool">Ferramenta</Label>
-            <Select value={tool} onValueChange={setTool}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecionar ferramenta" />
-              </SelectTrigger>
-              <SelectContent>
-                {SUGGESTED_TOOLS.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Modelo</Label>
-            <Popover open={modelOpen} onOpenChange={setModelOpen}>
-              <PopoverTrigger asChild>
-                <div className="relative">
-                  <Input
-                    placeholder="ex: openrouter/anthropic/claude-sonnet-4"
-                    value={model}
-                    onChange={(e) => {
-                      setModel(e.target.value);
-                      setModelOpen(true);
-                    }}
-                    onFocus={() => setModelOpen(true)}
-                    className="pr-8"
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setModelOpen(!modelOpen)}
-                  >
-                    <ChevronsUpDown className="h-4 w-4" />
-                  </button>
-                </div>
-              </PopoverTrigger>
-              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                <ScrollArea className="max-h-60">
-                  <div className="p-1">
-                    {filteredModels.length === 0 ? (
-                      <p className="px-2 py-1.5 text-sm text-muted-foreground">
-                        Nenhum modelo encontrado
-                      </p>
-                    ) : (
-                      filteredModels.map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          className={cn(
-                            'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent',
-                            model === m && 'bg-accent'
-                          )}
-                          onClick={() => {
-                            setModel(m);
-                            setModelOpen(false);
-                          }}
-                        >
-                          <Check className={cn('h-4 w-4', model === m ? 'opacity-100' : 'opacity-0')} />
-                          <span className="font-mono text-xs">{m}</span>
-                        </button>
-                      ))
-                    )}
+            <div className="space-y-2">
+              <Label>Modelo</Label>
+              <Popover open={modelOpen} onOpenChange={setModelOpen}>
+                <PopoverTrigger asChild>
+                  <div className="relative">
+                    <Input
+                      placeholder="ex: openrouter/anthropic/claude-sonnet-4"
+                      value={model}
+                      onChange={(e) => {
+                        setModel(e.target.value);
+                        setModelOpen(true);
+                      }}
+                      onFocus={() => setModelOpen(true)}
+                      className="pr-8"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setModelOpen(!modelOpen)}
+                    >
+                      <ChevronsUpDown className="h-4 w-4" />
+                    </button>
                   </div>
-                </ScrollArea>
-              </PopoverContent>
-            </Popover>
-            <p className="text-xs text-muted-foreground">
-              Digite qualquer modelo. As sugestões são apenas referência.
-            </p>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <ScrollArea className="max-h-48">
+                    <div className="p-1">
+                      {filteredModels.length === 0 ? (
+                        <p className="px-2 py-1.5 text-sm text-muted-foreground">
+                          Nenhum modelo encontrado
+                        </p>
+                      ) : (
+                        filteredModels.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            className={cn(
+                              'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent',
+                              model === m && 'bg-accent'
+                            )}
+                            onClick={() => {
+                              setModel(m);
+                              setModelOpen(false);
+                            }}
+                          >
+                            <Check className={cn('h-4 w-4', model === m ? 'opacity-100' : 'opacity-0')} />
+                            <span className="font-mono text-xs">{m}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-muted-foreground">
+                Digite qualquer modelo. As sugestões são apenas referência.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Variante</Label>
+              <Select value={variant} onValueChange={setVariant}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Padrão" />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXEC_VARIANTS.map((v) => (
+                    <SelectItem key={v.value || 'default'} value={v.value || 'default'}>
+                      {v.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Execution */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium text-muted-foreground">Execução</h4>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Projeto</Label>
+                <Select value={projectId} onValueChange={setProjectId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Todos os projetos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os projetos</SelectItem>
+                    {projects?.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Deixe vazio para pegar tarefas de qualquer projeto.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agent-timeout">Timeout (s)</Label>
+                <Input
+                  id="agent-timeout"
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={timeout}
+                  onChange={(e) => setTimeout_(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 grid-cols-3">
+              <div className="space-y-2">
+                <Label>Pick</Label>
+                <Select value={pickStatus} onValueChange={setPickStatus}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TODO">TODO</SelectItem>
+                    <SelectItem value="BACKLOG">BACKLOG</SelectItem>
+                    <SelectItem value="REVIEW">REVIEW</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Claim</Label>
+                <Select value={claimStatus} onValueChange={setClaimStatus}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DOING">DOING</SelectItem>
+                    <SelectItem value="IN_PROGRESS">IN_PROGRESS</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Done</Label>
+                <Select value={doneStatus} onValueChange={setDoneStatus}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DONE">DONE</SelectItem>
+                    <SelectItem value="REVIEW">REVIEW</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
 
           <DialogFooter>

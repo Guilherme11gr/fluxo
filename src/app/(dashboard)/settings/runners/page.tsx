@@ -26,7 +26,6 @@ import { useAgents, useCreateAgent, useUpdateAgent, useDeleteAgent } from '@/lib
 import { AgentFormDialog } from '@/components/features/settings/agent-form-dialog';
 import { AgentSetupDrawer } from '@/components/features/settings/agent-setup-drawer';
 import { formatRelativeDate } from '@/shared/utils/date-utils';
-import { useAuth } from '@/hooks/use-auth';
 import type { Agent } from '@/lib/query/hooks/use-agents';
 
 const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -42,8 +41,6 @@ const typeLabels: Record<string, string> = {
 };
 
 export default function RunnersPage() {
-  const { viewer } = useAuth();
-  const projectId = viewer?.currentOrgId ?? '';
   const { data: agents, isLoading } = useAgents();
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
@@ -239,7 +236,6 @@ export default function RunnersPage() {
         open={!!setupAgent}
         onOpenChange={(open) => { if (!open) setSetupAgent(null); }}
         agent={setupAgent}
-        projectId={projectId}
         apiKeyPrefix={apiKeyState.keyPrefix}
         hasApiKey={apiKeyState.hasKey}
       />

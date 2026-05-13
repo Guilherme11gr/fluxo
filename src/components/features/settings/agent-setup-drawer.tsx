@@ -10,67 +10,21 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Check, Copy, KeyRound, AlertTriangle } from 'lucide-react';
+import { Check, Copy, KeyRound, AlertTriangle, Terminal } from 'lucide-react';
 import type { Agent } from '@/lib/query/hooks/use-agents';
 
 interface AgentSetupDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   agent: Agent | null;
-  projectId: string;
   apiKeyPrefix: string | null;
   hasApiKey: boolean;
-}
-
-function generateYamlConfig(agent: Agent, projectId: string): string {
-  const config = agent.config ?? {};
-  const lines: string[] = [];
-
-  lines.push('runner:');
-  lines.push('  api_url: "https://fluxo.agenda-aqui.com/api/agent"');
-  lines.push('  api_key_env: "AGENT_API_KEY"');
-  lines.push('  poll_interval_sec: 30');
-  lines.push('  heartbeat_interval_sec: 60');
-  lines.push('');
-  lines.push('agents:');
-  lines.push('  - name: "' + agent.name + '"');
-
-  if (agent.tool) lines.push('    tool: "' + agent.tool + '"');
-  if (config.model) lines.push('    model: "' + config.model + '"');
-  if (config.agent_type) lines.push('    agent_type: "' + config.agent_type + '"');
-  if (config.variant) lines.push('    variant: "' + config.variant + '"');
-
-  lines.push('    project_id: "' + projectId + '"');
-  lines.push('    pick_status: "TODO"');
-  lines.push('    claim_status: "DOING"');
-  lines.push('    done_status: "DONE"');
-
-  if (agent.workdir) lines.push('    workdir: "' + agent.workdir + '"');
-  if (config.timeout) lines.push('    timeout: ' + config.timeout);
-  if (config.next_assignee_id) lines.push('    next_assignee_id: "' + config.next_assignee_id + '"');
-  if (config.context) lines.push('    context: "' + config.context + '"');
-
-  return lines.join('\n');
-}
-
-function generateEnvCommand(): string {
-  return 'export AGENT_API_KEY="agk_..."  # Cole sua chave aqui';
-}
-
-function generateRunCommand(): string {
-  return '# Instale o runner\n' +
-    'go install github.com/Guilherme11gr/fluxo/runner-go@latest\n\n' +
-    '# Ou baixe o binário direto\n' +
-    '# https://github.com/Guilherme11gr/fluxo/releases\n\n' +
-    '# Configure e execute\n' +
-    'fluxo-runner poll';
 }
 
 export function AgentSetupDrawer({
   open,
   onOpenChange,
   agent,
-  projectId,
   apiKeyPrefix,
   hasApiKey,
 }: AgentSetupDrawerProps) {
@@ -86,23 +40,42 @@ export function AgentSetupDrawer({
 
   if (!agent) return null;
 
-  const yamlConfig = generateYamlConfig(agent, projectId);
-  const envCmd = generateEnvCommand();
-  const runCmd = generateRunCommand();
+  const config = agent.config ?? {};
+  const modelInfo = config.model ? ` model=${String(config.model)}` : '';
+  const projectIdInfo = config.project_id ? ` project=${String(config.project_id).slice(0, 8)}...` : '';
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
         <SheetHeader className="mb-6">
           <SheetTitle className="flex items-center gap-2">
+            <Terminal className="w-5 h-5" />
             Configurar {agent.name}
           </SheetTitle>
           <SheetDescription>
-            Siga os passos abaixo para conectar o runner a este agent.
+            O runner busca este agent automaticamente via API. Sem YAML manual.
           </SheetDescription>
         </SheetHeader>
 
         <div className="space-y-6">
+          {/* Agent info */}
+          <div className="rounded-lg border p-4 bg-muted/30">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-sm font-medium">{agent.name}</span>
+              <span className="text-xs text-muted-foreground">·</span>
+              <span className="text-xs text-muted-foreground">{agent.tool || 'no tool'}</span>
+              {modelInfo && (
+                <>
+                  <span className="text-xs text-muted-foreground">·</span>
+                  <span className="text-xs font-mono text-muted-foreground">{String(config.model)}</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Este agent está cadastrado na API. O FluXo Runner vai buscá-lo automaticamente no startup.
+            </p>
+          </div>
+
           {/* Step 1: API Key */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -141,96 +114,89 @@ export function AgentSetupDrawer({
             )}
           </div>
 
-          {/* Step 2: Environment Variables */}
+          {/* Step 2: Run command */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold">
                 2
               </span>
-              <h3 className="font-medium">Variáveis de ambiente</h3>
-            </div>
-            <div className="relative">
-              <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre">
-                {envCmd}
-              </pre>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-2 top-2"
-                onClick={() => copyToClipboard(envCmd, 'env')}
-              >
-                {copiedSection === 'env' ? (
-                  <Check className="w-3.5 h-3.5 text-green-500" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Step 3: config.yaml */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                3
-              </span>
-              <h3 className="font-medium">Arquivo config.yaml</h3>
+              <h3 className="font-medium">Executar o runner</h3>
             </div>
             <p className="text-xs text-muted-foreground">
-              Salve como <code className="bg-muted px-1 py-0.5 rounded">config.yaml</code> no mesmo diretório do runner.
+              O runner busca os agents automaticamente. Sem YAML de agents para copiar.
             </p>
-            <div className="relative">
-              <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre max-h-64 overflow-y-auto">
-                {yamlConfig}
-              </pre>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-2 top-2"
-                onClick={() => copyToClipboard(yamlConfig, 'yaml')}
-              >
-                {copiedSection === 'yaml' ? (
-                  <Check className="w-3.5 h-3.5 text-green-500" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-              </Button>
-            </div>
-          </div>
 
-          {/* Step 4: Run */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                4
-              </span>
-              <h3 className="font-medium">Executar</h3>
-            </div>
             <div className="relative">
               <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre">
-                {runCmd}
+                fluxo-runner run --api-key agk_sua_chave_aqui
               </pre>
               <Button
                 variant="ghost"
                 size="icon"
                 className="absolute right-2 top-2"
-                onClick={() => copyToClipboard('fluxo-runner poll', 'run')}
+                onClick={() => copyToClipboard('fluxo-runner run --api-key agk_sua_chave_aqui', 'cli')}
               >
-                {copiedSection === 'run' ? (
+                {copiedSection === 'cli' ? (
                   <Check className="w-3.5 h-3.5 text-green-500" />
                 ) : (
                   <Copy className="w-3.5 h-3.5" />
                 )}
               </Button>
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              Ou com variável de ambiente:
+            </p>
+            <div className="relative">
+              <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre">
+{`export AGENT_API_KEY="agk_sua_chave_aqui"
+fluxo-runner run`}
+              </pre>
+            </div>
           </div>
 
-          {/* Project ID info */}
+          {/* Step 3: Optional config.yaml */}
+          <details className="group">
+            <summary className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+              Config YAML (opcional)
+            </summary>
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Para customizar a URL da API ou intervalo de polling. Agents vêm da API automaticamente.
+              </p>
+              <div className="relative">
+                <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre">
+{`runner:
+  api_url: "https://fluxo.agenda-aqui.com/api/agent"
+  api_key_env: "AGENT_API_KEY"
+  poll_interval_sec: 30
+  sync_interval_sec: 120
+
+# No agents section needed!
+# They come from the API automatically.`}
+                </pre>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-2 top-2"
+                  onClick={() => copyToClipboard(`runner:\n  api_url: "https://fluxo.agenda-aqui.com/api/agent"\n  api_key_env: "AGENT_API_KEY"\n  poll_interval_sec: 30\n  sync_interval_sec: 120\n`, 'yaml')}
+                >
+                  {copiedSection === 'yaml' ? (
+                    <Check className="w-3.5 h-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          </details>
+
+          {/* Agent config hint */}
           <div className="rounded-lg border p-3 text-xs text-muted-foreground">
-            <p><strong>Project ID:</strong> <code className="bg-muted px-1 py-0.5 rounded">{projectId}</code></p>
+            <p><strong>{agent.name}</strong> está configurado com{projectIdInfo},{modelInfo}.</p>
             <p className="mt-1">
-              O runner vai buscar tarefas no status <code className="bg-muted px-1 py-0.5 rounded">TODO</code> e mover para
-              <code className="bg-muted px-1 py-0.5 rounded"> DOING</code> automaticamente.
+              O runner vai buscar tarefas no status <code className="bg-muted px-1 py-0.5 rounded">{String(config.pick_status ?? 'TODO')}</code> e mover para
+              <code className="bg-muted px-1 py-0.5 rounded"> {String(config.claim_status ?? 'DOING')}</code>.
             </p>
           </div>
         </div>
