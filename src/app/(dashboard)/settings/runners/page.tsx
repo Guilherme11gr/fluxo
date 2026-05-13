@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,11 +21,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { toast } from 'sonner';
-import { Loader2, Plus, MoreVertical, Pencil, Trash2, Copy, Bot, Server } from 'lucide-react';
+import { Loader2, Plus, MoreVertical, Pencil, Trash2, Bot, Server, Terminal } from 'lucide-react';
 import { useAgents, useCreateAgent, useUpdateAgent, useDeleteAgent } from '@/lib/query/hooks';
 import { AgentFormDialog } from '@/components/features/settings/agent-form-dialog';
+import { AgentSetupDrawer } from '@/components/features/settings/agent-setup-drawer';
 import { formatRelativeDate } from '@/shared/utils/date-utils';
+import { useAuth } from '@/hooks/use-auth';
 import type { Agent } from '@/lib/query/hooks/use-agents';
 
 const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -40,31 +41,9 @@ const typeLabels: Record<string, string> = {
   CUSTOM: 'Custom',
 };
 
-function generateYamlConfig(agent: Agent): string {
-  const config = agent.config ?? {};
-  const lines: string[] = [];
-
-  lines.push(`# Config for: ${agent.name}`);
-  lines.push(`agents:`);
-  lines.push(`  - name: ${agent.name}`);
-  lines.push(`    type: ${agent.type.toLowerCase()}`);
-  if (agent.tool) lines.push(`    tool: ${agent.tool}`);
-  if (config.model) lines.push(`    model: "${config.model}"`);
-  if (config.variant) lines.push(`    variant: ${config.variant}`);
-  if (agent.workdir) lines.push(`    workdir: "${agent.workdir}"`);
-  lines.push('');
-  lines.push(`# Environment variables:`);
-  lines.push(`# AGENT_API_KEY=agk_xxxxx (your API key)`);
-  lines.push(`# Run with: fluxo-runner poll`);
-
-  return lines.join('\n');
-}
-
-function generateRunCommand(): string {
-  return `fluxo-runner poll`;
-}
-
 export default function RunnersPage() {
+  const { viewer } = useAuth();
+  const projectId = viewer?.currentOrgId ?? '';
   const { data: agents, isLoading } = useAgents();
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
@@ -73,6 +52,28 @@ export default function RunnersPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
+  const [setupAgent, setSetupAgent] = useState<Agent | null>(null);
+
+  const [apiKeyState, setApiKeyState] = useState<{ hasKey: boolean; keyPrefix: string | null }>({
+    hasKey: false,
+    keyPrefix: null,
+  });
+
+  useEffect(() => {
+    async function fetchKeyState() {
+      try {
+        const res = await fetch('/api/settings/agent-key');
+        if (res.ok) {
+          const json = await res.json();
+          setApiKeyState({
+            hasKey: json.data?.hasKey ?? false,
+            keyPrefix: json.data?.keyPrefix ?? null,
+          });
+        }
+      } catch {}
+    }
+    fetchKeyState();
+  }, []);
 
   const handleCreate = useCallback(
     async (data: { name: string; type: string; tool?: string; config?: Record<string, unknown> }) => {
@@ -100,22 +101,12 @@ export default function RunnersPage() {
     setDeleteTarget(null);
   }, [deleteAgent, deleteTarget]);
 
-  const handleCopyYaml = useCallback((agent: Agent) => {
-    navigator.clipboard.writeText(generateYamlConfig(agent));
-    toast.success('Config YAML copiada');
-  }, []);
-
-  const handleCopyCommand = useCallback(() => {
-    navigator.clipboard.writeText(generateRunCommand());
-    toast.success('Comando copiado');
-  }, []);
-
   return (
     <div className="container max-w-4xl py-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Runners</h1>
-          <p className="text-muted-foreground">Gerencie agents e configurações do runner</p>
+          <p className="text-muted-foreground">Gerencie agents e configure o runner</p>
         </div>
         <Button onClick={() => { setEditingAgent(null); setFormOpen(true); }}>
           <Plus className="w-4 h-4 mr-2" />
@@ -173,35 +164,37 @@ export default function RunnersPage() {
                         </div>
                       </div>
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="shrink-0">
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => { setEditingAgent(agent); setFormOpen(true); }}>
-                          <Pencil className="w-4 h-4 mr-2" />
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleCopyYaml(agent)}>
-                          <Copy className="w-4 h-4 mr-2" />
-                          Copiar config YAML
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleCopyCommand()}>
-                          <Copy className="w-4 h-4 mr-2" />
-                          Copiar comando
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => setDeleteTarget(agent)}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Excluir
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSetupAgent(agent)}
+                      >
+                        <Terminal className="w-3.5 h-3.5 mr-1.5" />
+                        Configurar
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => { setEditingAgent(agent); setFormOpen(true); }}>
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => setDeleteTarget(agent)}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Excluir
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -240,6 +233,15 @@ export default function RunnersPage() {
         agent={editingAgent}
         onSubmit={editingAgent ? handleUpdate : handleCreate}
         isSubmitting={createAgent.isPending || updateAgent.isPending}
+      />
+
+      <AgentSetupDrawer
+        open={!!setupAgent}
+        onOpenChange={(open) => { if (!open) setSetupAgent(null); }}
+        agent={setupAgent}
+        projectId={projectId}
+        apiKeyPrefix={apiKeyState.keyPrefix}
+        hasApiKey={apiKeyState.hasKey}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
