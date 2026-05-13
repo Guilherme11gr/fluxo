@@ -45,3 +45,11 @@ next-env.d.ts
 # claude settings (contains local permissions and secrets)
 .claude/
 .env.local
+
+# runner-go binaries and local config
+runner-go/fluxo-runner
+runner-go/fluxo-runner.exe
+runner-go/config.yaml
+
+# typecheck logs
+typecheck*.log
