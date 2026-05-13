@@ -18,7 +18,7 @@ const updateSchema = z.object({
   type: z.enum(['RUNNER', 'REVIEWER', 'CUSTOM']).optional(),
   tool: z.string().max(50).optional(),
   workdir: z.string().optional(),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
   status: z.enum(['ONLINE', 'OFFLINE', 'BUSY']).optional(),
 });
 

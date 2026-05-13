@@ -17,7 +17,7 @@ const createSchema = z.object({
   type: z.enum(['RUNNER', 'REVIEWER', 'CUSTOM']).default('RUNNER'),
   tool: z.string().max(50).optional(),
   workdir: z.string().optional(),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function GET() {
