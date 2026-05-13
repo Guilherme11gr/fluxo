@@ -9,7 +9,6 @@ import {
   Kanban,
   Settings,
   Infinity,
-  type LucideIcon,
   Menu,
   Users,
   ChevronLeft,
@@ -26,6 +25,7 @@ import { TaskModalProvider } from "@/providers/task-modal-provider";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardAgentChat } from "@/components/layout/dashboard-agent-chat";
 import { ConnectionBadge } from "@/components/ui/connection-badge";
+import { RunnerStatusBadge } from "@/components/layout/runner-status-badge";
 
 export function DashboardShell({
   children,
@@ -135,6 +135,7 @@ export function DashboardShell({
           isDesktopCollapsed ? 'p-2 flex flex-col items-center gap-2' : 'p-4 space-y-2'
         }`}>
           <ConnectionBadge iconOnly={isDesktopCollapsed} size="sm" />
+          <RunnerStatusBadge iconOnly={isDesktopCollapsed} />
           <LogoutButton isCollapsed={isDesktopCollapsed} />
         </div>
       </aside>
@@ -147,6 +148,7 @@ export function DashboardShell({
           <span className="font-bold text-lg">
             FluXo
           </span>
+          <RunnerStatusBadge />
         </div>
         <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
           <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)}>

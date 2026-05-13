@@ -5,13 +5,14 @@
 
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
+import { agentSuccess, agentError } from '@/shared/http/agent-responses';
 import { agentRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
 const heartbeatSchema = z.object({
   status: z.enum(['ONLINE', 'OFFLINE', 'BUSY']).default('ONLINE'),
+  config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function POST(
@@ -29,9 +30,19 @@ export async function POST(
 
     const body = await request.json().catch(() => ({}));
     const data = heartbeatSchema.parse(body);
-    const updated = await agentRepository.updateStatus(id, data.status);
+
+    // Merge config: if available_models is sent, merge it into existing config
+    const updateData: Record<string, unknown> = { status: data.status, lastHeartbeat: new Date() };
+    if (data.config) {
+      const existingConfig = (agent.config as Record<string, unknown>) ?? {};
+      const mergedConfig = { ...existingConfig, ...data.config };
+      updateData.config = mergedConfig;
+    }
+
+    // Use raw update to include config + status + heartbeat
+    const updated = await agentRepository.updateWithConfig(id, updateData);
     return agentSuccess(updated);
-  } catch (error) {
-    return handleAgentError(error);
+  } catch {
+    return Response.json({ error: 'Failed to process heartbeat' }, { status: 500 });
   }
 }

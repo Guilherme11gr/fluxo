@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -23,13 +23,7 @@ import { Loader2 } from 'lucide-react';
 import { useProjects } from '@/lib/query/hooks';
 import type { Agent } from '@/lib/query/hooks/use-agents';
 
-const AGENT_TYPES = [
-  { value: 'RUNNER', label: 'Runner' },
-  { value: 'REVIEWER', label: 'Reviewer' },
-  { value: 'CUSTOM', label: 'Custom' },
-] as const;
-
-const SUGGESTED_MODELS = [
+const FALLBACK_MODELS = [
   'openrouter/anthropic/claude-sonnet-4',
   'openrouter/anthropic/claude-3.5-sonnet',
   'openrouter/openai/gpt-4o',
@@ -45,7 +39,32 @@ const SUGGESTED_MODELS = [
   'openai/o4-mini',
   'google/gemini-2.5-pro',
   'google/gemini-2.5-flash',
-];
+] as const;
+
+function useAvailableModels() {
+  const [models, setModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/agents/models')
+      .then((r) => r.json())
+      .then((json) => {
+        if (mounted && Array.isArray(json.data)) {
+          setModels(json.data);
+        }
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  return models;
+}
+
+const AGENT_TYPES = [
+  { value: 'RUNNER', label: 'Runner' },
+  { value: 'REVIEWER', label: 'Reviewer' },
+  { value: 'CUSTOM', label: 'Custom' },
+] as const;
 
 const SUGGESTED_TOOLS = [
   { value: 'opencode', label: 'OpenCode' },
@@ -89,6 +108,19 @@ export function AgentFormDialog({
   const isEditing = Boolean(agent);
   const config = agent?.config ?? {};
   const { data: projects } = useProjects();
+  const availableModels = useAvailableModels();
+
+  const modelSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const m of availableModels) {
+      if (!seen.has(m)) { seen.add(m); result.push(m); }
+    }
+    for (const m of FALLBACK_MODELS) {
+      if (!seen.has(m)) { seen.add(m); result.push(m); }
+    }
+    return result;
+  }, [availableModels]);
 
   const [name, setName] = useState(agent?.name ?? '');
   const [type, setType] = useState(agent?.type ?? 'RUNNER');
@@ -229,14 +261,14 @@ export function AgentFormDialog({
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
-              <datalist id="model-suggestions">
-                {SUGGESTED_MODELS.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-              <p className="text-xs text-muted-foreground">
-                Digite qualquer modelo. As sugestões são apenas referência.
-              </p>
+               <datalist id="model-suggestions">
+                 {modelSuggestions.map((m) => (
+                   <option key={m} value={m} />
+                 ))}
+               </datalist>
+               <p className="text-xs text-muted-foreground">
+                 Modelos detectados pelo runner aparecem primeiro. Digite qualquer modelo.
+               </p>
             </div>
 
             <div className="space-y-2">

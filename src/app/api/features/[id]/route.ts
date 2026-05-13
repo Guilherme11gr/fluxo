@@ -13,6 +13,7 @@ const updateFeatureSchema = z.object({
   title: z.string().min(3).max(200).optional(),
   description: z.string().max(5000).nullable().optional(),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'DONE']).optional(),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).nullable().optional(),
 });
 
 /**

@@ -28,12 +28,30 @@ var (
 )
 
 // RegisterAgent registers an agent with the FluXo API.
-func RegisterAgent(client *api.Client, agent config.AgentConfig) string {
+// If availableModels is non-empty, it is included in the config payload
+// so the web UI can show real model suggestions.
+func RegisterAgent(client *api.Client, agent config.AgentConfig, availableModels []string) string {
 	body := map[string]interface{}{
 		"name": agent.Name,
 		"type": "RUNNER",
 		"tool": agent.Tool,
 		"workdir": agent.Workdir,
+	}
+
+	if len(availableModels) > 0 {
+		configObj := map[string]interface{}{
+			"available_models": availableModels,
+		}
+		if agent.Model != "" {
+			configObj["model"] = agent.Model
+		}
+		if agent.AgentType != "" {
+			configObj["agent_type"] = agent.AgentType
+		}
+		if agent.Variant != "" {
+			configObj["variant"] = agent.Variant
+		}
+		body["config"] = configObj
 	}
 
 	resp, err := client.Post("/agents", body)
@@ -63,7 +81,7 @@ func RegisterAgent(client *api.Client, agent config.AgentConfig) string {
 	return id
 }
 
-// SendHeartbeat sends a heartbeat for an agent.
+// SendHeartbeat sends a heartbeat for an agent, optionally including available_models.
 func SendHeartbeat(client *api.Client, agent config.AgentConfig, status string) {
 	agentMu.Lock()
 	agentID, ok := agentRegistryIDs[agent.Name]
@@ -71,7 +89,13 @@ func SendHeartbeat(client *api.Client, agent config.AgentConfig, status string) 
 	if !ok {
 		return
 	}
-	client.Post("/agents/"+agentID+"/heartbeat", map[string]interface{}{"status": status})
+	payload := map[string]interface{}{"status": status}
+	if len(agent.AvailableModels) > 0 {
+		payload["config"] = map[string]interface{}{
+			"available_models": agent.AvailableModels,
+		}
+	}
+	client.Post("/agents/"+agentID+"/heartbeat", payload)
 }
 
 // PollAndExecute runs the full poll → claim → execute → post → handoff cycle.

@@ -17,6 +17,7 @@ import { PriorityIndicator } from './priority-indicator';
 import { TagBadge } from '@/components/features/tags';
 import { TaskHierarchyPath } from './task-hierarchy-path';
 import { BlockTaskDialog } from './block-task-dialog';
+import { FocusBadge } from './focus-badge';
 import { useBlockTaskDialog } from '@/hooks/use-block-task-dialog';
 import { toast } from 'sonner';
 import { SyncIndicator } from '@/components/ui/sync-indicator';
@@ -188,6 +189,13 @@ export function TaskCard({
       )}>
         {task.title}
       </h4>
+
+      {/* Focus Badge */}
+      {task.focus && (
+        <div className="mb-2">
+          <FocusBadge focus={task.focus} size="sm" />
+        </div>
+      )}
 
       {/* Hierarchy Path */}
       <div className="mb-3">

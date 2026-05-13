@@ -1,5 +1,0 @@
-
-> jira-killer@0.1.0 typecheck
-> tsc --noEmit
-
-src/infra/adapters/prisma/feature.repository.ts(275,13): error TS1005: ',' expected.

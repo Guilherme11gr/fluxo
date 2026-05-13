@@ -16,6 +16,7 @@ export {
   taskStatusSchema,
   taskTypeSchema,
   taskPrioritySchema,
+  taskFocusSchema,
   storyPointsSchema,
   createTaskSchema,
   updateTaskSchema,

@@ -6,7 +6,7 @@ import { useCurrentOrgId, isOrgIdValid } from './use-org-id';
 import { useRealtimeActive } from '@/hooks/use-realtime-status';
 import { useRealtimeBroadcast } from '@/hooks/use-realtime-sync';
 import { useAuth } from '@/hooks/use-auth';
-import type { TaskWithReadableId, TaskStatus } from '@/shared/types';
+import type { TaskWithReadableId, TaskStatus, TaskFocus } from '@/shared/types';
 import type { TaskFiltersState } from '@/components/features/tasks';
 import { toast } from 'sonner';
 
@@ -52,6 +52,7 @@ interface UpdateTaskInput {
     blockReason: string | null;
     blockedAt: Date | null;
     blockedBy: string | null;
+    focus: TaskFocus | null;
   }>;
 }
 

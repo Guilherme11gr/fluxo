@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { AssigneeSelect, DocContextSelector } from "@/components/features/shared";
 import { TagSelector } from "@/components/features/tags";
+import { FocusSelector } from "./focus-selector";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { ModuleTagInput } from "@/components/ui/module-tag-input";

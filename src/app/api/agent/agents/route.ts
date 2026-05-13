@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
-import { agentList, agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
+import { agentList, agentSuccess, handleAgentError } from '@/shared/http/agent-responses';
 import { agentRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -39,8 +39,13 @@ export async function POST(request: Request) {
     // Check if agent with same name already exists
     const existing = await agentRepository.findByName(auth.orgId, data.name);
     if (existing) {
-      // Update status to ONLINE instead of erroring
-      const updated = await agentRepository.updateStatus(existing.id, 'ONLINE');
+      // Update status to ONLINE and merge config (preserving available_models)
+      const existingConfig = (existing.config as Record<string, unknown>) ?? {};
+      const mergedConfig = { ...existingConfig, ...(data.config ?? {}) };
+      const updated = await agentRepository.update(existing.id, {
+        status: 'ONLINE',
+        config: mergedConfig,
+      });
       return agentSuccess(updated);
     }
 

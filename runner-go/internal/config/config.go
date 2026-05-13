@@ -54,6 +54,10 @@ type AgentConfig struct {
 	// ID is the agent's remote ID from the API (not in YAML).
 	// Used by the syncer to track registration state.
 	ID string `yaml:"-"`
+
+	// AvailableModels is populated at runtime by detecting installed tools.
+	// Not stored in YAML — sent to the API so the web UI can use it.
+	AvailableModels []string `yaml:"-"`
 }
 
 // IsDynamic returns true when no agents are defined in config,

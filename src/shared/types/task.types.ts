@@ -1,4 +1,4 @@
-import type { TaskStatus, TaskType, TaskPriority, StoryPoints } from './project.types';
+import type { TaskStatus, TaskType, TaskPriority, StoryPoints, TaskFocus } from './project.types';
 import type { TagInfo } from './tag.types';
 
 // Base Task
@@ -33,6 +33,7 @@ export interface Task {
   githubPrUrl?: string | null;
   githubPrStatus?: 'open' | 'closed' | 'merged' | null;
   githubPrMergedAt?: Date | null;
+  focus?: TaskFocus | null;
 }
 
 

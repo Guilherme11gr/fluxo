@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import type { Feature, FeatureStatus } from '@/shared/types';
+import type { Feature, FeatureStatus, TaskFocus } from '@/shared/types';
 
 export interface CreateFeatureInput {
   orgId: string;
@@ -8,6 +8,7 @@ export interface CreateFeatureInput {
   description?: string | null;
   status?: 'BACKLOG' | 'TODO' | 'DOING' | 'DONE';
   isSystem?: boolean;
+  focus?: TaskFocus | null;
 }
 
 export interface UpdateFeatureInput {
@@ -16,6 +17,7 @@ export interface UpdateFeatureInput {
   status?: FeatureStatus;
   technicalAnalysis?: string | null;
   analysisUpdatedAt?: Date | string;
+  focus?: TaskFocus | null;
 }
 
 export class FeatureRepository {

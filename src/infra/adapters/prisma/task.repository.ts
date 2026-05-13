@@ -6,6 +6,7 @@ import type {
   TaskType,
   TaskPriority,
   StoryPoints,
+  TaskFocus,
   TaskFilterParams
 } from '@/shared/types';
 import { buildReadableId } from '@/shared/types/task.types';
@@ -23,6 +24,7 @@ export interface CreateTaskInput {
   modules?: string[];
   assigneeId?: string | null;
   createdBy?: string | null;
+  focus?: TaskFocus | null;
 }
 
 export interface UpdateTaskInput {
@@ -35,6 +37,7 @@ export interface UpdateTaskInput {
   modules?: string[];
   assigneeId?: string | null;
   blocked?: boolean;
+  focus?: TaskFocus | null;
 }
 
 export class TaskRepository {
@@ -95,6 +98,7 @@ export class TaskRepository {
         modules: input.modules ?? [],
         assigneeId: input.assigneeId,
         createdBy: input.createdBy,
+        focus: input.focus ?? null,
       },
     });
 
@@ -149,6 +153,7 @@ export class TaskRepository {
         updatedAt: true,
         blocked: true,
         statusChangedAt: true,
+        focus: true,
         tagAssignments: {
           select: {
             tag: {
@@ -470,6 +475,7 @@ export class TaskRepository {
       search,
       blocked,
       excludeStatuses,
+      focus,
     } = filters;
 
     const where: Record<string, unknown> = { orgId };
@@ -495,6 +501,13 @@ export class TaskRepository {
     if (projectId) where.projectId = projectId;
     if (featureId) where.featureId = featureId;
     if (blocked !== undefined) where.blocked = blocked;
+    if (focus) {
+      if (focus === 'THIS_WEEK') {
+        where.focus = { in: ['TODAY', 'THIS_WEEK'] };
+      } else {
+        where.focus = focus;
+      }
+    }
 
     // Filter by tag (requires JOIN via tagAssignments)
     if (tagId) {

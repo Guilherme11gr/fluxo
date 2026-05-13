@@ -127,11 +127,20 @@ Legacy mode (agents in config.yaml):
 			agents = cfg.Agents
 		}
 
+		// Discover available models from installed tools
+		availableModels := runner.DiscoverModels()
+		if len(availableModels) > 0 {
+			fmt.Printf("  \033[36m%d model(s) detected\033[0m\n", len(availableModels))
+		} else {
+			fmt.Println("  \033[33mNo models detected (opencode/claude not found)\033[0m")
+		}
+
 		// Register all agents
 		fmt.Println("[runner] Registering agents...")
 		for _, agent := range agents {
+			agent.AvailableModels = availableModels
 			client := api.NewClient(apiURL, apiKey, agent.Name)
-			id := runner.RegisterAgent(client, agent)
+			id := runner.RegisterAgent(client, agent, availableModels)
 			if id != "" {
 				shortID := id
 				if len(shortID) > 8 {
@@ -171,7 +180,7 @@ Legacy mode (agents in config.yaml):
 		defer ticker.Stop()
 
 		// First tick immediately
-		runAllAgents(agents, apiURL, apiKey)
+		runAllAgents(agents, apiURL, apiKey, availableModels)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -188,16 +197,17 @@ Legacy mode (agents in config.yaml):
 				if syncer != nil {
 					agents = syncer.GetAgents()
 				}
-				runAllAgents(agents, apiURL, apiKey)
+				runAllAgents(agents, apiURL, apiKey, availableModels)
 			}
 		}
 	},
 }
 
-func runAllAgents(agents []config.AgentConfig, apiURL, apiKey string) {
-	for _, agent := range agents {
-		client := api.NewClient(apiURL, apiKey, agent.Name)
-		runner.PollAndExecute(client, agent)
+func runAllAgents(agents []config.AgentConfig, apiURL, apiKey string, availableModels []string) {
+	for i := range agents {
+		agents[i].AvailableModels = availableModels
+		client := api.NewClient(apiURL, apiKey, agents[i].Name)
+		runner.PollAndExecute(client, agents[i])
 	}
 }
 

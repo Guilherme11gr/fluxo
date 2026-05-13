@@ -1,4 +1,4 @@
-import type { Task, TaskStatus, TaskType, TaskPriority, StoryPoints } from '@/shared/types';
+import type { Task, TaskStatus, TaskType, TaskPriority, StoryPoints, TaskFocus } from '@/shared/types';
 import type { TaskRepository, AuditLogRepository } from '@/infra/adapters/prisma';
 import { NotFoundError } from '@/shared/errors';
 import { AUDIT_ACTIONS } from '@/infra/adapters/prisma/audit-log.repository';
@@ -14,9 +14,10 @@ export interface UpdateTaskInput {
   modules?: string[];
   assigneeId?: string | null;
   blocked?: boolean;
-  blockReason?: string | null; // ✅ null explícito (não undefined)
-  blockedAt?: Date | null; // Timestamp do bloqueio
-  blockedBy?: string | null; // User ID que bloqueou
+  blockReason?: string | null;
+  blockedAt?: Date | null;
+  blockedBy?: string | null;
+  focus?: TaskFocus | null;
 }
 
 /**

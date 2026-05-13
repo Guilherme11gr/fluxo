@@ -1,4 +1,4 @@
-import type { Feature, FeatureStatus } from '@/shared/types';
+import type { Feature, FeatureStatus, TaskFocus } from '@/shared/types';
 import type { FeatureRepository } from '@/infra/adapters/prisma';
 import { NotFoundError } from '@/shared/errors';
 
@@ -6,6 +6,7 @@ export interface UpdateFeatureInput {
   title?: string;
   description?: string | null;
   status?: FeatureStatus;
+  focus?: TaskFocus | null;
 }
 
 export interface UpdateFeatureDeps {

@@ -11,6 +11,7 @@ export type PokerStatus = 'VOTING' | 'REVEALED' | 'CLOSED';
 // Health check types
 export type FeatureHealth = 'healthy' | 'warning' | 'critical';
 export type EpicRisk = 'low' | 'medium' | 'high';
+export type TaskFocus = 'TODAY' | 'THIS_WEEK';
 
 // Fibonacci points
 export type StoryPoints = 0 | 1 | 2 | 3 | 5 | 8 | 13 | 21 | null;
@@ -73,5 +74,6 @@ export interface Feature {
   healthReason?: string | null;
   technicalAnalysis?: string | null;
   analysisUpdatedAt?: Date | string | null;
+  focus?: TaskFocus | null;
   tasks?: Task[];
 }

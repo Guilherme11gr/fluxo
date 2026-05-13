@@ -1,4 +1,4 @@
-import type { Task, TaskType, TaskPriority, StoryPoints } from '@/shared/types';
+import type { Task, TaskType, TaskPriority, StoryPoints, TaskFocus } from '@/shared/types';
 import type { TaskRepository, FeatureRepository } from '@/infra/adapters/prisma';
 
 export interface CreateTaskInput {
@@ -13,7 +13,8 @@ export interface CreateTaskInput {
   points?: StoryPoints | null;
   modules?: string[];
   assigneeId?: string | null;
-  createdBy?: string; // Quem criou a task
+  createdBy?: string;
+  focus?: TaskFocus | null;
 }
 
 export interface CreateTaskDeps {

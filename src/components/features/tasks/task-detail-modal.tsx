@@ -43,6 +43,7 @@ import { PriorityIndicator } from './priority-indicator';
 import { TaskComments } from './task-comments';
 import { UserAvatar } from '@/components/features/shared';
 import { BlockTaskDialog } from './block-task-dialog';
+import { FocusBadge } from './focus-badge';
 import { useBlockTaskDialog } from '@/hooks/use-block-task-dialog';
 import { useMoveTaskWithUndo } from '@/hooks/use-move-task-undo';
 import { useAuth } from '@/hooks/use-auth';
@@ -271,6 +272,14 @@ export function TaskDetailModal({
                     )}
                   </Label>
                 </div>
+              </>
+            )}
+
+            {/* Focus Badge */}
+            {task.focus && (
+              <>
+                <Separator orientation="vertical" className="h-4" />
+                <FocusBadge focus={task.focus} size="md" />
               </>
             )}
           </div>

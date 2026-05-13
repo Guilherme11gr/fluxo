@@ -16,6 +16,7 @@ interface Feature {
   description?: string | null;
   epicId: string;
   status: string;
+  focus?: 'TODAY' | 'THIS_WEEK' | null;
   epic?: {
     id: string;
     title: string;
@@ -50,6 +51,7 @@ interface UpdateFeatureInput {
   id: string;
   data: Partial<Omit<CreateFeatureInput, 'epicId'>> & {
     status?: 'BACKLOG' | 'TODO' | 'DOING' | 'DONE';
+    focus?: 'TODAY' | 'THIS_WEEK' | null;
   };
 }
 

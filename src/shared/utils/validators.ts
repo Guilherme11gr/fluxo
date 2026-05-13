@@ -39,6 +39,8 @@ export const taskTypeSchema = z.enum(['TASK', 'BUG']);
 // Task priority validator
 export const taskPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 
+export const taskFocusSchema = z.enum(['TODAY', 'THIS_WEEK']).nullable().optional();
+
 // Story points validator (Fibonacci) - handles string inputs from forms
 export const storyPointsSchema = z.preprocess(
   (val) => {
@@ -74,6 +76,7 @@ export const createTaskSchema = z.object({
   points: storyPointsSchema.optional(),
   modules: z.array(z.string().max(50)).max(10).optional().default([]),
   assigneeId: uuidSchema.nullable().optional(),
+  focus: taskFocusSchema,
 });
 
 // Update task input validator
@@ -93,6 +96,7 @@ export const updateTaskSchema = z.object({
   status: taskStatusSchema.optional(),
   blocked: z.boolean().optional(),
   blockReason: z.string().trim().min(10, 'Motivo deve ter no mínimo 10 caracteres').max(500, 'Motivo muito longo').optional().nullable(),
+  focus: taskFocusSchema,
 });
 
 // Create comment validator

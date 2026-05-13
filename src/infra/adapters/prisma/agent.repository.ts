@@ -90,9 +90,25 @@ export class AgentRepository {
       tool?: string;
       workdir?: string;
       config?: Record<string, unknown>;
+      status?: string;
     }
   ): Promise<AgentRecord> {
     const record = await this.client.agent.update({ where: { id }, data });
+    return mapRecord(record);
+  }
+
+  async updateWithConfig(id: string, data: { status: string; lastHeartbeat: Date; config?: Record<string, unknown> }): Promise<AgentRecord> {
+    const updateData: Record<string, unknown> = {
+      status: data.status,
+      lastHeartbeat: data.lastHeartbeat,
+    };
+    if (data.config) {
+      updateData.config = data.config;
+    }
+    const record = await this.client.agent.update({
+      where: { id },
+      data: updateData,
+    });
     return mapRecord(record);
   }
 
