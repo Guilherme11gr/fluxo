@@ -19,10 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, ChevronsUpDown, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Loader2 } from 'lucide-react';
 import { useProjects } from '@/lib/query/hooks';
 import type { Agent } from '@/lib/query/hooks/use-agents';
 
@@ -91,12 +88,12 @@ export function AgentFormDialog({
 }: AgentFormDialogProps) {
   const isEditing = Boolean(agent);
   const config = agent?.config ?? {};
+  const { data: projects } = useProjects();
 
   const [name, setName] = useState(agent?.name ?? '');
   const [type, setType] = useState(agent?.type ?? 'RUNNER');
   const [tool, setTool] = useState(agent?.tool ?? '');
   const [model, setModel] = useState((config.model as string) ?? '');
-  const [modelOpen, setModelOpen] = useState(false);
 
   // Execution fields
   const [projectId, setProjectId] = useState((config.project_id as string) ?? '');
@@ -106,11 +103,6 @@ export function AgentFormDialog({
   const [claimStatus, setClaimStatus] = useState((config.claim_status as string) ?? 'DOING');
   const [doneStatus, setDoneStatus] = useState((config.done_status as string) ?? 'DONE');
   const [timeout, setTimeout_] = useState(String(config.timeout ?? 300));
-
-  const { data: projects } = useProjects();
-  const filteredModels = SUGGESTED_MODELS.filter((m) =>
-    m.toLowerCase().includes(model.toLowerCase())
-  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,60 +221,19 @@ export function AgentFormDialog({
               </div>
             </div>
 
-            <div className="space-y-2">
+             <div className="space-y-2">
               <Label>Modelo</Label>
-              <Popover open={modelOpen} onOpenChange={setModelOpen}>
-                <PopoverTrigger asChild>
-                  <div className="relative">
-                    <Input
-                      placeholder="ex: openrouter/anthropic/claude-sonnet-4"
-                      value={model}
-                      onChange={(e) => {
-                        setModel(e.target.value);
-                        setModelOpen(true);
-                      }}
-                      onFocus={() => setModelOpen(true)}
-                      className="pr-8"
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      onClick={() => setModelOpen(!modelOpen)}
-                    >
-                      <ChevronsUpDown className="h-4 w-4" />
-                    </button>
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                  <ScrollArea className="max-h-48">
-                    <div className="p-1">
-                      {filteredModels.length === 0 ? (
-                        <p className="px-2 py-1.5 text-sm text-muted-foreground">
-                          Nenhum modelo encontrado
-                        </p>
-                      ) : (
-                        filteredModels.map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            className={cn(
-                              'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent',
-                              model === m && 'bg-accent'
-                            )}
-                            onClick={() => {
-                              setModel(m);
-                              setModelOpen(false);
-                            }}
-                          >
-                            <Check className={cn('h-4 w-4', model === m ? 'opacity-100' : 'opacity-0')} />
-                            <span className="font-mono text-xs">{m}</span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </PopoverContent>
-              </Popover>
+              <Input
+                list="model-suggestions"
+                placeholder="ex: openrouter/anthropic/claude-sonnet-4"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              />
+              <datalist id="model-suggestions">
+                {SUGGESTED_MODELS.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
               <p className="text-xs text-muted-foreground">
                 Digite qualquer modelo. As sugestões são apenas referência.
               </p>
