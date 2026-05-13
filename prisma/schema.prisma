@@ -18,6 +18,7 @@ model Organization {
   updatedAt     DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   maxUsers               Int?            @map("max_users")
   agentApiKey            AgentApiKey?
+  agents                 Agent[]
   agentChatRoles         AgentChatRole[]
   auditLogs     AuditLog[]
   comments      Comment[]
@@ -72,6 +73,27 @@ model AgentApiKey {
 
   @@index([lastUsedAt], map: "idx_agent_api_keys_last_used_at")
   @@map("agent_api_keys")
+  @@schema("public")
+}
+
+model Agent {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId         String       @map("org_id") @db.Uuid
+  name          String       @db.VarChar(100)
+  type          String       @default("RUNNER") @db.VarChar(20)
+  status        String       @default("OFFLINE") @db.VarChar(20)
+  tool          String?      @db.VarChar(50)
+  workdir       String?
+  config        Json         @default("{}")
+  lastHeartbeat DateTime?    @map("last_heartbeat") @db.Timestamptz(6)
+  createdBy     String       @map("created_by") @db.Uuid
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([orgId, name])
+  @@index([orgId, status], map: "idx_agents_org_status")
+  @@map("agents")
   @@schema("public")
 }
 
@@ -339,6 +361,7 @@ model Task {
   priority        TaskPriority        @default(MEDIUM)
   points          Int?
   assigneeId      String?             @map("assignee_id") @db.Uuid
+  assigneeAgentId String?             @map("assignee_agent_id") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   modules         String[]            @default([])

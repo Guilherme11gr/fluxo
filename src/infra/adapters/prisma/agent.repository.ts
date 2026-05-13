@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 export interface AgentRecord {
   id: string;
@@ -15,25 +15,6 @@ export interface AgentRecord {
   updatedAt: Date;
 }
 
-export interface CreateAgentInput {
-  orgId: string;
-  name: string;
-  type?: string;
-  tool?: string;
-  workdir?: string;
-  config?: Record<string, unknown>;
-  createdBy: string;
-}
-
-export interface UpdateAgentInput {
-  name?: string;
-  type?: string;
-  tool?: string;
-  workdir?: string;
-  config?: Record<string, unknown>;
-  status?: string;
-}
-
 function mapRecord(record: any): AgentRecord {
   return {
     id: record.id,
@@ -44,10 +25,10 @@ function mapRecord(record: any): AgentRecord {
     tool: record.tool,
     workdir: record.workdir,
     config: record.config ?? {},
-    lastHeartbeat: record.lastHeartbeat ?? record.last_heartbeat ?? null,
-    createdBy: record.createdBy ?? record.created_by,
-    createdAt: record.createdAt ?? record.created_at,
-    updatedAt: record.updatedAt ?? record.updated_at,
+    lastHeartbeat: record.lastHeartbeat,
+    createdBy: record.createdBy,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -72,44 +53,53 @@ export class AgentRepository {
   }
 
   async findByName(orgId: string, name: string): Promise<AgentRecord | null> {
-    const client = this.prisma as PrismaClient & { agent: any };
-    const record = await client.agent.findFirst({
-      where: { orgId, name },
+    const record = await this.client.agent.findUnique({
+      where: { orgId_name: { orgId, name } },
     });
     return record ? mapRecord(record) : null;
   }
 
-  async create(input: CreateAgentInput): Promise<AgentRecord> {
+  async create(data: {
+    orgId: string;
+    name: string;
+    type?: string;
+    tool?: string;
+    workdir?: string;
+    config?: Record<string, unknown>;
+    createdBy: string;
+  }): Promise<AgentRecord> {
     const record = await this.client.agent.create({
       data: {
-        orgId: input.orgId,
-        name: input.name,
-        type: input.type ?? 'RUNNER',
-        tool: input.tool ?? null,
-        workdir: input.workdir ?? null,
-        config: input.config ?? {},
-        createdBy: input.createdBy,
+        orgId: data.orgId,
+        name: data.name,
+        type: data.type ?? 'RUNNER',
+        tool: data.tool ?? null,
+        workdir: data.workdir ?? null,
+        config: data.config ?? {},
+        createdBy: data.createdBy,
       },
     });
     return mapRecord(record);
   }
 
-  async update(id: string, data: UpdateAgentInput): Promise<AgentRecord> {
-    const record = await this.client.agent.update({
-      where: { id },
-      data,
-    });
+  async update(
+    id: string,
+    data: {
+      name?: string;
+      type?: string;
+      tool?: string;
+      workdir?: string;
+      config?: Record<string, unknown>;
+    }
+  ): Promise<AgentRecord> {
+    const record = await this.client.agent.update({ where: { id }, data });
     return mapRecord(record);
   }
 
   async updateStatus(id: string, status: string): Promise<AgentRecord> {
     const record = await this.client.agent.update({
       where: { id },
-      data: {
-        status,
-        lastHeartbeat: new Date(),
-        updatedAt: new Date(),
-      },
+      data: { status, lastHeartbeat: new Date() },
     });
     return mapRecord(record);
   }
