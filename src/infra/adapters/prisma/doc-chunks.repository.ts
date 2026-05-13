@@ -20,6 +20,15 @@ export interface DocChunkSearchResult {
   rank: number;
 }
 
+export interface DocSearchResult {
+  docId: string;
+  docTitle: string;
+  projectId: string;
+  score: number;
+  preview: string;
+  matchedChunkCount: number;
+}
+
 export class DocChunksRepository {
   constructor(private prisma: PrismaClient) {}
 
@@ -152,6 +161,127 @@ export class DocChunksRepository {
       WHERE d.org_id = ${orgId}::uuid
         ${projectFilter}
       ORDER BY rank DESC
+      LIMIT ${limit}
+    `;
+  }
+
+  /**
+   * Hybrid search grouped by doc instead of individual chunks.
+   *
+   * Returns top docs with:
+   * - best chunk score across all matched chunks
+   * - preview from the best-matching chunk (truncated to 300 chars)
+   * - count of how many chunks matched for this doc
+   *
+   * Useful when consumers want a doc-level view instead of chunk-level.
+   */
+  async hybridSearchDocs(
+    orgId: string,
+    query: string,
+    options?: { projectId?: string; limit?: number }
+  ): Promise<DocSearchResult[]> {
+    const limit = options?.limit ?? 5;
+
+    const projectFilter = options?.projectId
+      ? Prisma.sql`AND d.project_id = ${options.projectId}::uuid`
+      : Prisma.empty;
+
+    // Generate embedding for the query
+    const { getEmbedding } = await import('@/shared/rag/embedding');
+    let queryEmbedding: number[];
+
+    try {
+      queryEmbedding = await getEmbedding(query);
+    } catch (error) {
+      console.error('[DocChunks] Query embedding failed for hybridSearchDocs', error);
+      // Fall back to keyword-only grouped search
+      return this.keywordSearchDocs(orgId, query, options);
+    }
+
+    const vectorStr = `[${queryEmbedding.join(',')}]`;
+
+    return this.prisma.$queryRaw<DocSearchResult[]>`
+      WITH ranked_chunks AS (
+        SELECT
+          c.doc_id,
+          c.content,
+          d.title,
+          d.project_id,
+          (
+            COALESCE(
+              ts_rank(d.search_vector, websearch_to_tsquery('public.portuguese_unaccent', ${query})) * 2,
+              0
+            )
+            +
+            (1 - (c.embedding <=> ${vectorStr}::vector)) * 3
+          ) as rank
+        FROM doc_chunks c
+        JOIN project_docs d ON d.id = c.doc_id
+        WHERE d.org_id = ${orgId}::uuid
+          ${projectFilter}
+        ORDER BY rank DESC
+        LIMIT 50
+      )
+      SELECT
+        rc.doc_id as "docId",
+        rc.title as "docTitle",
+        rc.project_id as "projectId",
+        MAX(rc.rank) as score,
+        LEFT(
+          (SELECT rc2.content FROM ranked_chunks rc2 WHERE rc2.doc_id = rc.doc_id ORDER BY rc2.rank DESC LIMIT 1),
+          300
+        ) as preview,
+        CAST(COUNT(*) AS INTEGER) as "matchedChunkCount"
+      FROM ranked_chunks rc
+      GROUP BY rc.doc_id, rc.title, rc.project_id
+      ORDER BY score DESC
+      LIMIT ${limit}
+    `;
+  }
+
+  /**
+   * Keyword-only grouped search (tsvector fallback for hybridSearchDocs).
+   */
+  private async keywordSearchDocs(
+    orgId: string,
+    query: string,
+    options?: { projectId?: string; limit?: number }
+  ): Promise<DocSearchResult[]> {
+    const limit = options?.limit ?? 5;
+
+    const projectFilter = options?.projectId
+      ? Prisma.sql`AND d.project_id = ${options.projectId}::uuid`
+      : Prisma.empty;
+
+    return this.prisma.$queryRaw<DocSearchResult[]>`
+      WITH ranked_chunks AS (
+        SELECT
+          c.doc_id,
+          c.content,
+          d.title,
+          d.project_id,
+          ts_rank(d.search_vector, websearch_to_tsquery('public.portuguese_unaccent', ${query})) * 2 as rank
+        FROM doc_chunks c
+        JOIN project_docs d ON d.id = c.doc_id
+        WHERE d.org_id = ${orgId}::uuid
+          AND d.search_vector @@ websearch_to_tsquery('public.portuguese_unaccent', ${query})
+          ${projectFilter}
+        ORDER BY rank DESC
+        LIMIT 50
+      )
+      SELECT
+        rc.doc_id as "docId",
+        rc.title as "docTitle",
+        rc.project_id as "projectId",
+        MAX(rc.rank) as score,
+        LEFT(
+          (SELECT rc2.content FROM ranked_chunks rc2 WHERE rc2.doc_id = rc.doc_id ORDER BY rc2.rank DESC LIMIT 1),
+          300
+        ) as preview,
+        CAST(COUNT(*) AS INTEGER) as "matchedChunkCount"
+      FROM ranked_chunks rc
+      GROUP BY rc.doc_id, rc.title, rc.project_id
+      ORDER BY score DESC
       LIMIT ${limit}
     `;
   }

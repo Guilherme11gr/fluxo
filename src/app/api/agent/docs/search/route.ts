@@ -22,6 +22,7 @@ const searchQuerySchema = z.object({
   q: z.string().min(2, 'Query must be at least 2 characters'),
   projectId: z.string().uuid().optional(),
   limit: z.coerce.number().min(1).max(50).default(5),
+  mode: z.enum(['chunks', 'docs']).default('chunks'),
 });
 
 export async function GET(request: NextRequest) {
@@ -33,14 +34,30 @@ export async function GET(request: NextRequest) {
       q: searchParams.get('q'),
       projectId: searchParams.get('projectId') || undefined,
       limit: searchParams.get('limit') || 5,
+      mode: searchParams.get('mode') || undefined,
     });
 
     if (!query.success) {
       return agentError('VALIDATION_ERROR', query.error.issues[0].message, 400);
     }
 
-    const { q, projectId, limit } = query.data;
+    const { q, projectId, limit, mode } = query.data;
 
+    if (mode === 'docs') {
+      const results = await docChunksRepository.hybridSearchDocs(orgId, q, {
+        projectId,
+        limit,
+      });
+
+      return NextResponse.json({
+        success: true,
+        mode: 'docs',
+        data: results,
+        meta: { total: results.length, query: q },
+      });
+    }
+
+    // Default: chunk-level search (backward compatible)
     const results = await docChunksRepository.hybridSearch(orgId, q, {
       projectId,
       limit,
