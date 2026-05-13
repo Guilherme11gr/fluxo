@@ -129,6 +129,64 @@ async function callEmbeddingApi(texts: string[]): Promise<EmbeddingVector[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Query Embedding Cache (LRU + TTL)
+// ---------------------------------------------------------------------------
+
+interface CacheEntry {
+  embedding: EmbeddingVector;
+  timestamp: number;
+}
+
+const CACHE_MAX_SIZE = 200;
+const CACHE_TTL_MS = 60 * 60 * 1_000; // 1 hour
+
+const embeddingCache = new Map<string, CacheEntry>();
+
+/**
+ * Normalise text for cache key: lowercase, collapse whitespace, trim.
+ */
+function cacheKey(text: string): string {
+  return text.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Look up a cached embedding. Returns undefined on miss or expired entry.
+ */
+function getCached(text: string): EmbeddingVector | undefined {
+  const key = cacheKey(text);
+  const entry = embeddingCache.get(key);
+  if (!entry) return undefined;
+
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    embeddingCache.delete(key);
+    return undefined;
+  }
+
+  // Move to end (most-recently used) for LRU eviction
+  embeddingCache.delete(key);
+  embeddingCache.set(key, entry);
+
+  return entry.embedding;
+}
+
+/**
+ * Store an embedding in cache, evicting oldest entry if at capacity.
+ */
+function setCache(text: string, embedding: EmbeddingVector): void {
+  const key = cacheKey(text);
+
+  // Evict oldest (first) entry if at capacity
+  if (embeddingCache.size >= CACHE_MAX_SIZE) {
+    const oldest = embeddingCache.keys().next().value;
+    if (oldest !== undefined) {
+      embeddingCache.delete(oldest);
+    }
+  }
+
+  embeddingCache.set(key, { embedding, timestamp: Date.now() });
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -136,8 +194,10 @@ async function callEmbeddingApi(texts: string[]): Promise<EmbeddingVector[]> {
  * Generate an embedding vector for a single text string.
  *
  * Uses the `text-embedding-3-small` model (1536 dimensions).
+ * Results are cached in-memory with LRU eviction (200 entries, 1h TTL).
  *
  * @param text - The text to embed.
+ * @param useCache - Whether to check/populate cache (default: true).
  * @returns A promise that resolves to the embedding vector.
  *
  * @example
@@ -146,9 +206,20 @@ async function callEmbeddingApi(texts: string[]): Promise<EmbeddingVector[]> {
  * console.log(vector.length); // 1536
  * ```
  */
-export async function getEmbedding(text: string): Promise<EmbeddingVector> {
+export async function getEmbedding(text: string, useCache = true): Promise<EmbeddingVector> {
+  if (useCache) {
+    const cached = getCached(text);
+    if (cached) return cached;
+  }
+
   const embeddings = await callEmbeddingApi([text]);
-  return embeddings[0];
+  const embedding = embeddings[0];
+
+  if (useCache) {
+    setCache(text, embedding);
+  }
+
+  return embedding;
 }
 
 /**
