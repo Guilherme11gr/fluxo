@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { buildDeterministicBranchName } from './claim-next-task';
 
+describe('claim next task helpers', () => {
+  it('keeps branch building deterministic', () => {
+    const name = buildDeterministicBranchName(
+      '3044ff8c-73b9-40ae-b7fb-a9c6837baf1f',
+      'TASK',
+      'builder',
+      null,
+    );
+    expect(name).toBe('builder/task-3044ff8c');
+  });
+});
+
 describe('buildDeterministicBranchName', () => {
   it('builds a branch name from task metadata', () => {
     const name = buildDeterministicBranchName(

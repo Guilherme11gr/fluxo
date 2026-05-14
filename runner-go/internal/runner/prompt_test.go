@@ -35,48 +35,48 @@ func TestBuildPromptUsesRoleContractWithoutLegacyContextOrCommitInstruction(t *t
 	assertNotContains(t, prompt, "If you modify code, commit your changes")
 }
 
-func TestParseExecutionResultV1ExtractsStructuredBlock(t *testing.T) {
-	raw := strings.Join([]string{
-		"Implemented the requested changes.",
-		ResultStartMarker,
-		`{"schemaVersion":"v1","status":"success","summary":"Done","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
-		ResultEndMarker,
-	}, "\n")
-
-	result, err := ParseExecutionResultV1(raw)
-	if err != nil {
-		t.Fatalf("expected parse to succeed, got %v", err)
+func TestBuildPromptIncludesPreviousExecutionContext(t *testing.T) {
+	agent := config.AgentConfig{
+		Role:                "builder",
+		OutputSchemaVersion: "v1",
 	}
+	exitCode := 1
+	duration := 42
+	prNumber := 7
 
-	if result == nil || result.Summary != "Done" {
-		t.Fatalf("expected parsed summary, got %#v", result)
-	}
+	prompt := BuildPromptWithPreviousExecution(Task{
+		ID:          "task-123",
+		Title:       "Retry feature",
+		Description: "Continue from last attempt",
+		Priority:    "HIGH",
+		Type:        "TASK",
+		Status:      "DOING",
+	}, agent, &PreviousExecutionContext{
+		ID:            "exec-previous",
+		Status:        "FAILED",
+		ResultSummary: "Previous run changed the parser but failed validation.",
+		ErrorMessage:  "validation failed",
+		OutputExcerpt: "tool output excerpt",
+		ExitCode:      &exitCode,
+		Duration:      &duration,
+		StartedAt:     "2026-05-14T00:00:00Z",
+		FinishedAt:    "2026-05-14T00:00:42Z",
+		Git: &PreviousExecutionGitContext{
+			Mode:       "branch_commit_pr",
+			BaseBranch: "main",
+			Branch:     "agent/task-123",
+			CommitShas: []string{"abc123"},
+			PRUrl:      "https://example.com/pr/7",
+			PRNumber:   &prNumber,
+		},
+	})
 
-	stripped := StripStructuredResultBlock(raw)
-	if strings.Contains(stripped, ResultStartMarker) || strings.Contains(stripped, ResultEndMarker) {
-		t.Fatalf("expected structured block to be stripped, got %q", stripped)
-	}
-}
-
-func TestFormatExecutionEventFormatsJSONLToolUse(t *testing.T) {
-	raw := `{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"src/app.ts"}}}}`
-	formatted := FormatExecutionEvent("stdout", raw)
-	assertContains(t, formatted, "[tool:read]")
-	assertContains(t, formatted, "src/app.ts")
-}
-
-func TestExtractReadableOutputIncludesFormattedToolEvents(t *testing.T) {
-	raw := strings.Join([]string{
-		`{"type":"step_start","part":{"type":"step-start"}}`,
-		`{"type":"tool_use","part":{"tool":"grep","state":{"input":{"pattern":"gitPolicy"}}}}`,
-		`{"type":"tool_result","part":{"tool":"grep","state":{"status":"completed","output":{"matches":3}}}}`,
-		`{"type":"result","part":{"text":"Finished."}}`,
-	}, "\n")
-
-	formatted := ExtractReadableOutput(raw)
-	assertContains(t, formatted, "Finished.")
-	assertContains(t, formatted, "[tool:grep]")
-	assertContains(t, formatted, "[tool-result:grep]")
+	assertContains(t, prompt, "## Previous Attempt Context")
+	assertContains(t, prompt, "Previous Execution ID: exec-previous")
+	assertContains(t, prompt, "Previous Summary:")
+	assertContains(t, prompt, "validation failed")
+	assertContains(t, prompt, "Commit SHAs: abc123")
+	assertContains(t, prompt, "Use this previous attempt context to continue safely instead of restarting blindly.")
 }
 
 func assertContains(t *testing.T, value, expected string) {

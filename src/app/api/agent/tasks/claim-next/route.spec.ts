@@ -86,6 +86,25 @@ describe('POST /api/agent/tasks/claim-next', () => {
         gitPolicy: 'branch_commit_pr',
         metadata: {},
       },
+      previousExecution: {
+        id: 'exec-previous',
+        status: 'FAILED',
+        resultSummary: 'Previous run failed after partial changes',
+        errorMessage: 'command failed',
+        outputExcerpt: 'output excerpt',
+        exitCode: 1,
+        duration: 30,
+        startedAt: new Date('2026-05-13T23:59:00Z'),
+        finishedAt: new Date('2026-05-13T23:59:30Z'),
+        git: {
+          mode: 'branch_commit_pr',
+          baseBranch: 'main',
+          branch: 'agent/task-1',
+          commitShas: ['abc123'],
+          prUrl: null,
+          prNumber: null,
+        },
+      },
     });
   });
 
@@ -122,6 +141,13 @@ describe('POST /api/agent/tasks/claim-next', () => {
         repoPath: 'D:/code/fluxo',
         executionMode: 'branch_per_task',
         gitPolicy: 'branch_commit_pr',
+      })
+    );
+    expect(json.data.previousExecution).toEqual(
+      expect.objectContaining({
+        id: 'exec-previous',
+        status: 'FAILED',
+        errorMessage: 'command failed',
       })
     );
   });

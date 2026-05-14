@@ -28,6 +28,9 @@ type RunnerManager struct {
 	workers  map[string]*AgentWorker
 }
 
+const staleExecutionGraceMultiplier = 3
+const minimumStaleExecutionWindow = 90 * time.Second
+
 func NewRunnerManager(apiURL, apiKey string, pollInterval, heartbeat time.Duration, availableModels []string, syncer *agentsync.AgentSyncer, agentFlag string) *RunnerManager {
 	return &RunnerManager{
 		apiURL:          apiURL,
@@ -74,6 +77,7 @@ func (m *RunnerManager) Start(ctx context.Context, agents []config.AgentConfig) 
 		return err
 	}
 
+	m.reapStaleExecutions("startup")
 	go m.reaperLoop(ctx)
 	m.reconcileAgents(ctx, agents)
 	ticker := time.NewTicker(m.pollInterval)
@@ -97,6 +101,7 @@ func (m *RunnerManager) RunOnce(ctx context.Context, agents []config.AgentConfig
 	if err := m.Register(ctx); err != nil {
 		return err
 	}
+	m.reapStaleExecutions("startup")
 
 	var wg sync.WaitGroup
 	for _, agent := range agents {
@@ -182,7 +187,7 @@ func (m *RunnerManager) heartbeatLoop(ctx context.Context) {
 			_, err := api.HeartbeatRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), m.runnerID, api.RunnerHeartbeatParams{
 				Status: "ONLINE",
 				Capabilities: map[string]interface{}{
-					"host_os":        runtime.GOOS,
+					"host_os":          runtime.GOOS,
 					"available_models": m.availableModels,
 				},
 				Metadata: map[string]interface{}{
@@ -200,15 +205,36 @@ func (m *RunnerManager) reaperLoop(ctx context.Context) {
 	interval := 60 * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	client := api.NewClient(m.apiURL, m.apiKey, "runner")
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := api.ReapStaleExecutions(client, 10*60*1000); err != nil {
-				fmt.Printf("[runner] reaper error: %v\n", err)
-			}
+			m.reapStaleExecutions("interval")
 		}
 	}
+}
+
+func (m *RunnerManager) reapStaleExecutions(trigger string) {
+	client := api.NewClient(m.apiURL, m.apiKey, "runner")
+	staleAfter := m.staleAfterMilliseconds()
+	if err := api.ReapStaleExecutions(client, staleAfter); err != nil {
+		fmt.Printf("[runner] reaper error (%s): %v\n", trigger, err)
+	}
+}
+
+func (m *RunnerManager) staleAfterMilliseconds() int {
+	base := executionHeartbeatInterval()
+	if base <= 0 {
+		base = minimumStaleExecutionWindow
+	}
+	staleAfter := base * staleExecutionGraceMultiplier
+	if staleAfter < minimumStaleExecutionWindow {
+		staleAfter = minimumStaleExecutionWindow
+	}
+	return int(staleAfter / time.Millisecond)
+}
+
+func executionHeartbeatInterval() time.Duration {
+	return 30 * time.Second
 }

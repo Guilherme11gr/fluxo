@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import {
   prisma,
   agentRepository,
+  agentExecutionRepository,
   runnerInstanceRepository,
   auditLogRepository,
   projectRuntimeBindingRepository,
@@ -69,7 +70,32 @@ export interface ClaimedTaskResult {
     expiresAt: Date;
   };
   runtimeBinding: ResolvedProjectRuntimeBinding | null;
+  previousExecution: PreviousExecutionSummary | null;
 }
+
+export interface PreviousExecutionGitSummary {
+  mode: string | null;
+  baseBranch: string | null;
+  branch: string | null;
+  commitShas: string[];
+  prUrl: string | null;
+  prNumber: number | null;
+}
+
+export interface PreviousExecutionSummary {
+  id: string;
+  status: string;
+  resultSummary: string | null;
+  errorMessage: string | null;
+  outputExcerpt: string | null;
+  exitCode: number | null;
+  duration: number | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+  git: PreviousExecutionGitSummary | null;
+}
+
+type ClaimedTaskBaseResult = Omit<ClaimedTaskResult, 'previousExecution'>;
 
 type CandidateRow = {
   id: string;
@@ -91,6 +117,47 @@ type CandidateRow = {
 type LockedTaskRow = CandidateRow;
 
 const SAFE_BRANCH_RE = /[^a-zA-Z0-9/_\-]/g;
+
+function truncateExecutionText(value: string | null | undefined, max: number): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length <= max) {
+    return normalized;
+  }
+
+  return normalized.slice(0, max);
+}
+
+function extractExecutionGit(metadata: Record<string, unknown>): PreviousExecutionGitSummary | null {
+  const git = metadata.git;
+  if (!git || typeof git !== 'object' || Array.isArray(git)) {
+    return null;
+  }
+
+  const gitRecord = git as Record<string, unknown>;
+  const commitShas = Array.isArray(gitRecord.commitShas)
+    ? gitRecord.commitShas.filter((value): value is string => typeof value === 'string')
+    : [];
+  const prNumber = typeof gitRecord.prNumber === 'number'
+    ? gitRecord.prNumber
+    : null;
+
+  return {
+    mode: typeof gitRecord.mode === 'string' ? gitRecord.mode : null,
+    baseBranch: typeof gitRecord.baseBranch === 'string' ? gitRecord.baseBranch : null,
+    branch: typeof gitRecord.branch === 'string' ? gitRecord.branch : null,
+    commitShas,
+    prUrl: typeof gitRecord.prUrl === 'string' ? gitRecord.prUrl : null,
+    prNumber,
+  };
+}
 
 export function buildDeterministicBranchName(
   taskId: string,
@@ -331,7 +398,7 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
           expiresAt: leaseRows[0].expiresAt,
         },
         runtimeBinding,
-      } satisfies ClaimedTaskResult;
+      } satisfies ClaimedTaskBaseResult;
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     }).catch((error) => {
@@ -346,6 +413,26 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
     });
 
     if (claimed) {
+      const previousExecutionRecord = await agentExecutionRepository.findLatestCompletedByTaskId(
+        claimed.task.id,
+        input.orgId,
+        claimed.execution.id,
+      );
+      const previousExecution = previousExecutionRecord
+        ? {
+            id: previousExecutionRecord.id,
+            status: previousExecutionRecord.status,
+            resultSummary: truncateExecutionText(previousExecutionRecord.resultSummary, 1000),
+            errorMessage: truncateExecutionText(previousExecutionRecord.errorMessage, 1000),
+            outputExcerpt: truncateExecutionText(previousExecutionRecord.output, 2000),
+            exitCode: previousExecutionRecord.exitCode,
+            duration: previousExecutionRecord.duration,
+            startedAt: previousExecutionRecord.startedAt,
+            finishedAt: previousExecutionRecord.finishedAt,
+            git: extractExecutionGit(previousExecutionRecord.metadata),
+          }
+        : null;
+
       await auditLogRepository.log({
         orgId: input.orgId,
         userId: input.userId,
@@ -365,7 +452,10 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
         },
       }).catch(() => {});
 
-      return claimed;
+      return {
+        ...claimed,
+        previousExecution,
+      };
     }
   }
 

@@ -18,6 +18,28 @@ type Task struct {
 	Status      string `json:"status"`
 }
 
+type PreviousExecutionContext struct {
+	ID            string
+	Status        string
+	ResultSummary string
+	ErrorMessage  string
+	OutputExcerpt string
+	ExitCode      *int
+	Duration      *int
+	StartedAt     string
+	FinishedAt    string
+	Git           *PreviousExecutionGitContext
+}
+
+type PreviousExecutionGitContext struct {
+	Mode       string
+	BaseBranch string
+	Branch     string
+	CommitShas []string
+	PRUrl      string
+	PRNumber   *int
+}
+
 const (
 	ResultStartMarker = "FLUXO_RESULT_JSON_START"
 	ResultEndMarker   = "FLUXO_RESULT_JSON_END"
@@ -25,6 +47,10 @@ const (
 
 // BuildPrompt constructs the full prompt sent to the coding agent.
 func BuildPrompt(task Task, agent config.AgentConfig) string {
+	return BuildPromptWithPreviousExecution(task, agent, nil)
+}
+
+func BuildPromptWithPreviousExecution(task Task, agent config.AgentConfig, previousExecution *PreviousExecutionContext) string {
 	var prompt strings.Builder
 
 	role := strings.TrimSpace(agent.Role)
@@ -51,9 +77,65 @@ func BuildPrompt(task Task, agent config.AgentConfig) string {
 	prompt.WriteString(fmt.Sprintf("\nTask ID: %s\n", task.ID))
 	prompt.WriteString(fmt.Sprintf("Priority: %s\n", defaultStr(task.Priority, "MEDIUM")))
 	prompt.WriteString(fmt.Sprintf("Type: %s\n", defaultStr(task.Type, "TASK")))
+	prompt.WriteString(fmt.Sprintf("Current Status: %s\n", defaultStr(task.Status, "TODO")))
 
 	if agent.Workdir != "" {
 		prompt.WriteString(fmt.Sprintf("Working directory: %s\n", agent.Workdir))
+	}
+
+	if previousExecution != nil {
+		prompt.WriteString("\n## Previous Attempt Context\n")
+		prompt.WriteString(fmt.Sprintf("Previous Execution ID: %s\n", previousExecution.ID))
+		prompt.WriteString(fmt.Sprintf("Previous Status: %s\n", defaultStr(previousExecution.Status, "UNKNOWN")))
+		if previousExecution.StartedAt != "" {
+			prompt.WriteString(fmt.Sprintf("Started At: %s\n", previousExecution.StartedAt))
+		}
+		if previousExecution.FinishedAt != "" {
+			prompt.WriteString(fmt.Sprintf("Finished At: %s\n", previousExecution.FinishedAt))
+		}
+		if previousExecution.Duration != nil {
+			prompt.WriteString(fmt.Sprintf("Duration Seconds: %d\n", *previousExecution.Duration))
+		}
+		if previousExecution.ExitCode != nil {
+			prompt.WriteString(fmt.Sprintf("Exit Code: %d\n", *previousExecution.ExitCode))
+		}
+		if previousExecution.ResultSummary != "" {
+			prompt.WriteString("\nPrevious Summary:\n")
+			prompt.WriteString(previousExecution.ResultSummary)
+			prompt.WriteString("\n")
+		}
+		if previousExecution.ErrorMessage != "" {
+			prompt.WriteString("\nPrevious Error:\n")
+			prompt.WriteString(previousExecution.ErrorMessage)
+			prompt.WriteString("\n")
+		}
+		if previousExecution.OutputExcerpt != "" {
+			prompt.WriteString("\nPrevious Output Excerpt:\n")
+			prompt.WriteString(previousExecution.OutputExcerpt)
+			prompt.WriteString("\n")
+		}
+		if previousExecution.Git != nil {
+			prompt.WriteString("\nPrevious Git Context:\n")
+			if previousExecution.Git.Mode != "" {
+				prompt.WriteString(fmt.Sprintf("- Mode: %s\n", previousExecution.Git.Mode))
+			}
+			if previousExecution.Git.BaseBranch != "" {
+				prompt.WriteString(fmt.Sprintf("- Base Branch: %s\n", previousExecution.Git.BaseBranch))
+			}
+			if previousExecution.Git.Branch != "" {
+				prompt.WriteString(fmt.Sprintf("- Branch: %s\n", previousExecution.Git.Branch))
+			}
+			if len(previousExecution.Git.CommitShas) > 0 {
+				prompt.WriteString(fmt.Sprintf("- Commit SHAs: %s\n", strings.Join(previousExecution.Git.CommitShas, ", ")))
+			}
+			if previousExecution.Git.PRUrl != "" {
+				prompt.WriteString(fmt.Sprintf("- PR URL: %s\n", previousExecution.Git.PRUrl))
+			}
+			if previousExecution.Git.PRNumber != nil {
+				prompt.WriteString(fmt.Sprintf("- PR Number: %d\n", *previousExecution.Git.PRNumber))
+			}
+		}
+		prompt.WriteString("\nUse this previous attempt context to continue safely instead of restarting blindly.\n")
 	}
 
 	prompt.WriteString("\n## Operating Rules\n")
@@ -140,5 +222,5 @@ func buildOutputSchemaExample(version string) string {
   "followups": [],
   "memoryCandidates": [],
   "skillCandidates": []
-}` , version)
+}`, version)
 }

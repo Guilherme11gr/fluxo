@@ -42,10 +42,10 @@ type ClaimedTaskResponse struct {
 		StartedAt        string                 `json:"startedAt"`
 	} `json:"execution"`
 	Lease struct {
-		ID         string `json:"id"`
-		ProjectID  string `json:"projectId"`
+		ID          string `json:"id"`
+		ProjectID   string `json:"projectId"`
 		ExecutionID string `json:"executionId"`
-		ExpiresAt  string `json:"expiresAt"`
+		ExpiresAt   string `json:"expiresAt"`
 	} `json:"lease"`
 	RuntimeBinding struct {
 		ID                  string                 `json:"id"`
@@ -61,6 +61,25 @@ type ClaimedTaskResponse struct {
 		GitPolicy           string                 `json:"gitPolicy"`
 		Metadata            map[string]interface{} `json:"metadata"`
 	} `json:"runtimeBinding"`
+	PreviousExecution *struct {
+		ID            string `json:"id"`
+		Status        string `json:"status"`
+		ResultSummary string `json:"resultSummary"`
+		ErrorMessage  string `json:"errorMessage"`
+		OutputExcerpt string `json:"outputExcerpt"`
+		ExitCode      *int   `json:"exitCode"`
+		Duration      *int   `json:"duration"`
+		StartedAt     string `json:"startedAt"`
+		FinishedAt    string `json:"finishedAt"`
+		Git           *struct {
+			Mode       string   `json:"mode"`
+			BaseBranch string   `json:"baseBranch"`
+			Branch     string   `json:"branch"`
+			CommitShas []string `json:"commitShas"`
+			PRUrl      string   `json:"prUrl"`
+			PRNumber   *int     `json:"prNumber"`
+		} `json:"git"`
+	} `json:"previousExecution"`
 }
 
 func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResponse, error) {
@@ -158,6 +177,70 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 		result.RuntimeBinding.GitPolicy, _ = runtimeBindingData["gitPolicy"].(string)
 		if metadata, ok := runtimeBindingData["metadata"].(map[string]interface{}); ok {
 			result.RuntimeBinding.Metadata = metadata
+		}
+	}
+	if previousExecutionData, ok := data["previousExecution"].(map[string]interface{}); ok {
+		result.PreviousExecution = &struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			ResultSummary string `json:"resultSummary"`
+			ErrorMessage  string `json:"errorMessage"`
+			OutputExcerpt string `json:"outputExcerpt"`
+			ExitCode      *int   `json:"exitCode"`
+			Duration      *int   `json:"duration"`
+			StartedAt     string `json:"startedAt"`
+			FinishedAt    string `json:"finishedAt"`
+			Git           *struct {
+				Mode       string   `json:"mode"`
+				BaseBranch string   `json:"baseBranch"`
+				Branch     string   `json:"branch"`
+				CommitShas []string `json:"commitShas"`
+				PRUrl      string   `json:"prUrl"`
+				PRNumber   *int     `json:"prNumber"`
+			} `json:"git"`
+		}{}
+
+		result.PreviousExecution.ID, _ = previousExecutionData["id"].(string)
+		result.PreviousExecution.Status, _ = previousExecutionData["status"].(string)
+		result.PreviousExecution.ResultSummary, _ = previousExecutionData["resultSummary"].(string)
+		result.PreviousExecution.ErrorMessage, _ = previousExecutionData["errorMessage"].(string)
+		result.PreviousExecution.OutputExcerpt, _ = previousExecutionData["outputExcerpt"].(string)
+		result.PreviousExecution.StartedAt, _ = previousExecutionData["startedAt"].(string)
+		result.PreviousExecution.FinishedAt, _ = previousExecutionData["finishedAt"].(string)
+
+		if exitCode, ok := previousExecutionData["exitCode"].(float64); ok {
+			parsed := int(exitCode)
+			result.PreviousExecution.ExitCode = &parsed
+		}
+		if duration, ok := previousExecutionData["duration"].(float64); ok {
+			parsed := int(duration)
+			result.PreviousExecution.Duration = &parsed
+		}
+		if gitData, ok := previousExecutionData["git"].(map[string]interface{}); ok {
+			result.PreviousExecution.Git = &struct {
+				Mode       string   `json:"mode"`
+				BaseBranch string   `json:"baseBranch"`
+				Branch     string   `json:"branch"`
+				CommitShas []string `json:"commitShas"`
+				PRUrl      string   `json:"prUrl"`
+				PRNumber   *int     `json:"prNumber"`
+			}{}
+			result.PreviousExecution.Git.Mode, _ = gitData["mode"].(string)
+			result.PreviousExecution.Git.BaseBranch, _ = gitData["baseBranch"].(string)
+			result.PreviousExecution.Git.Branch, _ = gitData["branch"].(string)
+			result.PreviousExecution.Git.PRUrl, _ = gitData["prUrl"].(string)
+			if commitShas, ok := gitData["commitShas"].([]interface{}); ok {
+				result.PreviousExecution.Git.CommitShas = make([]string, 0, len(commitShas))
+				for _, value := range commitShas {
+					if sha, ok := value.(string); ok {
+						result.PreviousExecution.Git.CommitShas = append(result.PreviousExecution.Git.CommitShas, sha)
+					}
+				}
+			}
+			if prNumber, ok := gitData["prNumber"].(float64); ok {
+				parsed := int(prNumber)
+				result.PreviousExecution.Git.PRNumber = &parsed
+			}
 		}
 	}
 

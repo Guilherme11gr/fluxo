@@ -27,6 +27,19 @@ export interface AgentExecutionRecord {
   updatedAt: Date;
 }
 
+export interface PreviousTaskExecutionRecord {
+  id: string;
+  status: AgentExecStatus;
+  resultSummary: string | null;
+  errorMessage: string | null;
+  output: string | null;
+  exitCode: number | null;
+  duration: number | null;
+  metadata: Record<string, unknown>;
+  startedAt: Date;
+  finishedAt: Date | null;
+}
+
 function mapRecord(record: any): AgentExecutionRecord {
   return {
     id: record.id,
@@ -178,6 +191,50 @@ export class AgentExecutionRepository {
       orderBy: { createdAt: 'desc' },
     });
     return records.map(mapRecord);
+  }
+
+  async findLatestCompletedByTaskId(taskId: string, orgId: string, excludeId?: string): Promise<PreviousTaskExecutionRecord | null> {
+    const record = await this.client.agentExecution.findFirst({
+      where: {
+        taskId,
+        orgId,
+        status: { in: ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED'] },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      orderBy: [
+        { finishedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      select: {
+        id: true,
+        status: true,
+        resultSummary: true,
+        errorMessage: true,
+        output: true,
+        exitCode: true,
+        duration: true,
+        metadata: true,
+        startedAt: true,
+        finishedAt: true,
+      },
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return {
+      id: record.id,
+      status: record.status,
+      resultSummary: record.resultSummary,
+      errorMessage: record.errorMessage,
+      output: record.output,
+      exitCode: record.exitCode,
+      duration: record.duration,
+      metadata: (record.metadata ?? {}) as Record<string, unknown>,
+      startedAt: record.startedAt,
+      finishedAt: record.finishedAt,
+    };
   }
 
   async findByAgentId(agentId: string, orgId: string, limit = 10): Promise<AgentExecutionRecord[]> {

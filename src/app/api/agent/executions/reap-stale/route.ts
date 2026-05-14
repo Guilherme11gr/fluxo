@@ -28,8 +28,8 @@ export async function POST(request: Request) {
         auth.orgId,
         auth.userId,
         {
-          blocked: true,
-          blockReason: 'Execution timed out (stale runner/execution heartbeat)',
+          blocked: false,
+          blockReason: null,
           status: 'TODO',
         },
         { taskRepository, auditLogRepository, agentRepository },

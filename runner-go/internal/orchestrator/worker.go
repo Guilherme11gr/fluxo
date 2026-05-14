@@ -14,24 +14,24 @@ import (
 )
 
 type AgentWorker struct {
-	apiURL   string
-	apiKey   string
-	runnerID string
+	apiURL       string
+	apiKey       string
+	runnerID     string
 	pollInterval time.Duration
 
 	mu     sync.RWMutex
-	agent   config.AgentConfig
+	agent  config.AgentConfig
 	stopCh chan struct{}
 }
 
 func NewAgentWorker(apiURL, apiKey, runnerID string, agent config.AgentConfig, pollInterval time.Duration) *AgentWorker {
 	return &AgentWorker{
-		apiURL:   apiURL,
-		apiKey:   apiKey,
-		runnerID: runnerID,
+		apiURL:       apiURL,
+		apiKey:       apiKey,
+		runnerID:     runnerID,
 		pollInterval: pollInterval,
-		agent:    agent,
-		stopCh:   make(chan struct{}),
+		agent:        agent,
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -141,18 +141,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"model": agent.Model,
 				"git":   runner.GitMetadataMap(failedGitSnapshot),
 				"runtimeBinding": map[string]interface{}{
-					"id": claimed.RuntimeBinding.ID,
-					"projectId": claimed.RuntimeBinding.ProjectID,
-					"runnerProfile": claimed.RuntimeBinding.RunnerProfile,
-					"hostOs": claimed.RuntimeBinding.HostOS,
-					"repoPath": claimed.RuntimeBinding.RepoPath,
-					"defaultBaseBranch": claimed.RuntimeBinding.DefaultBaseBranch,
+					"id":                  claimed.RuntimeBinding.ID,
+					"projectId":           claimed.RuntimeBinding.ProjectID,
+					"runnerProfile":       claimed.RuntimeBinding.RunnerProfile,
+					"hostOs":              claimed.RuntimeBinding.HostOS,
+					"repoPath":            claimed.RuntimeBinding.RepoPath,
+					"defaultBaseBranch":   claimed.RuntimeBinding.DefaultBaseBranch,
 					"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
-					"executionMode": claimed.RuntimeBinding.ExecutionMode,
-					"gitProvider": claimed.RuntimeBinding.GitProvider,
-					"prPolicy": claimed.RuntimeBinding.PRPolicy,
-					"gitPolicy": claimed.RuntimeBinding.GitPolicy,
-					"metadata": claimed.RuntimeBinding.Metadata,
+					"executionMode":       claimed.RuntimeBinding.ExecutionMode,
+					"gitProvider":         claimed.RuntimeBinding.GitProvider,
+					"prPolicy":            claimed.RuntimeBinding.PRPolicy,
+					"gitPolicy":           claimed.RuntimeBinding.GitPolicy,
+					"metadata":            claimed.RuntimeBinding.Metadata,
 				},
 			},
 		})
@@ -182,7 +182,32 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		"agentId": agent.ID,
 	})
 
-	prompt := runner.BuildPrompt(runner.Task{
+	var previousExecution *runner.PreviousExecutionContext
+	if claimed.PreviousExecution != nil {
+		previousExecution = &runner.PreviousExecutionContext{
+			ID:            claimed.PreviousExecution.ID,
+			Status:        claimed.PreviousExecution.Status,
+			ResultSummary: claimed.PreviousExecution.ResultSummary,
+			ErrorMessage:  claimed.PreviousExecution.ErrorMessage,
+			OutputExcerpt: claimed.PreviousExecution.OutputExcerpt,
+			ExitCode:      claimed.PreviousExecution.ExitCode,
+			Duration:      claimed.PreviousExecution.Duration,
+			StartedAt:     claimed.PreviousExecution.StartedAt,
+			FinishedAt:    claimed.PreviousExecution.FinishedAt,
+		}
+		if claimed.PreviousExecution.Git != nil {
+			previousExecution.Git = &runner.PreviousExecutionGitContext{
+				Mode:       claimed.PreviousExecution.Git.Mode,
+				BaseBranch: claimed.PreviousExecution.Git.BaseBranch,
+				Branch:     claimed.PreviousExecution.Git.Branch,
+				CommitShas: claimed.PreviousExecution.Git.CommitShas,
+				PRUrl:      claimed.PreviousExecution.Git.PRUrl,
+				PRNumber:   claimed.PreviousExecution.Git.PRNumber,
+			}
+		}
+	}
+
+	prompt := runner.BuildPromptWithPreviousExecution(runner.Task{
 		ID:          claimed.Task.ID,
 		Title:       claimed.Task.Title,
 		Description: claimed.Task.Description,
@@ -190,7 +215,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		Type:        claimed.Task.Type,
 		ProjectID:   claimed.Task.ProjectID,
 		Status:      claimed.Task.Status,
-	}, agent)
+	}, agent, previousExecution)
 
 	var exec executor.Executor
 	switch agent.Tool {
@@ -232,7 +257,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(executionHeartbeatInterval())
 		defer ticker.Stop()
 		for {
 			select {
@@ -312,18 +337,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			"model": agent.Model,
 			"git":   runner.GitMetadataMap(gitSnapshot),
 			"runtimeBinding": map[string]interface{}{
-				"id":                    claimed.RuntimeBinding.ID,
-				"projectId":             claimed.RuntimeBinding.ProjectID,
-				"runnerProfile":         claimed.RuntimeBinding.RunnerProfile,
-				"hostOs":                claimed.RuntimeBinding.HostOS,
-				"repoPath":              claimed.RuntimeBinding.RepoPath,
-				"defaultBaseBranch":     claimed.RuntimeBinding.DefaultBaseBranch,
-				"allowedBranchPrefix":   claimed.RuntimeBinding.AllowedBranchPrefix,
-				"executionMode":         claimed.RuntimeBinding.ExecutionMode,
-				"gitProvider":           claimed.RuntimeBinding.GitProvider,
-				"prPolicy":              claimed.RuntimeBinding.PRPolicy,
-				"gitPolicy":             claimed.RuntimeBinding.GitPolicy,
-				"metadata":              claimed.RuntimeBinding.Metadata,
+				"id":                  claimed.RuntimeBinding.ID,
+				"projectId":           claimed.RuntimeBinding.ProjectID,
+				"runnerProfile":       claimed.RuntimeBinding.RunnerProfile,
+				"hostOs":              claimed.RuntimeBinding.HostOS,
+				"repoPath":            claimed.RuntimeBinding.RepoPath,
+				"defaultBaseBranch":   claimed.RuntimeBinding.DefaultBaseBranch,
+				"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
+				"executionMode":       claimed.RuntimeBinding.ExecutionMode,
+				"gitProvider":         claimed.RuntimeBinding.GitProvider,
+				"prPolicy":            claimed.RuntimeBinding.PRPolicy,
+				"gitPolicy":           claimed.RuntimeBinding.GitPolicy,
+				"metadata":            claimed.RuntimeBinding.Metadata,
 			},
 		},
 	}
