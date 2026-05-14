@@ -21,6 +21,9 @@ import { DocSearchRepository } from './doc-search.repository';
 import { DocChunksRepository } from './doc-chunks.repository';
 import { AgentRepository } from './agent.repository';
 import { AgentExecutionRepository } from './agent-execution.repository';
+import { RunnerInstanceRepository } from './runner-instance.repository';
+import { ExecutionLeaseRepository } from './execution-lease.repository';
+import { AgentExecutionEventRepository } from './agent-execution-event.repository';
 
 // Singleton Prisma Client
 // https://www.prisma.io/docs/guides/performance-and-optimization/connection-management#prismaclient-in-long-running-applications
@@ -86,6 +89,9 @@ export const docSearchRepository = new DocSearchRepository(prisma);
 export const docChunksRepository = new DocChunksRepository(prisma);
 export const agentRepository = new AgentRepository(prisma);
 export const agentExecutionRepository = new AgentExecutionRepository(prisma);
+export const runnerInstanceRepository = new RunnerInstanceRepository(prisma);
+export const executionLeaseRepository = new ExecutionLeaseRepository(prisma);
+export const agentExecutionEventRepository = new AgentExecutionEventRepository(prisma);
 
 // Re-export for convenience
 export {
@@ -104,6 +110,10 @@ export {
   OrgMembershipRepository,
   AgentApiKeyRepository,
   AgentExecutionRepository,
+  AgentRepository,
+  RunnerInstanceRepository,
+  ExecutionLeaseRepository,
+  AgentExecutionEventRepository,
   DocSearchRepository,
   DocChunksRepository,
 };

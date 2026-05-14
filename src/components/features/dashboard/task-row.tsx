@@ -8,6 +8,10 @@ import { cn } from '@/lib/utils';
 import { useTaskModal } from '@/providers/task-modal-provider';
 import type { TaskWithReadableId } from '@/shared/types';
 
+function getAssigneeDisplay(task: TaskWithReadableId) {
+  return task.assignee?.displayName || task.assigneeAgent?.name;
+}
+
 interface TaskRowProps {
   task: TaskWithReadableId;
   showProject?: boolean;
@@ -73,12 +77,12 @@ export function TaskRow({ task, showProject = false, showAssignee = false }: Tas
               • {task.feature.epic.project.name}
             </span>
           )}
-          {showAssignee && task.assigneeId && (
+          {showAssignee && (task.assigneeId || task.assigneeAgentId) && (
             <>
               <span className="text-xs text-muted-foreground shrink-0">•</span>
               <UserAvatar 
-                userId={task.assigneeId}
-                displayName={task.assignee?.displayName}
+                userId={task.assigneeId || undefined}
+                displayName={getAssigneeDisplay(task)}
                 avatarUrl={task.assignee?.avatarUrl}
                 size="sm"
                 showTooltip

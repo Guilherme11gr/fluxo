@@ -24,6 +24,20 @@ import { SyncIndicator } from '@/components/ui/sync-indicator';
 import { OptimisticWrapper } from '@/components/ui/optimistic-wrapper';
 import type { TaskWithReadableId } from '@/shared/types';
 
+function getAssigneeLabel(task: TaskWithReadableId) {
+  return task.assignee?.displayName || task.assigneeAgent?.name || 'Assignee';
+}
+
+function getAssigneeInitials(task: TaskWithReadableId) {
+  if (task.assignee?.displayName) {
+    return task.assignee.displayName.slice(0, 2).toUpperCase();
+  }
+  if (task.assigneeAgent?.name) {
+    return task.assigneeAgent.name.slice(0, 2).toUpperCase();
+  }
+  return (task.assigneeId || task.assigneeAgentId || 'AS').slice(0, 2).toUpperCase();
+}
+
 // Generate consistent colors for modules based on hash (legacy fallback)
 const MODULE_COLORS = [
   'bg-purple-500/20 text-purple-300 border-purple-500/30',
@@ -205,11 +219,11 @@ export function TaskCard({
       {/* Footer: Avatar + Points + Bug + Blocked */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {task.assigneeId && (
-            <Avatar className="h-5 w-5" title={task.assignee?.displayName || 'Assignee'}>
+          {(task.assigneeId || task.assigneeAgentId) && (
+            <Avatar className="h-5 w-5" title={getAssigneeLabel(task)}>
               <AvatarImage src={task.assignee?.avatarUrl || undefined} />
               <AvatarFallback className="text-[10px] bg-muted">
-                {task.assignee?.displayName?.slice(0, 2).toUpperCase() || task.assigneeId.slice(0, 2).toUpperCase()}
+                {getAssigneeInitials(task)}
               </AvatarFallback>
             </Avatar>
           )}

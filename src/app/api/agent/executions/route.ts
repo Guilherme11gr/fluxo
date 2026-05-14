@@ -13,10 +13,15 @@ export const dynamic = 'force-dynamic';
 
 const createSchema = z.object({
   agentId: z.string().optional(),
+  runnerInstanceId: z.string().uuid().optional(),
   taskId: z.string().min(1),
   projectId: z.string().min(1),
   tool: z.string().max(50).optional(),
   model: z.string().max(100).optional(),
+  workspaceMode: z.string().max(50).optional(),
+  workspaceRef: z.string().optional(),
+  workspacePath: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   startedAt: z.string().datetime().optional(),
 });
 
@@ -39,10 +44,15 @@ export async function POST(request: Request) {
     const execution = await agentExecutionRepository.create({
       orgId: auth.orgId,
       agentId,
+      runnerInstanceId: data.runnerInstanceId,
       taskId: data.taskId,
       projectId: data.projectId,
       tool: data.tool,
       model: data.model,
+      workspaceMode: data.workspaceMode,
+      workspaceRef: data.workspaceRef,
+      workspacePath: data.workspacePath,
+      metadata: data.metadata,
       startedAt: data.startedAt ? new Date(data.startedAt) : new Date(),
     });
 

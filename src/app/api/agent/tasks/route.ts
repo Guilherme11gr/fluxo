@@ -23,6 +23,7 @@ const listQuerySchema = z.object({
   type: z.enum(['TASK', 'BUG']).optional(),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   assigneeId: z.string().uuid().optional(),
+  assigneeAgentId: z.string().uuid().optional(),
   tagId: z.string().uuid().optional(),
   blocked: z.enum(['true', 'false']).transform((val) => val === 'true').optional(),
   search: z.string().optional(),
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
       type: searchParams.get('type') || undefined,
       priority: searchParams.get('priority') || undefined,
       assigneeId: searchParams.get('assigneeId') || undefined,
+      assigneeAgentId: searchParams.get('assigneeAgentId') || undefined,
       tagId: searchParams.get('tagId') || undefined,
       blocked: searchParams.get('blocked') || undefined,
       search: searchParams.get('search') || undefined,
@@ -54,7 +56,7 @@ export async function GET(request: NextRequest) {
 
     const {
       featureId, epicId, projectId, status,
-      type, priority, assigneeId, tagId, blocked, search,
+      type, priority, assigneeId, assigneeAgentId, tagId, blocked, search,
       limit
     } = query.data;
 
@@ -66,6 +68,7 @@ export async function GET(request: NextRequest) {
     if (type) filter.type = type;
     if (priority) filter.priority = priority;
     if (assigneeId) filter.assigneeId = assigneeId;
+    if (assigneeAgentId) filter.assigneeAgentId = assigneeAgentId;
     if (tagId) filter.tagId = tagId;
     if (blocked !== undefined) filter.blocked = blocked;
     if (search) filter.search = search;

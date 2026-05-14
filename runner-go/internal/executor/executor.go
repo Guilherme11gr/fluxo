@@ -2,11 +2,14 @@ package executor
 
 import (
 	"bytes"
+	"bufio"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fluxo-app/fluxo-runner/internal/config"
@@ -19,12 +22,21 @@ type Result struct {
 	SessionID string
 }
 
+type StreamEvent struct {
+	Seq       int
+	Kind      string
+	Content   string
+	Timestamp time.Time
+}
+
+type StreamFunc func(StreamEvent)
+
 type Executor interface {
-	Execute(ctx context.Context, prompt, workdir string, timeout time.Duration) Result
+	Execute(ctx context.Context, prompt, workdir string, timeout time.Duration, stream StreamFunc) Result
 	Name() string
 }
 
-func runCommand(ctx context.Context, command string, args []string, stdinStr, workdir string, env []string) Result {
+func runCommand(ctx context.Context, command string, args []string, stdinStr, workdir string, env []string, stream StreamFunc) Result {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = workdir
 	if env != nil {
@@ -34,11 +46,58 @@ func runCommand(ctx context.Context, command string, args []string, stdinStr, wo
 	}
 	cmd.Stdin = strings.NewReader(stdinStr)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{Success: false, Output: err.Error(), ExitCode: 1}
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return Result{Success: false, Output: err.Error(), ExitCode: 1}
+	}
 
-	err := cmd.Run()
+	var stdout, stderr bytes.Buffer
+	var seqMu sync.Mutex
+	seq := 0
+	nextSeq := func() int {
+		seqMu.Lock()
+		defer seqMu.Unlock()
+		seq++
+		return seq
+	}
+
+	readPipe := func(kind string, reader io.Reader, buffer *bytes.Buffer, wg *sync.WaitGroup) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(reader)
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
+		for scanner.Scan() {
+			line := stripANSI(scanner.Text())
+			if buffer.Len() > 0 {
+				buffer.WriteString("\n")
+			}
+			buffer.WriteString(line)
+			if stream != nil {
+				stream(StreamEvent{
+					Seq:       nextSeq(),
+					Kind:      kind,
+					Content:   line,
+					Timestamp: time.Now().UTC(),
+				})
+			}
+		}
+	}
+
+	if err := cmd.Start(); err != nil {
+		return Result{Success: false, Output: err.Error(), ExitCode: 1}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go readPipe("stdout", stdoutPipe, &stdout, &wg)
+	go readPipe("stderr", stderrPipe, &stderr, &wg)
+
+	err = cmd.Wait()
+	wg.Wait()
 
 	output := stripANSI(strings.TrimSpace(stdout.String()))
 	errOutput := stripANSI(strings.TrimSpace(stderr.String()))
@@ -74,7 +133,7 @@ type ClaudeExecutor struct {
 
 func (e *ClaudeExecutor) Name() string { return "claude" }
 
-func (e *ClaudeExecutor) Execute(ctx context.Context, prompt, workdir string, timeout time.Duration) Result {
+func (e *ClaudeExecutor) Execute(ctx context.Context, prompt, workdir string, timeout time.Duration, stream StreamFunc) Result {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -89,7 +148,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, prompt, workdir string, ti
 	}
 
 	env := os.Environ()
-	return runCommand(ctx, "claude", args, prompt, workdir, env)
+	return runCommand(ctx, "claude", args, prompt, workdir, env, stream)
 }
 
 type OpenCodeExecutor struct {
@@ -98,7 +157,7 @@ type OpenCodeExecutor struct {
 
 func (e *OpenCodeExecutor) Name() string { return "opencode" }
 
-func (e *OpenCodeExecutor) Execute(ctx context.Context, prompt, workdir string, timeout time.Duration) Result {
+func (e *OpenCodeExecutor) Execute(ctx context.Context, prompt, workdir string, timeout time.Duration, stream StreamFunc) Result {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -120,7 +179,7 @@ func (e *OpenCodeExecutor) Execute(ctx context.Context, prompt, workdir string, 
 	copy(env, os.Environ())
 	env = append(env, "OPENCODE_DISABLE_PROJECT_CONFIG=true")
 
-	return runCommand(ctx, "opencode", args, prompt, workdir, env)
+	return runCommand(ctx, "opencode", args, prompt, workdir, env, stream)
 }
 
 func stripANSI(s string) string {

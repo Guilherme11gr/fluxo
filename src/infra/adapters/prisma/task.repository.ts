@@ -36,6 +36,7 @@ export interface UpdateTaskInput {
   points?: StoryPoints;
   modules?: string[];
   assigneeId?: string | null;
+  assigneeAgentId?: string | null;
   blocked?: boolean;
   focus?: TaskFocus | null;
 }
@@ -148,6 +149,7 @@ export class TaskRepository {
         modules: true,
         localId: true,
         assigneeId: true,
+        assigneeAgentId: true,
         featureId: true,
         createdAt: true,
         updatedAt: true,
@@ -190,6 +192,13 @@ export class TaskRepository {
             },
           },
         },
+        assigneeAgent: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          },
+        },
       },
       // When cursor is provided, don't use skip (cursor handles offset)
       skip: cursor ? 0 : (page - 1) * pageSize,
@@ -218,6 +227,13 @@ export class TaskRepository {
         displayName: task.assignee.user_profiles.displayName,
         avatarUrl: task.assignee.user_profiles.avatarUrl,
       } : undefined,
+      assigneeAgent: task.assigneeAgent
+        ? {
+            id: task.assigneeAgent.id,
+            name: task.assigneeAgent.name,
+            status: task.assigneeAgent.status,
+          }
+        : null,
     })) as TaskWithReadableId[];
 
     return result;
@@ -319,6 +335,13 @@ export class TaskRepository {
             },
           },
         },
+        assigneeAgent: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          },
+        },
         feature: {
           select: {
             id: true,
@@ -372,6 +395,13 @@ export class TaskRepository {
         displayName: task.assignee.user_profiles.displayName,
         avatarUrl: task.assignee.user_profiles.avatarUrl,
       } : undefined,
+      assigneeAgent: task.assigneeAgent
+        ? {
+            id: task.assigneeAgent.id,
+            name: task.assigneeAgent.name,
+            status: task.assigneeAgent.status,
+          }
+        : null,
     } as TaskWithReadableId;
   }
 
@@ -497,6 +527,7 @@ export class TaskRepository {
     if (type) where.type = type;
     if (priority) where.priority = priority;
     if (assigneeId) where.assigneeId = assigneeId;
+    if (filters.assigneeAgentId) where.assigneeAgentId = filters.assigneeAgentId;
     if (module) where.modules = { has: module };
     if (projectId) where.projectId = projectId;
     if (featureId) where.featureId = featureId;
@@ -594,4 +625,3 @@ export class TaskRepository {
     return value.replace(/[%_]/g, (match: string) => `\\${match}`);
   }
 }
-

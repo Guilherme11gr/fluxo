@@ -49,6 +49,10 @@ import { useMoveTaskWithUndo } from '@/hooks/use-move-task-undo';
 import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
 
+function getAssigneeName(task: TaskWithReadableId) {
+  return task.assignee?.displayName || task.assigneeAgent?.name || 'Sem responsável';
+}
+
 interface TaskDetailModalProps {
   task: TaskWithReadableId | null;
   open: boolean;
@@ -231,12 +235,12 @@ export function TaskDetailModal({
             <div className="flex items-center gap-2" title="Responsável">
               <UserAvatar 
                 userId={task.assigneeId || undefined}
-                displayName={task.assignee?.displayName}
+                displayName={getAssigneeName(task)}
                 avatarUrl={task.assignee?.avatarUrl}
                 size="sm" 
               />
               <span className="text-xs text-muted-foreground">
-                {task.assignee?.displayName || 'Sem responsável'}
+                {getAssigneeName(task)}
               </span>
             </div>
 

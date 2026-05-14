@@ -5,11 +5,15 @@ export interface AgentExecutionRecord {
   id: string;
   orgId: string;
   agentId: string;
+  runnerInstanceId: string | null;
   taskId: string;
   projectId: string;
   status: AgentExecStatus;
   tool: string | null;
   model: string | null;
+  workspaceMode: string | null;
+  workspaceRef: string | null;
+  workspacePath: string | null;
   output: string | null;
   resultSummary: string | null;
   errorMessage: string | null;
@@ -17,6 +21,7 @@ export interface AgentExecutionRecord {
   duration: number | null;
   metadata: Record<string, unknown>;
   startedAt: Date;
+  lastHeartbeatAt: Date | null;
   finishedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -27,11 +32,15 @@ function mapRecord(record: any): AgentExecutionRecord {
     id: record.id,
     orgId: record.orgId,
     agentId: record.agentId,
+    runnerInstanceId: record.runnerInstanceId ?? null,
     taskId: record.taskId,
     projectId: record.projectId,
     status: record.status,
     tool: record.tool,
     model: record.model,
+    workspaceMode: record.workspaceMode ?? null,
+    workspaceRef: record.workspaceRef ?? null,
+    workspacePath: record.workspacePath ?? null,
     output: record.output,
     resultSummary: record.resultSummary,
     errorMessage: record.errorMessage,
@@ -39,6 +48,7 @@ function mapRecord(record: any): AgentExecutionRecord {
     duration: record.duration,
     metadata: record.metadata ?? {},
     startedAt: record.startedAt,
+    lastHeartbeatAt: record.lastHeartbeatAt ?? null,
     finishedAt: record.finishedAt,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -55,22 +65,33 @@ export class AgentExecutionRepository {
   async create(data: {
     orgId: string;
     agentId: string;
+    runnerInstanceId?: string | null;
     taskId: string;
     projectId: string;
     tool?: string;
     model?: string;
+    workspaceMode?: string;
+    workspaceRef?: string | null;
+    workspacePath?: string | null;
+    metadata?: Record<string, unknown>;
     startedAt: Date;
   }): Promise<AgentExecutionRecord> {
     const record = await this.client.agentExecution.create({
       data: {
         orgId: data.orgId,
         agentId: data.agentId,
+        runnerInstanceId: data.runnerInstanceId ?? null,
         taskId: data.taskId,
         projectId: data.projectId,
         status: 'CLAIMED',
         tool: data.tool ?? null,
         model: data.model ?? null,
+        workspaceMode: data.workspaceMode ?? null,
+        workspaceRef: data.workspaceRef ?? null,
+        workspacePath: data.workspacePath ?? null,
+        metadata: data.metadata ?? {},
         startedAt: data.startedAt,
+        lastHeartbeatAt: data.startedAt,
       },
     });
     return mapRecord(record);
@@ -86,6 +107,10 @@ export class AgentExecutionRepository {
       exitCode?: number;
       duration?: number;
       finishedAt?: Date;
+      lastHeartbeatAt?: Date;
+      workspaceMode?: string;
+      workspaceRef?: string | null;
+      workspacePath?: string | null;
       metadata?: Record<string, unknown>;
     }
   ): Promise<AgentExecutionRecord> {
@@ -96,6 +121,10 @@ export class AgentExecutionRepository {
     if (data.exitCode !== undefined) updateData.exitCode = data.exitCode;
     if (data.duration !== undefined) updateData.duration = data.duration;
     if (data.finishedAt !== undefined) updateData.finishedAt = data.finishedAt;
+    if (data.lastHeartbeatAt !== undefined) updateData.lastHeartbeatAt = data.lastHeartbeatAt;
+    if (data.workspaceMode !== undefined) updateData.workspaceMode = data.workspaceMode;
+    if (data.workspaceRef !== undefined) updateData.workspaceRef = data.workspaceRef;
+    if (data.workspacePath !== undefined) updateData.workspacePath = data.workspacePath;
     if (data.metadata !== undefined) updateData.metadata = data.metadata;
 
     const record = await this.client.agentExecution.update({
@@ -168,13 +197,47 @@ export class AgentExecutionRepository {
     return record ? mapRecord(record) : null;
   }
 
+  async findActiveByRunnerInstance(runnerInstanceId: string): Promise<AgentExecutionRecord[]> {
+    const records = await this.client.agentExecution.findMany({
+      where: {
+        runnerInstanceId,
+        status: { in: ['CLAIMED', 'RUNNING'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return records.map(mapRecord);
+  }
+
+  async heartbeat(id: string): Promise<AgentExecutionRecord> {
+    const record = await this.client.agentExecution.update({
+      where: { id },
+      data: { lastHeartbeatAt: new Date() },
+    });
+    return mapRecord(record);
+  }
+
+  async findActiveByOrg(orgId: string, staleBefore?: Date): Promise<AgentExecutionRecord[]> {
+    const records = await this.client.agentExecution.findMany({
+      where: {
+        orgId,
+        status: { in: ['CLAIMED', 'RUNNING'] },
+        ...(staleBefore ? { lastHeartbeatAt: { lt: staleBefore } } : {}),
+      },
+      orderBy: { startedAt: 'asc' },
+    });
+    return records.map(mapRecord);
+  }
+
   async markStaleAsTimeout(orgId: string, staleAfterMs: number): Promise<number> {
     const cutoff = new Date(Date.now() - staleAfterMs);
     const result = await this.client.agentExecution.updateMany({
       where: {
         orgId,
-        status: 'RUNNING',
-        startedAt: { lt: cutoff },
+        status: { in: ['CLAIMED', 'RUNNING'] },
+        OR: [
+          { lastHeartbeatAt: { lt: cutoff } },
+          { lastHeartbeatAt: null, startedAt: { lt: cutoff } },
+        ],
       },
       data: {
         status: 'TIMEOUT',

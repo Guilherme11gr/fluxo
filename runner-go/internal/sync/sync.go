@@ -205,8 +205,14 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 	agent.Model = strVal(configMap, "model")
 	agent.AgentType = strVal(configMap, "agent_type")
 	agent.Variant = strVal(configMap, "variant")
-	agent.AssigneeID = strVal(configMap, "assignee_id")
-	agent.NextAssigneeID = strVal(configMap, "next_assignee_id")
+	agent.AssigneeID = strVal(configMap, "assignee_agent_id")
+	if agent.AssigneeID == "" {
+		agent.AssigneeID = strVal(configMap, "assignee_id")
+	}
+	agent.NextAssigneeID = strVal(configMap, "next_assignee_agent_id")
+	if agent.NextAssigneeID == "" {
+		agent.NextAssigneeID = strVal(configMap, "next_assignee_id")
+	}
 	agent.Context = strVal(configMap, "context")
 	agent.Workdir = strVal(configMap, "workdir")
 	if agent.Workdir == "" {

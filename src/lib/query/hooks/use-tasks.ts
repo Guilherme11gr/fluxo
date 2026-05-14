@@ -48,6 +48,7 @@ interface UpdateTaskInput {
     modules: string[];
     featureId: string;
     assigneeId: string | null;
+    assigneeAgentId: string | null;
     blocked: boolean;
     blockReason: string | null;
     blockedAt: Date | null;

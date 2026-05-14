@@ -11,6 +11,7 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
+	"github.com/fluxo-app/fluxo-runner/internal/orchestrator"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 	"github.com/fluxo-app/fluxo-runner/internal/sync"
 	"github.com/spf13/cobra"
@@ -172,9 +173,11 @@ Legacy mode (agents in config.yaml):
 
 		// Single run mode
 		if once {
-			for _, agent := range agents {
-				client := api.NewClient(apiURL, apiKey, agent.Name)
-				runner.PollAndExecute(client, agent)
+			manager := orchestrator.NewRunnerManager(apiURL, apiKey, pollInterval, time.Duration(cfg.Runner.HeartbeatSec)*time.Second, availableModels, nil, agentFlag)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			if err := manager.RunOnce(ctx, agents); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -192,40 +195,15 @@ Legacy mode (agents in config.yaml):
 		defer stop()
 
 		fmt.Print("Running in continuous mode. Press Ctrl+C to stop.\n\n")
-
-		ticker := time.NewTicker(pollInterval)
-		defer ticker.Stop()
-
-		// First tick immediately
-		runAllAgents(agents, apiURL, apiKey, availableModels)
-		if ctx.Err() != nil {
-			return nil
+		manager := orchestrator.NewRunnerManager(apiURL, apiKey, pollInterval, time.Duration(cfg.Runner.HeartbeatSec)*time.Second, availableModels, syncer, agentFlag)
+		if err := manager.Start(ctx, agents); err != nil {
+			fmt.Print("\n\033[33m[runner] Shutdown signal received...\033[0m\n")
+			gracefulShutdown(agents, apiURL, apiKey)
+			return err
 		}
-
-		for {
-			select {
-			case <-ctx.Done():
-				fmt.Print("\n\033[33m[runner] Shutdown signal received...\033[0m\n")
-				gracefulShutdown(agents, apiURL, apiKey)
-				fmt.Println("[runner] Goodbye.")
-				return nil
-			case <-ticker.C:
-				// In dynamic mode, get fresh agent list from syncer
-				if syncer != nil {
-					agents = syncer.GetAgents()
-				}
-				runAllAgents(agents, apiURL, apiKey, availableModels)
-			}
-		}
+		fmt.Println("[runner] Goodbye.")
+		return nil
 	},
-}
-
-func runAllAgents(agents []config.AgentConfig, apiURL, apiKey string, availableModels []string) {
-	for i := range agents {
-		agents[i].AvailableModels = availableModels
-		client := api.NewClient(apiURL, apiKey, agents[i].Name)
-		runner.PollAndExecute(client, agents[i])
-	}
 }
 
 func gracefulShutdown(agents []config.AgentConfig, apiURL, apiKey string) {

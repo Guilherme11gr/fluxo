@@ -147,9 +147,9 @@ export const queryKeys = {
     all: (orgId: string) => [...orgKey(orgId), 'executions'] as const,
     list: (orgId: string, filters?: Record<string, string>) => [...queryKeys.executions.all(orgId), 'list', filters ?? {}] as const,
     detail: (orgId: string, id: string) => [...queryKeys.executions.all(orgId), 'detail', id] as const,
+    events: (orgId: string, id: string, afterSeq?: number) => [...queryKeys.executions.all(orgId), 'events', id, afterSeq ?? 0] as const,
   },
 } as const;
 
 // Type helper for extracting query key types
 export type QueryKeys = typeof queryKeys;
-

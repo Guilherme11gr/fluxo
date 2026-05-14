@@ -20,6 +20,10 @@ const updateSchema = z.object({
   exitCode: z.number().int().optional(),
   duration: z.number().int().positive().optional(),
   finishedAt: z.string().datetime().optional(),
+  lastHeartbeatAt: z.string().datetime().optional(),
+  workspaceMode: z.string().max(50).optional(),
+  workspaceRef: z.string().nullable().optional(),
+  workspacePath: z.string().nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -65,7 +69,11 @@ export async function PATCH(
       errorMessage: data.errorMessage,
       exitCode: data.exitCode,
       duration: data.duration,
+      lastHeartbeatAt: data.lastHeartbeatAt ? new Date(data.lastHeartbeatAt) : undefined,
       finishedAt: data.finishedAt ? new Date(data.finishedAt) : (data.status === 'SUCCESS' || data.status === 'FAILED' || data.status === 'TIMEOUT' || data.status === 'CANCELLED' ? new Date() : undefined),
+      workspaceMode: data.workspaceMode,
+      workspaceRef: data.workspaceRef,
+      workspacePath: data.workspacePath,
       metadata: data.metadata,
     });
 

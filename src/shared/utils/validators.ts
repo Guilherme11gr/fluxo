@@ -91,6 +91,7 @@ export const updateTaskSchema = z.object({
   points: storyPointsSchema.optional(),
   modules: z.array(z.string().max(50)).max(10).optional(),
   assigneeId: uuidSchema.nullable().optional(),
+  assigneeAgentId: uuidSchema.nullable().optional(),
   featureId: uuidSchema.nullable().optional(),
   projectId: uuidSchema.optional(),
   status: taskStatusSchema.optional(),

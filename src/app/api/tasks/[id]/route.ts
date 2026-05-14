@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { extractAuthenticatedTenant, extractUserId } from '@/shared/http/auth.helpers';
 import { jsonSuccess, jsonError } from '@/shared/http/responses';
 import { handleError } from '@/shared/errors';
-import { taskRepository, auditLogRepository, userProfileRepository } from '@/infra/adapters/prisma';
+import { taskRepository, auditLogRepository, userProfileRepository, agentRepository } from '@/infra/adapters/prisma';
 import { updateTask } from '@/domain/use-cases/tasks/update-task';
 import { deleteTask } from '@/domain/use-cases/tasks/delete-task';
 import { broadcastTaskEvent } from '@/lib/supabase/broadcast';
@@ -59,7 +59,7 @@ export async function PATCH(
     const task = await updateTask(id, tenantId, userId, {
       ...parsed.data,
       points: parsed.data.points as StoryPoints | null | undefined,
-    }, { taskRepository, auditLogRepository });
+    }, { taskRepository, auditLogRepository, agentRepository });
 
     // Broadcast event for real-time updates
     const userProfile = await userProfileRepository.findByIdGlobal(userId);

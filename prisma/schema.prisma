@@ -34,6 +34,8 @@ model Organization {
   projects             Project[]
   tasks                Task[]
   executions           AgentExecution[]
+  runnerInstances      RunnerInstance[]
+  executionLeases      ExecutionLease[]
   userProfiles         UserProfile[]
   personalBoardColumns PersonalBoardColumn[]
   personalBoardTags    PersonalBoardItemTag[]
@@ -95,6 +97,7 @@ model Agent {
   organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   executions    AgentExecution[]
   comments      Comment[]
+  assignedTasks Task[]       @relation("TaskAssigneeAgent")
 
   @@unique([orgId, name])
   @@index([orgId, status], map: "idx_agents_org_status")
@@ -214,6 +217,7 @@ model Project {
   projectNotes    ProjectNote[]
   projectTags     ProjectTag[]
   executions      AgentExecution[]
+  executionLeases ExecutionLease[]
   creator         users?        @relation("ProjectCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
   organization    Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tasks           Task[]
@@ -391,6 +395,7 @@ model Task {
   tagAssignments  TaskTagAssignment[]
   executions      AgentExecution[]
   assignee        users?              @relation("TaskAssignee", fields: [assigneeId], references: [id], onUpdate: NoAction)
+  assigneeAgent   Agent?              @relation("TaskAssigneeAgent", fields: [assigneeAgentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   creator         users?              @relation("TaskCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
   feature         Feature             @relation(fields: [featureId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organization    Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -398,6 +403,7 @@ model Task {
 
   @@unique([projectId, localId])
   @@index([assigneeId, status], map: "idx_tasks_assignee_status")
+  @@index([assigneeAgentId, status], map: "idx_tasks_assignee_agent_status")
   @@index([featureId], map: "idx_tasks_feature")
   @@index([orgId], map: "idx_tasks_org")
   @@index([orgId, createdAt(sort: Desc)], map: "idx_tasks_org_created")
@@ -1019,11 +1025,15 @@ model AgentExecution {
   id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   orgId           String           @map("org_id") @db.Uuid
   agentId         String           @map("agent_id") @db.Uuid
+  runnerInstanceId String?         @map("runner_instance_id") @db.Uuid
   taskId          String           @map("task_id") @db.Uuid
   projectId       String           @map("project_id") @db.Uuid
   status          AgentExecStatus  @default(CLAIMED)
   tool            String?          @db.VarChar(50)
   model           String?          @db.VarChar(100)
+  workspaceMode   String?          @map("workspace_mode") @db.VarChar(50)
+  workspaceRef    String?          @map("workspace_ref")
+  workspacePath   String?          @map("workspace_path")
   output          String?
   resultSummary   String?          @map("result_summary")
   errorMessage    String?          @map("error_message")
@@ -1031,22 +1041,93 @@ model AgentExecution {
   duration        Int?
   metadata        Json             @default("{}")
   startedAt       DateTime         @map("started_at") @db.Timestamptz(6)
+  lastHeartbeatAt DateTime?        @map("last_heartbeat_at") @db.Timestamptz(6)
   finishedAt      DateTime?        @map("finished_at") @db.Timestamptz(6)
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   agent           Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  runnerInstance  RunnerInstance?  @relation(fields: [runnerInstanceId], references: [id], onDelete: SetNull)
   task            Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
   project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   organization    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lease           ExecutionLease?
+  events          AgentExecutionEvent[]
 
   @@index([orgId], map: "idx_agent_executions_org")
   @@index([agentId], map: "idx_agent_executions_agent")
+  @@index([runnerInstanceId], map: "idx_agent_executions_runner_instance")
   @@index([taskId], map: "idx_agent_executions_task")
   @@index([projectId], map: "idx_agent_executions_project")
   @@index([status], map: "idx_agent_executions_status")
+  @@index([lastHeartbeatAt], map: "idx_agent_executions_last_heartbeat")
   @@index([orgId, createdAt(sort: Desc)], map: "idx_agent_executions_org_created")
   @@map("agent_executions")
+  @@schema("public")
+}
+
+model RunnerInstance {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId           String           @map("org_id") @db.Uuid
+  hostname        String?
+  pid             Int?
+  version         String?          @db.VarChar(50)
+  status          String           @default("ONLINE") @db.VarChar(20)
+  capabilities    Json             @default("{}")
+  metadata        Json             @default("{}")
+  startedAt       DateTime         @default(now()) @map("started_at") @db.Timestamptz(6)
+  lastHeartbeatAt DateTime         @default(now()) @map("last_heartbeat_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  executions      AgentExecution[]
+  executionLeases ExecutionLease[]
+
+  @@index([orgId], map: "idx_runner_instances_org")
+  @@index([orgId, status], map: "idx_runner_instances_org_status")
+  @@index([lastHeartbeatAt], map: "idx_runner_instances_last_heartbeat")
+  @@map("runner_instances")
+  @@schema("public")
+}
+
+model ExecutionLease {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId            String          @map("org_id") @db.Uuid
+  projectId        String          @map("project_id") @db.Uuid
+  executionId      String?         @unique @map("execution_id") @db.Uuid
+  runnerInstanceId String          @map("runner_instance_id") @db.Uuid
+  expiresAt        DateTime        @map("expires_at") @db.Timestamptz(6)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  execution        AgentExecution? @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  organization     Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runnerInstance   RunnerInstance  @relation(fields: [runnerInstanceId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, projectId], map: "uq_execution_leases_org_project")
+  @@index([expiresAt], map: "idx_execution_leases_expires_at")
+  @@index([runnerInstanceId], map: "idx_execution_leases_runner_instance")
+  @@map("execution_leases")
+  @@schema("public")
+}
+
+model AgentExecutionEvent {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  executionId String         @map("execution_id") @db.Uuid
+  seq         Int
+  kind        String         @db.VarChar(50)
+  content     String
+  metadata    Json           @default("{}")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  execution   AgentExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@unique([executionId, seq], map: "uq_agent_execution_events_execution_seq")
+  @@index([executionId, createdAt(sort: Asc)], map: "idx_agent_execution_events_execution_created")
+  @@index([executionId, seq(sort: Asc)], map: "idx_agent_execution_events_execution_seq")
+  @@map("agent_execution_events")
   @@schema("public")
 }
 

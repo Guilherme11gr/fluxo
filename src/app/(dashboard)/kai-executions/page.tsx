@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useExecutions } from '@/lib/query/hooks/use-executions';
+import { useEffect, useMemo, useState } from 'react';
+import { useExecutionEvents, useExecutions, useLiveExecution } from '@/lib/query/hooks/use-executions';
 import { useAgents } from '@/lib/query/hooks/use-agents';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,20 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   CANCELLED: <X className="h-3.5 w-3.5" />,
 };
 
+type ExecutionRecord = {
+  id: string;
+  agentId?: string;
+  tool?: string | null;
+  model?: string | null;
+  output?: string | null;
+  resultSummary?: string | null;
+  errorMessage?: string | null;
+  startedAt?: string;
+  duration?: number | null;
+  exitCode?: number | null;
+  status: string;
+};
+
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '—';
   if (seconds < 60) return `${seconds}s`;
@@ -48,9 +62,27 @@ export default function ExecutionsPage() {
   const effectiveFilter = statusFilter && statusFilter !== 'ALL' ? { status: statusFilter } : undefined;
   const { data, isLoading } = useExecutions(effectiveFilter);
   const { data: agents } = useAgents();
-  const [selectedExecution, setSelectedExecution] = useState<any>(null);
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
+  const { data: selectedExecution } = useLiveExecution(selectedExecutionId ?? '', !!selectedExecutionId);
+  const { data: executionEvents } = useExecutionEvents(selectedExecutionId ?? '', undefined, !!selectedExecutionId);
 
   const agentsMap = new Map((agents ?? []).map((a: any) => [a.id, a.name]));
+  const liveOutput = useMemo(() => {
+    const eventLines = (executionEvents?.items ?? [])
+      .map((event: any) => String(event.content ?? ''))
+      .filter(Boolean);
+    if (eventLines.length > 0) {
+      return eventLines.join('\n');
+    }
+    return String(selectedExecution?.output ?? '');
+  }, [executionEvents?.items, selectedExecution?.output]);
+
+  useEffect(() => {
+    if (!selectedExecutionId || !data?.items?.length) return;
+    if (!data.items.some((exec: any) => exec.id === selectedExecutionId)) {
+      setSelectedExecutionId(null);
+    }
+  }, [data?.items, selectedExecutionId]);
 
   return (
     <div className="space-y-6">
@@ -103,7 +135,7 @@ export default function ExecutionsPage() {
                 <tr
                   key={exec.id}
                   className="border-b border-border hover:bg-muted/30 cursor-pointer transition-colors"
-                  onClick={() => setSelectedExecution(selectedExecution?.id === exec.id ? null : exec)}
+                  onClick={() => setSelectedExecutionId(selectedExecutionId === exec.id ? null : exec.id)}
                 >
                   <td className="px-4 py-3">
                     <Badge variant="secondary" className={STATUS_COLORS[exec.status] ?? ''}>
@@ -135,53 +167,60 @@ export default function ExecutionsPage() {
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm">Detalhes da Execução</h3>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedExecution(null)}>
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              {(String((selectedExecution as ExecutionRecord).status) === 'CLAIMED' || String((selectedExecution as ExecutionRecord).status) === 'RUNNING') && (
+                <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 animate-pulse">
+                  Live
+                </Badge>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setSelectedExecutionId(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
               <span className="text-muted-foreground">Status</span>
               <div className="mt-0.5">
-                <Badge variant="secondary" className={STATUS_COLORS[selectedExecution.status] ?? ''}>
-                  {selectedExecution.status}
+                <Badge variant="secondary" className={STATUS_COLORS[String((selectedExecution as ExecutionRecord).status)] ?? ''}>
+                  {String((selectedExecution as ExecutionRecord).status)}
                 </Badge>
               </div>
             </div>
             <div>
               <span className="text-muted-foreground">Tool</span>
-              <div className="mt-0.5 font-medium">{selectedExecution.tool ?? '—'}</div>
+              <div className="mt-0.5 font-medium">{(selectedExecution as ExecutionRecord).tool ?? '—'}</div>
             </div>
             <div>
               <span className="text-muted-foreground">Model</span>
-              <div className="mt-0.5 font-medium">{selectedExecution.model ?? '—'}</div>
+              <div className="mt-0.5 font-medium">{(selectedExecution as ExecutionRecord).model ?? '—'}</div>
             </div>
             <div>
               <span className="text-muted-foreground">Exit Code</span>
-              <div className="mt-0.5 font-mono">{selectedExecution.exitCode ?? '—'}</div>
+              <div className="mt-0.5 font-mono">{(selectedExecution as ExecutionRecord).exitCode ?? '—'}</div>
             </div>
           </div>
-          {selectedExecution.errorMessage && (
+          {(selectedExecution as ExecutionRecord).errorMessage && (
             <div>
               <span className="text-xs text-muted-foreground">Error</span>
               <pre className="mt-1 text-xs bg-destructive/10 text-destructive rounded p-3 overflow-x-auto max-h-48">
-                {selectedExecution.errorMessage}
+                {(selectedExecution as ExecutionRecord).errorMessage}
               </pre>
             </div>
           )}
-          {selectedExecution.resultSummary && (
+          {(selectedExecution as ExecutionRecord).resultSummary && (
             <div>
               <span className="text-xs text-muted-foreground">Result Summary</span>
               <pre className="mt-1 text-xs bg-muted rounded p-3 overflow-x-auto max-h-48">
-                {selectedExecution.resultSummary}
+                {(selectedExecution as ExecutionRecord).resultSummary}
               </pre>
             </div>
           )}
-          {selectedExecution.output && (
+          {liveOutput && (
             <div>
               <span className="text-xs text-muted-foreground">Full Output</span>
               <pre className="mt-1 text-xs bg-muted rounded p-3 overflow-x-auto max-h-96 whitespace-pre-wrap">
-                {selectedExecution.output}
+                {liveOutput}
               </pre>
             </div>
           )}

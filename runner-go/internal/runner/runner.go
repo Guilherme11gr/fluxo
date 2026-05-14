@@ -106,8 +106,10 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	// Step 1: Poll for tasks
 	pickStatus := defaultStr(agent.PickStatus, "TODO")
 	pollPath := fmt.Sprintf("/tasks?status=%s&limit=5", url.QueryEscape(pickStatus))
-	if agent.AssigneeID != "" {
-		pollPath += "&assigneeId=" + url.QueryEscape(agent.AssigneeID)
+	if agent.ID != "" {
+		pollPath += "&assigneeAgentId=" + url.QueryEscape(agent.ID)
+	} else if agent.AssigneeID != "" {
+		pollPath += "&assigneeAgentId=" + url.QueryEscape(agent.AssigneeID)
 	}
 	if agent.ProjectID != "" {
 		pollPath += "&projectId=" + url.QueryEscape(agent.ProjectID)
@@ -223,7 +225,7 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	startTime := time.Now()
 	ctx := context.Background()
-	result := exec.Execute(ctx, prompt, agent.Workdir, timeout)
+	result := exec.Execute(ctx, prompt, agent.Workdir, timeout, nil)
 	elapsed := time.Since(startTime).Seconds()
 	elapsedInt := int(elapsed)
 
@@ -271,16 +273,22 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	// Step 6: Handoff
 	doneStatus := defaultStr(agent.DoneStatus, "DONE")
+	patchBody := map[string]interface{}{}
 	if !result.Success {
-		doneStatus = "BLOCKED"
+		doneStatus = claimStatus
+		patchBody["blocked"] = true
+		patchBody["blockReason"] = fmt.Sprintf("Agent %s failed after %.1fs while running %s. Check execution logs and comments for details.", agent.Name, elapsed, agent.Tool)
+	} else {
+		patchBody["blocked"] = false
 	}
 	changeReason := fmt.Sprintf("[FluXo Runner][%s] Execution %s with %s", agent.Name, statusText, agent.Tool)
-	patchBody := map[string]interface{}{
-		"status":       doneStatus,
+	patchBody["status"] = doneStatus
+	patchBody["_metadata"] = map[string]interface{}{
+		"status": doneStatus,
 		"changeReason": changeReason,
 	}
 	if result.Success && agent.NextAssigneeID != "" {
-		patchBody["assigneeId"] = agent.NextAssigneeID
+		patchBody["assigneeAgentId"] = agent.NextAssigneeID
 	}
 
 	fmt.Printf("  [%s] Handoff → %s\n", agent.Name, doneStatus)
@@ -288,7 +296,8 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	if result.Success && agent.NextAssigneeID != "" {
 		client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{
-			"content": fmt.Sprintf("[FluXo Runner][%s] Reassigning to next agent for review.", agent.Name),
+			"content": fmt.Sprintf("[FluXo Runner][%s] Reassigned to next agent.", agent.Name),
+			"agentId": agentID,
 		})
 	}
 

@@ -1,6 +1,6 @@
 import type { Task, TaskStatus, TaskType, TaskPriority, StoryPoints, TaskFocus } from '@/shared/types';
-import type { TaskRepository, AuditLogRepository } from '@/infra/adapters/prisma';
-import { NotFoundError } from '@/shared/errors';
+import type { TaskRepository, AuditLogRepository, AgentRepository } from '@/infra/adapters/prisma';
+import { NotFoundError, ValidationError } from '@/shared/errors';
 import { AUDIT_ACTIONS } from '@/infra/adapters/prisma/audit-log.repository';
 import type { AgentProvidedMetadata } from '@/shared/types/audit-metadata';
 
@@ -13,6 +13,7 @@ export interface UpdateTaskInput {
   points?: StoryPoints | null;
   modules?: string[];
   assigneeId?: string | null;
+  assigneeAgentId?: string | null;
   blocked?: boolean;
   blockReason?: string | null;
   blockedAt?: Date | null;
@@ -44,6 +45,7 @@ export type ActionContext = AutomationContext | HumanContext;
 export interface UpdateTaskDeps {
   taskRepository: TaskRepository;
   auditLogRepository: AuditLogRepository;
+  agentRepository?: AgentRepository;
 }
 
 export async function updateTask(
@@ -54,14 +56,36 @@ export async function updateTask(
   deps: UpdateTaskDeps,
   context?: ActionContext
 ): Promise<Task> {
-  const { taskRepository, auditLogRepository } = deps;
+  const { taskRepository, auditLogRepository, agentRepository } = deps;
 
   const existing = await taskRepository.findById(id, orgId);
   if (!existing) {
     throw new NotFoundError('Task', id);
   }
 
-  const updated = await taskRepository.update(id, orgId, input);
+  if (input.assigneeId && input.assigneeAgentId) {
+    throw new ValidationError('Task não pode ser atribuída simultaneamente a usuário e agent');
+  }
+
+  if (input.assigneeAgentId && agentRepository) {
+    const assigneeAgent = await agentRepository.findById(input.assigneeAgentId);
+    if (!assigneeAgent || assigneeAgent.orgId !== orgId) {
+      throw new ValidationError('Agent responsável inválido para esta organização');
+    }
+    if (assigneeAgent.projectId && assigneeAgent.projectId !== existing.projectId) {
+      throw new ValidationError('Agent responsável não pertence ao projeto desta task');
+    }
+  }
+
+  const normalizedInput: UpdateTaskInput = { ...input };
+  if (input.assigneeId) {
+    normalizedInput.assigneeAgentId = null;
+  }
+  if (input.assigneeAgentId) {
+    normalizedInput.assigneeId = null;
+  }
+
+  const updated = await taskRepository.update(id, orgId, normalizedInput);
 
   // Build base metadata based on context
   // Note: projectKey is not available here since findById returns Task without relations
@@ -86,7 +110,7 @@ export async function updateTask(
   const auditPromises: Promise<any>[] = [];
 
   // Status changed
-  if (input.status && input.status !== existing.status) {
+  if (normalizedInput.status && normalizedInput.status !== existing.status) {
     auditPromises.push(
       auditLogRepository.log({
         orgId,
@@ -99,14 +123,14 @@ export async function updateTask(
         metadata: {
           ...baseMetadata,
           fromStatus: existing.status,
-          toStatus: input.status,
+          toStatus: normalizedInput.status,
         }
       })
     );
   }
 
   // Assignee changed
-  if (input.assigneeId !== undefined && input.assigneeId !== existing.assigneeId) {
+  if (normalizedInput.assigneeId !== undefined && normalizedInput.assigneeId !== existing.assigneeId) {
     auditPromises.push(
       auditLogRepository.log({
         orgId,
@@ -119,19 +143,38 @@ export async function updateTask(
         metadata: {
           ...baseMetadata,
           fromAssigneeId: existing.assigneeId,
-          toAssigneeId: input.assigneeId,
+          toAssigneeId: normalizedInput.assigneeId,
+        }
+      })
+    );
+  }
+
+  if (normalizedInput.assigneeAgentId !== undefined && normalizedInput.assigneeAgentId !== existing.assigneeAgentId) {
+    auditPromises.push(
+      auditLogRepository.log({
+        orgId,
+        userId,
+        action: AUDIT_ACTIONS.TASK_ASSIGNED,
+        targetType: 'task',
+        targetId: id,
+        actorType: context?.source === 'agent' ? 'agent' : 'user',
+        clientId: context?.source === 'agent' ? context.keyId : undefined,
+        metadata: {
+          ...baseMetadata,
+          fromAssigneeAgentId: existing.assigneeAgentId,
+          toAssigneeAgentId: normalizedInput.assigneeAgentId,
         }
       })
     );
   }
 
   // Blocked status changed
-  if (input.blocked !== undefined && input.blocked !== existing.blocked) {
+  if (normalizedInput.blocked !== undefined && normalizedInput.blocked !== existing.blocked) {
     auditPromises.push(
       auditLogRepository.log({
         orgId,
         userId,
-        action: input.blocked ? 'task.blocked' : 'task.unblocked',
+        action: normalizedInput.blocked ? 'task.blocked' : 'task.unblocked',
         targetType: 'task',
         targetId: id,
         actorType: context?.source === 'agent' ? 'agent' : 'user',

@@ -35,17 +35,18 @@ export interface TaskFilterParams extends PaginationParams, SortParams {
   type?: string;
   priority?: string;
   assigneeId?: string;
+  assigneeAgentId?: string;
   module?: string;
-  tagId?: string; // New: filter by tag
+  tagId?: string;
   projectId?: string;
   epicId?: string;
   featureId?: string;
   search?: string;
   blocked?: boolean;
   focus?: string;
-  skipCount?: boolean; // Performance: skip count query when not needed
-  cursor?: string; // Cursor-based pagination (ISO date string of createdAt)
-  excludeStatuses?: string[]; // Statuses to exclude from results
+  skipCount?: boolean;
+  cursor?: string;
+  excludeStatuses?: string[];
 }
 
 // Common list response

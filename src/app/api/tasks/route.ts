@@ -18,6 +18,7 @@ const searchTasksSchema = z.object({
   type: z.string().optional(),
   priority: z.string().optional(),
   assigneeId: z.string().uuid().optional(),
+  assigneeAgentId: z.string().uuid().optional(),
   module: z.string().optional(),
   tagId: z.string().uuid().optional(),
   projectId: z.string().uuid().optional(),

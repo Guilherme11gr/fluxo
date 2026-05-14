@@ -10,7 +10,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { taskRepository, taskTagRepository, auditLogRepository } from '@/infra/adapters/prisma';
+import { taskRepository, taskTagRepository, auditLogRepository, agentRepository } from '@/infra/adapters/prisma';
 import { updateTask } from '@/domain/use-cases/tasks/update-task';
 
 export const dynamic = 'force-dynamic';
@@ -55,7 +55,9 @@ const updateTaskSchema = z.object({
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE']).optional(),
   blocked: z.boolean().optional(),
+  blockReason: z.string().min(10).nullable().optional(),
   assigneeId: z.string().uuid().nullable().optional(),
+  assigneeAgentId: z.string().uuid().nullable().optional(),
   tagIds: z.array(z.string().uuid()).optional(),
   // Agent-provided metadata (optional)
   _metadata: agentMetadataSchema,
@@ -100,7 +102,8 @@ export async function PATCH(
     if (Object.keys(updateData).length > 0) {
       updated = await updateTask(id, orgId, userId, updateData, { 
         taskRepository,
-        auditLogRepository
+        auditLogRepository,
+        agentRepository,
       }, {
         source: 'agent',
         agentName,

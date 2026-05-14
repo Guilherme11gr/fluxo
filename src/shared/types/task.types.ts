@@ -17,6 +17,7 @@ export interface Task {
   modules: string[]; // Legacy - to be deprecated
   tags?: TagInfo[]; // New tag system
   assigneeId: string | null;
+  assigneeAgentId?: string | null;
   createdAt: Date;
   updatedAt: Date;
   createdBy?: string | null; // Quem criou a tarefa
@@ -44,6 +45,11 @@ export interface TaskWithReadableId extends Task {
     displayName: string | null;
     avatarUrl: string | null;
   };
+  assigneeAgent?: {
+    id: string;
+    name: string;
+    status?: string | null;
+  } | null;
   feature: {
     id: string;
     title: string;
@@ -78,6 +84,11 @@ export interface TaskWithRelations extends Task {
     id: string;
     displayName: string | null;
     avatarUrl: string | null;
+  } | null;
+  assigneeAgent: {
+    id: string;
+    name: string;
+    status?: string | null;
   } | null;
 }
 
