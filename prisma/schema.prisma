@@ -93,6 +93,7 @@ model Agent {
   updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   executions    AgentExecution[]
+  comments      Comment[]
 
   @@unique([orgId, name])
   @@index([orgId, status], map: "idx_agents_org_status")
@@ -465,17 +466,20 @@ model Comment {
   orgId        String       @map("org_id") @db.Uuid
   taskId       String       @map("task_id") @db.Uuid
   userId       String       @map("user_id") @db.Uuid
+  agentId      String?      @map("agent_id") @db.Uuid
   content      String
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   task         Task         @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users        users        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  agent        Agent?       @relation(fields: [agentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([orgId], map: "idx_comments_org")
   @@index([taskId], map: "idx_comments_task")
   @@index([taskId, createdAt(sort: Desc)], map: "idx_comments_task_created")
   @@index([userId], map: "idx_comments_user")
+  @@index([agentId], map: "idx_comments_agent")
   @@map("comments")
   @@schema("public")
 }

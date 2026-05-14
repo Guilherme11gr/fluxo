@@ -185,6 +185,7 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	// Post "started" comment
 	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{
 		"content": fmt.Sprintf("## 🚀 Execution Started\n\n**Agent:** %s  \n**Tool:** %s  \n**Model:** %s", agent.Name, agent.Tool, agent.Model),
+		"agentId": agentID,
 	})
 
 	// Update execution: RUNNING
@@ -266,7 +267,7 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	// Step 5: Post result
 	comment := FormatExecutionComment(agent.Name, agent.Tool, result.Success, elapsed, result.Output, result.ExitCode)
-	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{"content": comment})
+	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{"content": comment, "agentId": agentID})
 
 	// Step 6: Handoff
 	doneStatus := defaultStr(agent.DoneStatus, "DONE")

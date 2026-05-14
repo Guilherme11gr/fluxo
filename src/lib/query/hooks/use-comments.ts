@@ -13,12 +13,17 @@ export interface Comment {
   id: string;
   taskId: string;
   userId: string;
+  agentId?: string | null;
   content: string;
   createdAt: string;
   updatedAt: string;
   user?: {
     displayName: string | null;
     avatarUrl: string | null;
+  };
+  agent?: {
+    id: string;
+    name: string;
   };
 }
 

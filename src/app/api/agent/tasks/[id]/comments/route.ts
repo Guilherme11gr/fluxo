@@ -46,6 +46,7 @@ export async function GET(
 
 const createCommentSchema = z.object({
   content: z.string().min(1, 'Content is required'),
+  agentId: z.string().uuid().optional(),
 });
 
 export async function POST(
@@ -73,21 +74,28 @@ export async function POST(
       return agentError('VALIDATION_ERROR', parsed.error.issues[0].message, 400);
     }
 
-    const { content } = parsed.data;
+    const { content, agentId } = parsed.data;
 
-    // Create the comment
-    // Only 'content' is required by schema, but repository needs orgId, taskId, userId
+    // If agentId provided, validate it belongs to this org
+    if (agentId) {
+      const { agentRepository } = await import('@/infra/adapters/prisma');
+      const agent = await agentRepository.findById(agentId);
+      if (!agent || agent.orgId !== orgId) {
+        return agentError('NOT_FOUND', 'Agent not found', 404);
+      }
+    }
+
     const comment = await commentRepository.create({
       taskId,
       userId,
+      agentId,
       content,
       orgId,
     });
 
     return agentSuccess(comment, 201);
   } catch (error: any) {
-    // Check for foreign key constraint violation (user not found)
-    if (error.code === 'P2003') { // Prisma error code for FK violation
+    if (error.code === 'P2003') {
       return agentError('VALIDATION_ERROR', 'Referenced user not found', 400);
     }
     return handleAgentError(error);

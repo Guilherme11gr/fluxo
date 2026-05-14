@@ -331,7 +331,7 @@ export function TaskComments({ taskId, className }: TaskCommentsProps) {
                 className="group flex gap-3 animate-in fade-in slide-in-from-bottom-1 duration-300"
               >
                 <UserAvatar
-                  displayName={comment.user?.displayName}
+                  displayName={comment.agent?.name || comment.user?.displayName}
                   avatarUrl={comment.user?.avatarUrl}
                   userId={comment.userId}
                   size="sm"
@@ -342,8 +342,13 @@ export function TaskComments({ taskId, className }: TaskCommentsProps) {
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-foreground/90">
-                        {comment.user?.displayName || 'Usuario'}
+                        {comment.agent?.name || comment.user?.displayName || 'Usuario'}
                       </span>
+                      {comment.agent && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                          Agent
+                        </span>
+                      )}
                       <span className="text-[10px] text-muted-foreground tabular-nums">
                         {formatDate(comment.createdAt)}
                       </span>
