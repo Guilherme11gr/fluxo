@@ -19,6 +19,9 @@ export interface UpdateTaskInput {
   blockedAt?: Date | null;
   blockedBy?: string | null;
   focus?: TaskFocus | null;
+  githubPrUrl?: string | null;
+  githubPrNumber?: number | null;
+  githubPrStatus?: 'open' | 'closed' | 'merged' | null;
 }
 
 /**

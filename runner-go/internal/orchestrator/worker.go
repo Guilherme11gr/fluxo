@@ -107,45 +107,70 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if gitBaseBranch == "" {
 		gitBaseBranch = "main"
 	}
-
-	if gitPolicy != runner.GitPolicyNoWrite {
-		workdir := agent.Workdir
-		if claimed.RuntimeBinding.RepoPath != "" {
-			workdir = claimed.RuntimeBinding.RepoPath
+	workdir := agent.Workdir
+	if claimed.RuntimeBinding.RepoPath != "" {
+		workdir = claimed.RuntimeBinding.RepoPath
+	}
+	preparedGit, err := runner.PrepareGitBranch(workdir, gitPolicy, gitBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix)
+	if err != nil {
+		failedGitSnapshot := runner.GitSnapshot{
+			Branch:     gitBranch,
+			BaseBranch: gitBaseBranch,
+			CommitShas: []string{},
+			Mode:       string(gitPolicy),
+			CapturedAt: time.Now().UTC().Format(time.RFC3339),
 		}
-		currentBranch := runner.GitCurrentBranch(workdir)
-		if err := runner.PreflightGitCheck(gitPolicy, currentBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix); err != nil {
-			fmt.Printf("[%s] git preflight check failed: %v\n", agent.Name, err)
-			_ = api.UpdateExecution(client, claimed.Execution.ID, map[string]interface{}{
-				"status":          "FAILED",
-				"errorMessage":    fmt.Sprintf("git preflight check failed: %v", err),
-				"lastHeartbeatAt": time.Now().UTC().Format(time.RFC3339),
-			})
-			_, _ = client.Patch("/tasks/"+claimed.Task.ID, map[string]interface{}{
-				"status":  defaultStr(agent.ClaimStatus, "DOING"),
-				"blocked": true,
-				"blockReason": fmt.Sprintf("Git policy preflight failed: %v", err),
-				"_metadata": map[string]interface{}{
-					"status":       defaultStr(agent.ClaimStatus, "DOING"),
-					"changeReason": fmt.Sprintf("[FluXo Runner][%s] Git preflight failed: %v", agent.Name, err),
+		errorMessage := runner.StripStructuredResultBlock(runner.ExtractReadableOutput(runner.FormatGitPreparationError(err, failedGitSnapshot)))
+		structuredResult := runner.MergeGitResult(
+			runner.BuildExecutionResultV1(false, errorMessage, 1),
+			failedGitSnapshot,
+		)
+		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
+			Status:        "FAILED",
+			Output:        errorMessage,
+			ResultSummary: truncate(errorMessage, 500),
+			Result:        structuredResult,
+			ErrorMessage:  truncate(errorMessage, 2000),
+			ExitCode:      1,
+			Duration:      0,
+			NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
+			BlockReason:   nullableString(errorMessage),
+			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+			Metadata: map[string]interface{}{
+				"tool":  agent.Tool,
+				"model": agent.Model,
+				"git":   runner.GitMetadataMap(failedGitSnapshot),
+				"runtimeBinding": map[string]interface{}{
+					"id": claimed.RuntimeBinding.ID,
+					"projectId": claimed.RuntimeBinding.ProjectID,
+					"runnerProfile": claimed.RuntimeBinding.RunnerProfile,
+					"hostOs": claimed.RuntimeBinding.HostOS,
+					"repoPath": claimed.RuntimeBinding.RepoPath,
+					"defaultBaseBranch": claimed.RuntimeBinding.DefaultBaseBranch,
+					"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
+					"executionMode": claimed.RuntimeBinding.ExecutionMode,
+					"gitProvider": claimed.RuntimeBinding.GitProvider,
+					"prPolicy": claimed.RuntimeBinding.PRPolicy,
+					"gitPolicy": claimed.RuntimeBinding.GitPolicy,
+					"metadata": claimed.RuntimeBinding.Metadata,
 				},
-			})
-			runner.SendHeartbeat(client, agent, "ONLINE")
-			return
-		}
+			},
+		})
+		runner.SendHeartbeat(client, agent, "ONLINE")
+		return
 	}
 
 	runner.SendHeartbeat(client, agent, "BUSY")
 
-	execMetadata := map[string]interface{}{
-		"git": map[string]interface{}{
-			"mode":       string(gitPolicy),
-			"baseBranch": gitBaseBranch,
-			"branch":     gitBranch,
-			"prUrl":      nil,
-			"prNumber":   nil,
-		},
-	}
+	execMetadata := map[string]interface{}{"git": runner.GitMetadataMap(runner.GitSnapshot{
+		Branch:     preparedGit.Branch,
+		BaseBranch: preparedGit.BaseBranch,
+		CommitShas: preparedGit.CommitShas,
+		PRUrl:      preparedGit.PRUrl,
+		PRNumber:   preparedGit.PRNumber,
+		Mode:       string(preparedGit.Mode),
+		CapturedAt: time.Now().UTC().Format(time.RFC3339),
+	})}
 	_ = api.UpdateExecution(client, claimed.Execution.ID, map[string]interface{}{
 		"status":          "RUNNING",
 		"lastHeartbeatAt": time.Now().UTC().Format(time.RFC3339),
@@ -153,7 +178,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	})
 
 	_, _ = client.Post("/tasks/"+claimed.Task.ID+"/comments", map[string]interface{}{
-		"content": fmt.Sprintf("## Execution Started\n\n**Agent:** %s  \n**Tool:** %s  \n**Model:** %s  \n**Git Policy:** %s  \n**Branch:** %s", agent.Name, agent.Tool, agent.Model, gitPolicy, gitBranch),
+		"content": fmt.Sprintf("## Execution Started\n\n**Agent:** %s  \n**Tool:** %s  \n**Model:** %s  \n**Git Policy:** %s  \n**Branch:** %s", agent.Name, agent.Tool, agent.Model, gitPolicy, preparedGit.Branch),
 		"agentId": agent.ID,
 	})
 
@@ -176,8 +201,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	}
 
 	timeout := time.Duration(agent.Timeout) * time.Second
-	if timeout == 0 {
-		timeout = 300 * time.Second
+	if timeout <= 0 {
+		timeout = 900 * time.Second
 	}
 
 	var (
@@ -221,21 +246,20 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		}
 	}()
 
-	workdir := agent.Workdir
-	if claimed.RuntimeBinding.RepoPath != "" {
-		workdir = claimed.RuntimeBinding.RepoPath
-	}
-
 	result := exec.Execute(execCtx, prompt, workdir, timeout, func(event executor.StreamEvent) {
 		content := strings.TrimSpace(event.Content)
 		if content == "" {
 			return
 		}
+		formattedContent := runner.FormatExecutionEvent(event.Kind, content)
 		eventMu.Lock()
 		pendingEvents = append(pendingEvents, api.ExecutionEvent{
 			Seq:     event.Seq,
 			Kind:    event.Kind,
-			Content: content,
+			Content: formattedContent,
+			Metadata: map[string]interface{}{
+				"raw": content,
+			},
 		})
 		fullOutput = append(fullOutput, content)
 		eventMu.Unlock()
@@ -253,32 +277,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), output, result.ExitCode)
 
-	gitSnapshot := runner.CaptureGitSnapshot(workdir)
-	gitResult := map[string]interface{}{
-		"mode":       string(gitPolicy),
-		"baseBranch": gitBaseBranch,
-		"branch":     gitSnapshot.Branch,
-		"commitShas": gitSnapshot.CommitShas,
-		"prUrl":      gitSnapshot.PRUrl,
-		"prNumber":   gitSnapshot.PRNumber,
-	}
-	if gitSnapshot.Branch != "" && gitPolicy != runner.GitPolicyNoWrite {
-		gitResult["branch"] = gitSnapshot.Branch
-	}
-	if structuredResult != nil {
-		if gitRaw, ok := structuredResult["git"].(map[string]interface{}); ok {
-			if prUrl, ok := gitRaw["prUrl"].(string); ok && prUrl != "" {
-				gitResult["prUrl"] = prUrl
-				gitResult["prNumber"] = gitRaw["prNumber"]
-			}
-			if commitShas, ok := gitRaw["commitShas"].([]interface{}); ok && len(commitShas) > 0 {
-				gitResult["commitShas"] = commitShas
-			}
-			if branch, ok := gitRaw["branch"].(string); ok && branch != "" {
-				gitResult["branch"] = branch
-			}
-		}
-	}
+	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
+	structuredResult = runner.MergeGitResult(structuredResult, gitSnapshot)
 
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
@@ -310,7 +310,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		Metadata: map[string]interface{}{
 			"tool":  agent.Tool,
 			"model": agent.Model,
-			"git":    gitResult,
+			"git":   runner.GitMetadataMap(gitSnapshot),
 			"runtimeBinding": map[string]interface{}{
 				"id":                    claimed.RuntimeBinding.ID,
 				"projectId":             claimed.RuntimeBinding.ProjectID,
@@ -326,13 +326,6 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"metadata":              claimed.RuntimeBinding.Metadata,
 			},
 		},
-	}
-
-	if prUrl, ok := gitResult["prUrl"].(string); ok && prUrl != "" {
-		finalizeParams.Metadata["prUrl"] = prUrl
-	}
-	if prNumber, ok := gitResult["prNumber"]; ok && prNumber != nil {
-		finalizeParams.Metadata["prNumber"] = prNumber
 	}
 
 	_, err = api.FinalizeExecution(client, claimed.Execution.ID, finalizeParams)

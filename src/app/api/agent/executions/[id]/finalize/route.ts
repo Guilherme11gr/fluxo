@@ -29,6 +29,23 @@ const finalizeSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+function extractGitPayload(data: {
+  result?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const resultGit = data.result?.git;
+  if (resultGit && typeof resultGit === 'object') {
+    return resultGit as Record<string, unknown>;
+  }
+
+  const metadataGit = data.metadata?.git;
+  if (metadataGit && typeof metadataGit === 'object') {
+    return metadataGit as Record<string, unknown>;
+  }
+
+  return undefined;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -117,14 +134,22 @@ export async function POST(
         );
       }
 
-      const gitResult = (data.result as Record<string, unknown> | undefined)?.git as Record<string, unknown> | undefined;
+      const gitResult = extractGitPayload({
+        result: data.result,
+        metadata: data.metadata,
+      });
       if (gitResult) {
         const prUrl = typeof gitResult.prUrl === 'string' ? gitResult.prUrl : undefined;
         const prNumber = typeof gitResult.prNumber === 'number' ? gitResult.prNumber : undefined;
         if (prUrl || prNumber !== undefined) {
-          const prUpdate: Record<string, unknown> = {};
+          const prUpdate: {
+            githubPrUrl?: string | null;
+            githubPrNumber?: number | null;
+            githubPrStatus?: 'open' | 'closed' | 'merged' | null;
+          } = {};
           if (prUrl) prUpdate.githubPrUrl = prUrl;
           if (prNumber !== undefined) prUpdate.githubPrNumber = prNumber;
+          prUpdate.githubPrStatus = 'open';
           await taskRepository.update(execution.taskId, auth.orgId, prUpdate);
         }
       }

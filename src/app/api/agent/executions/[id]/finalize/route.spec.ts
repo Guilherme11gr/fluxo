@@ -6,6 +6,7 @@ const {
   mockFindAgentById,
   mockUpdateStatus,
   mockFindTaskById,
+  mockUpdateTaskRecord,
   mockDeleteLease,
   mockFindCommentsByTaskId,
   mockCreateComment,
@@ -16,6 +17,7 @@ const {
   mockFindAgentById: vi.fn(),
   mockUpdateStatus: vi.fn(),
   mockFindTaskById: vi.fn(),
+  mockUpdateTaskRecord: vi.fn(),
   mockDeleteLease: vi.fn(),
   mockFindCommentsByTaskId: vi.fn(),
   mockCreateComment: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock('@/infra/adapters/prisma', () => ({
   },
   taskRepository: {
     findById: mockFindTaskById,
+    update: mockUpdateTaskRecord,
   },
 }));
 
@@ -92,6 +95,7 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
 
     mockFindCommentsByTaskId.mockResolvedValue([]);
     mockUpdateStatus.mockResolvedValue({ id: 'exec-1', status: 'SUCCESS' });
+    mockUpdateTaskRecord.mockResolvedValue({ id: 'task-1' });
   });
 
   it('stores structured result under metadata.result and preserves existing metadata', async () => {
@@ -133,5 +137,31 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
       })
     );
     expect(mockDeleteLease).toHaveBeenCalledWith('exec-1');
+  });
+
+  it('updates task PR fields from metadata git payload when result.git is absent', async () => {
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          metadata: {
+            git: {
+              prUrl: 'https://github.com/fluxo-app/fluxo/pull/42',
+              prNumber: 42,
+            },
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateTaskRecord).toHaveBeenCalledWith('task-1', 'org-1', {
+      githubPrUrl: 'https://github.com/fluxo-app/fluxo/pull/42',
+      githubPrNumber: 42,
+      githubPrStatus: 'open',
+    });
   });
 });

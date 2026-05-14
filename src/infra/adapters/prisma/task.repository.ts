@@ -42,6 +42,7 @@ export interface UpdateTaskInput {
   focus?: TaskFocus | null;
   githubPrUrl?: string | null;
   githubPrNumber?: number | null;
+  githubPrStatus?: 'open' | 'closed' | 'merged' | null;
 }
 
 export class TaskRepository {

@@ -58,6 +58,27 @@ func TestParseExecutionResultV1ExtractsStructuredBlock(t *testing.T) {
 	}
 }
 
+func TestFormatExecutionEventFormatsJSONLToolUse(t *testing.T) {
+	raw := `{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"src/app.ts"}}}}`
+	formatted := FormatExecutionEvent("stdout", raw)
+	assertContains(t, formatted, "[tool:read]")
+	assertContains(t, formatted, "src/app.ts")
+}
+
+func TestExtractReadableOutputIncludesFormattedToolEvents(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"grep","state":{"input":{"pattern":"gitPolicy"}}}}`,
+		`{"type":"tool_result","part":{"tool":"grep","state":{"status":"completed","output":{"matches":3}}}}`,
+		`{"type":"result","part":{"text":"Finished."}}`,
+	}, "\n")
+
+	formatted := ExtractReadableOutput(raw)
+	assertContains(t, formatted, "Finished.")
+	assertContains(t, formatted, "[tool:grep]")
+	assertContains(t, formatted, "[tool-result:grep]")
+}
+
 func assertContains(t *testing.T, value, expected string) {
 	t.Helper()
 	if !strings.Contains(value, expected) {

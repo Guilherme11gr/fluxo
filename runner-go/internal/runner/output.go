@@ -6,6 +6,99 @@ import (
 	"strings"
 )
 
+func FormatExecutionEvent(kind, content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+
+	switch kind {
+	case "stdout", "stderr":
+		if formatted := formatJSONLExecutionLine(content); formatted != "" {
+			return formatted
+		}
+	}
+
+	return content
+}
+
+func formatJSONLExecutionLine(line string) string {
+	if !strings.HasPrefix(strings.TrimSpace(line), "{") {
+		return line
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		return line
+	}
+
+	eventType, _ := obj["type"].(string)
+	part, _ := obj["part"].(map[string]interface{})
+
+	switch eventType {
+	case "text":
+		if text, _ := part["text"].(string); strings.TrimSpace(text) != "" {
+			return text
+		}
+	case "tool_use":
+		toolName, _ := part["tool"].(string)
+		if toolName == "" {
+			toolName = "tool"
+		}
+		if state, ok := part["state"].(map[string]interface{}); ok {
+			if input, ok := state["input"]; ok {
+				serialized := compactJSON(input)
+				if serialized != "" {
+					return fmt.Sprintf("[tool:%s] %s", toolName, serialized)
+				}
+			}
+		}
+		return fmt.Sprintf("[tool:%s]", toolName)
+	case "tool_result":
+		toolName, _ := part["tool"].(string)
+		if toolName == "" {
+			toolName = "tool"
+		}
+		if state, ok := part["state"].(map[string]interface{}); ok {
+			if output, ok := state["output"]; ok {
+				serialized := compactJSON(output)
+				if serialized != "" {
+					return fmt.Sprintf("[tool-result:%s] %s", toolName, serialized)
+				}
+			}
+			if status, _ := state["status"].(string); status != "" {
+				return fmt.Sprintf("[tool-result:%s] status=%s", toolName, status)
+			}
+		}
+		return fmt.Sprintf("[tool-result:%s]", toolName)
+	case "step_start":
+		return "[step] started"
+	case "step_end":
+		return "[step] completed"
+	case "result":
+		if text, _ := part["text"].(string); strings.TrimSpace(text) != "" {
+			return text
+		}
+		if summary, _ := part["summary"].(string); strings.TrimSpace(summary) != "" {
+			return summary
+		}
+	}
+
+	return line
+}
+
+func compactJSON(value interface{}) string {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(string(bytes))
+	if len(text) > 300 {
+		return text[:300] + "..."
+	}
+	return text
+}
+
 // ExtractReadableOutput parses JSONL output from opencode/claude and extracts
 // human-readable text content. Falls back to raw output if parsing fails.
 func ExtractReadableOutput(raw string) string {
@@ -72,16 +165,28 @@ func ExtractReadableOutput(raw string) string {
 					}
 				}
 			}
+			if formatted := formatJSONLExecutionLine(line); formatted != "" && !seen[formatted] {
+				seen[formatted] = true
+				textParts = append(textParts, formatted)
+			}
 
 		case "tool_result":
-			// Skip tool results — too verbose
+			if formatted := formatJSONLExecutionLine(line); formatted != "" && !seen[formatted] {
+				seen[formatted] = true
+				textParts = append(textParts, formatted)
+			}
 			continue
 
 		case "step_start", "step_end":
-			// Skip step markers
+			if formatted := formatJSONLExecutionLine(line); formatted != "" && !seen[formatted] {
+				seen[formatted] = true
+				textParts = append(textParts, formatted)
+			}
 			continue
 		}
 	}
+
+	filtered := filterReadableTextParts(textParts, finalResult)
 
 	// Build readable output
 	var result strings.Builder
@@ -91,29 +196,15 @@ func ExtractReadableOutput(raw string) string {
 		result.WriteString(finalResult)
 	}
 
-	// If no final result, use collected text parts
-	if result.Len() == 0 && len(textParts) > 0 {
-		// Deduplicate and take the most relevant parts
-		// Skip very short fragments and system messages
-		var filtered []string
-		for _, t := range textParts {
-			t = strings.TrimSpace(t)
-			if len(t) < 10 {
-				continue
-			}
-			// Skip common opencode noise
-			if strings.HasPrefix(t, "Running") || strings.HasPrefix(t, "Session:") {
-				continue
-			}
-			filtered = append(filtered, t)
+	if len(filtered) > 0 {
+		if result.Len() > 0 {
+			result.WriteString("\n\n")
 		}
-		if len(filtered) > 0 {
-			result.WriteString(strings.Join(filtered, "\n"))
-		}
+		result.WriteString(strings.Join(filtered, "\n"))
 	}
 
 	// Append tool summary if we have tools
-	if len(toolNames) > 0 && result.Len() > 0 {
+	if len(toolNames) > 0 && result.Len() > 0 && len(filtered) == 0 {
 		result.WriteString(fmt.Sprintf("\n\nTools used: %s", strings.Join(toolNames, ", ")))
 	}
 
@@ -130,6 +221,25 @@ func ExtractReadableOutput(raw string) string {
 		out = out[:4000] + "\n\n(output truncated)"
 	}
 	return out
+}
+
+func filterReadableTextParts(textParts []string, finalResult string) []string {
+	var filtered []string
+	for _, t := range textParts {
+		t = strings.TrimSpace(t)
+		if len(t) < 10 {
+			continue
+		}
+		if t == finalResult {
+			continue
+		}
+		// Skip common opencode noise
+		if strings.HasPrefix(t, "Running") || strings.HasPrefix(t, "Session:") {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
 }
 
 // FormatExecutionComment creates a clean, readable comment for task execution results.
