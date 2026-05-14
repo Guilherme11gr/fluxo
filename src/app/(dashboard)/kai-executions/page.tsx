@@ -76,6 +76,8 @@ export default function ExecutionsPage() {
     }
     return String(selectedExecution?.output ?? '');
   }, [executionEvents?.items, selectedExecution?.output]);
+  const showExecutionError =
+    selectedExecution?.status !== 'SUCCESS' && Boolean((selectedExecution as ExecutionRecord | undefined)?.errorMessage);
 
   useEffect(() => {
     if (!selectedExecutionId || !data?.items?.length) return;
@@ -200,7 +202,7 @@ export default function ExecutionsPage() {
               <div className="mt-0.5 font-mono">{(selectedExecution as ExecutionRecord).exitCode ?? '—'}</div>
             </div>
           </div>
-          {(selectedExecution as ExecutionRecord).errorMessage && (
+          {showExecutionError && (
             <div>
               <span className="text-xs text-muted-foreground">Error</span>
               <pre className="mt-1 text-xs bg-destructive/10 text-destructive rounded p-3 overflow-x-auto max-h-48">

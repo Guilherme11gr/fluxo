@@ -195,15 +195,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 
 	duration := int(time.Since(start).Seconds())
 	output := strings.Join(fullOutput, "\n")
+	readableOutput := runner.ExtractReadableOutput(output)
 	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), output, result.ExitCode)
 
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
 	var nextAssignee *string
+	errorMessage := truncate(readableOutput, 2000)
 	blockReason := fmt.Sprintf("Agent %s failed while running %s.", agent.Name, agent.Tool)
 	if result.Success {
 		status = "SUCCESS"
 		nextStatus = defaultStr(agent.DoneStatus, "DONE")
+		errorMessage = ""
 		if agent.NextAssigneeID != "" {
 			nextAssignee = &agent.NextAssigneeID
 		}
@@ -213,8 +216,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	_, err = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 		Status:              status,
 		Output:              output,
-		ResultSummary:       truncate(runner.ExtractReadableOutput(output), 500),
-		ErrorMessage:        truncate(runner.ExtractReadableOutput(output), 2000),
+		ResultSummary:       truncate(readableOutput, 500),
+		ErrorMessage:        errorMessage,
 		ExitCode:            result.ExitCode,
 		Duration:            duration,
 		NextStatus:          nextStatus,
