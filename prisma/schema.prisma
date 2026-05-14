@@ -17,6 +17,7 @@ model Organization {
   createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   maxUsers               Int?            @map("max_users")
+  subscriptionStatus     String?         @default("trial") @map("subscription_status") @db.VarChar(20)
   agentApiKey            AgentApiKey?
   agents                 Agent[]
   agentChatRoles         AgentChatRole[]
