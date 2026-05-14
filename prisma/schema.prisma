@@ -86,6 +86,7 @@ model Agent {
   status        String       @default("OFFLINE") @db.VarChar(20)
   tool          String?      @db.VarChar(50)
   workdir       String?
+  projectId     String?      @map("project_id") @db.Uuid
   config        Json         @default("{}")
   lastHeartbeat DateTime?    @map("last_heartbeat") @db.Timestamptz(6)
   createdBy     String       @map("created_by") @db.Uuid
@@ -97,6 +98,7 @@ model Agent {
 
   @@unique([orgId, name])
   @@index([orgId, status], map: "idx_agents_org_status")
+  @@index([projectId], map: "idx_agents_project")
   @@map("agents")
   @@schema("public")
 }

@@ -8,6 +8,7 @@ export interface AgentRecord {
   status: string;
   tool: string | null;
   workdir: string | null;
+  projectId: string | null;
   config: Record<string, unknown>;
   lastHeartbeat: Date | null;
   createdBy: string;
@@ -24,6 +25,7 @@ function mapRecord(record: any): AgentRecord {
     status: record.status,
     tool: record.tool,
     workdir: record.workdir,
+    projectId: record.projectId,
     config: record.config ?? {},
     lastHeartbeat: record.lastHeartbeat,
     createdBy: record.createdBy,
@@ -65,6 +67,7 @@ export class AgentRepository {
     type?: string;
     tool?: string;
     workdir?: string;
+    projectId?: string;
     config?: Record<string, unknown>;
     createdBy: string;
   }): Promise<AgentRecord> {
@@ -75,6 +78,7 @@ export class AgentRepository {
         type: data.type ?? 'RUNNER',
         tool: data.tool ?? null,
         workdir: data.workdir ?? null,
+        projectId: data.projectId ?? null,
         config: data.config ?? {},
         createdBy: data.createdBy,
       },
@@ -89,6 +93,7 @@ export class AgentRepository {
       type?: string;
       tool?: string;
       workdir?: string;
+      projectId?: string | null;
       config?: Record<string, unknown>;
       status?: string;
     }

@@ -17,6 +17,7 @@ const createSchema = z.object({
   type: z.enum(['RUNNER', 'REVIEWER', 'CUSTOM']).default('RUNNER'),
   tool: z.string().max(50).optional(),
   workdir: z.string().optional(),
+  projectId: z.string().uuid().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
       type: data.type,
       tool: data.tool,
       workdir: data.workdir,
+      projectId: data.projectId,
       config: data.config,
       createdBy: auth.userId,
     });

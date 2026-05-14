@@ -18,6 +18,7 @@ const updateSchema = z.object({
   type: z.enum(['RUNNER', 'REVIEWER', 'CUSTOM']).optional(),
   tool: z.string().max(50).optional(),
   workdir: z.string().optional(),
+  projectId: z.string().uuid().nullable().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   status: z.enum(['ONLINE', 'OFFLINE', 'BUSY']).optional(),
 });
@@ -54,7 +55,12 @@ export async function PATCH(
 
     const body = await request.json();
     const data = updateSchema.parse(body);
-    const updated = await agentRepository.update(id, data);
+    const updateData: any = { ...data };
+    // Handle projectId explicitly - null means clear it
+    if ('projectId' in data) {
+      updateData.projectId = data.projectId;
+    }
+    const updated = await agentRepository.update(id, updateData);
     return agentSuccess(updated);
   } catch (error) {
     return handleAgentError(error);

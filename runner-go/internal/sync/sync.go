@@ -205,7 +205,6 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 	agent.Model = strVal(configMap, "model")
 	agent.AgentType = strVal(configMap, "agent_type")
 	agent.Variant = strVal(configMap, "variant")
-	agent.ProjectID = strVal(configMap, "project_id")
 	agent.AssigneeID = strVal(configMap, "assignee_id")
 	agent.NextAssigneeID = strVal(configMap, "next_assignee_id")
 	agent.Context = strVal(configMap, "context")
@@ -214,6 +213,12 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 		if w := strVal(obj, "workdir"); w != "" {
 			agent.Workdir = w
 		}
+	}
+
+	// ProjectID: prefer column, fall back to config
+	agent.ProjectID = strVal(obj, "projectId")
+	if agent.ProjectID == "" {
+		agent.ProjectID = strVal(configMap, "project_id")
 	}
 
 	// Override defaults with config values if present

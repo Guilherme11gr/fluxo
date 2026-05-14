@@ -20,6 +20,7 @@ const updateSchema = z.object({
   type: z.enum(['RUNNER', 'REVIEWER', 'CUSTOM']).optional(),
   tool: z.string().max(50).optional(),
   workdir: z.string().optional(),
+  projectId: z.string().uuid().nullable().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
 

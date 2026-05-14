@@ -93,6 +93,7 @@ interface AgentFormDialogProps {
     name: string;
     type: string;
     tool?: string;
+    projectId?: string | null;
     config?: Record<string, unknown>;
   }) => void;
   isSubmitting?: boolean;
@@ -127,8 +128,8 @@ export function AgentFormDialog({
   const [tool, setTool] = useState(agent?.tool ?? '');
   const [model, setModel] = useState((config.model as string) ?? '');
 
-  // Execution fields
-  const [projectId, setProjectId] = useState((config.project_id as string) ?? '');
+  // Execution fields — projectId from column first, then config fallback
+  const [projectId, setProjectId] = useState((agent as any)?.projectId ?? (config.project_id as string) ?? '');
   const [agentType, setAgentType] = useState((config.agent_type as string) ?? 'build');
   const [variant, setVariant] = useState((config.variant as string) ?? '');
   const [pickStatus, setPickStatus] = useState((config.pick_status as string) ?? 'TODO');
@@ -142,7 +143,6 @@ export function AgentFormDialog({
     if (model) cfg.model = model;
     cfg.agent_type = agentType;
     if (variant) cfg.variant = variant;
-    if (projectId) cfg.project_id = projectId;
     cfg.pick_status = pickStatus;
     cfg.claim_status = claimStatus;
     cfg.done_status = doneStatus;
@@ -153,6 +153,7 @@ export function AgentFormDialog({
       name: name.trim(),
       type,
       tool: tool || undefined,
+      projectId: projectId || null,
       config: Object.keys(cfg).length > 0 ? cfg : undefined,
     });
   };
