@@ -184,7 +184,7 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	// Post "started" comment
 	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{
-		"content": fmt.Sprintf("[FluXo Runner][%s] Task claimed. Starting execution with %s...", agent.Name, agent.Tool),
+		"content": fmt.Sprintf("## 🚀 Execution Started\n\n**Agent:** %s  \n**Tool:** %s  \n**Model:** %s", agent.Name, agent.Tool, agent.Model),
 	})
 
 	// Update execution: RUNNING
@@ -238,6 +238,7 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	// Update execution: SUCCESS/FAILED
 	if execID != "" {
+		readableOutput := ExtractReadableOutput(result.Output)
 		execResult := map[string]interface{}{
 			"status":     execStatus,
 			"duration":   elapsedInt,
@@ -246,15 +247,15 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 		if result.ExitCode != 0 {
 			execResult["exitCode"] = result.ExitCode
 		}
-		if !result.Success && len(result.Output) > 0 {
-			errMsg := result.Output
+		if !result.Success && len(readableOutput) > 0 {
+			errMsg := readableOutput
 			if len(errMsg) > 2000 {
 				errMsg = errMsg[:2000]
 			}
 			execResult["errorMessage"] = errMsg
 		}
 		if result.Success {
-			summary := result.Output
+			summary := readableOutput
 			if len(summary) > 500 {
 				summary = summary[:500]
 			}
@@ -264,24 +265,8 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	}
 
 	// Step 5: Post result
-	const maxLen = 4000
-	truncated := len(result.Output) > maxLen
-	output := result.Output
-	if len(output) > maxLen {
-		output = output[:maxLen]
-	}
-
-	var summary string
-	if result.Success {
-		summary = fmt.Sprintf("[FluXo Runner][%s] Completed in %.1fs.\n\n%s", agent.Name, elapsed, output)
-	} else {
-		summary = fmt.Sprintf("[FluXo Runner][%s] FAILED in %.1fs (exit: %d).\n\n%s", agent.Name, elapsed, result.ExitCode, output)
-	}
-	if truncated {
-		summary += "\n\n*(output truncated — full log available locally)*"
-	}
-
-	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{"content": summary})
+	comment := FormatExecutionComment(agent.Name, agent.Tool, result.Success, elapsed, result.Output, result.ExitCode)
+	client.Post("/tasks/"+task.ID+"/comments", map[string]interface{}{"content": comment})
 
 	// Step 6: Handoff
 	doneStatus := defaultStr(agent.DoneStatus, "DONE")
