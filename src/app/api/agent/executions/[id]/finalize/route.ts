@@ -116,6 +116,18 @@ export async function POST(
           }
         );
       }
+
+      const gitResult = (data.result as Record<string, unknown> | undefined)?.git as Record<string, unknown> | undefined;
+      if (gitResult) {
+        const prUrl = typeof gitResult.prUrl === 'string' ? gitResult.prUrl : undefined;
+        const prNumber = typeof gitResult.prNumber === 'number' ? gitResult.prNumber : undefined;
+        if (prUrl || prNumber !== undefined) {
+          const prUpdate: Record<string, unknown> = {};
+          if (prUrl) prUpdate.githubPrUrl = prUrl;
+          if (prNumber !== undefined) prUpdate.githubPrNumber = prNumber;
+          await taskRepository.update(execution.taskId, auth.orgId, prUpdate);
+        }
+      }
     }
 
     await executionLeaseRepository.deleteByExecutionId(id);

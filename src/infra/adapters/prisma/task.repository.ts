@@ -38,7 +38,10 @@ export interface UpdateTaskInput {
   assigneeId?: string | null;
   assigneeAgentId?: string | null;
   blocked?: boolean;
+  blockReason?: string | null;
   focus?: TaskFocus | null;
+  githubPrUrl?: string | null;
+  githubPrNumber?: number | null;
 }
 
 export class TaskRepository {

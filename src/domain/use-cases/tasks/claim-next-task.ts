@@ -134,13 +134,13 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
         epic: { status: { not: 'CLOSED' } },
       },
     },
-    select: {
-      id: true,
-      orgId: true,
-      projectId: true,
-      featureId: true,
-      localId: true,
-      title: true,
+      select: {
+        id: true,
+        orgId: true,
+        projectId: true,
+        featureId: true,
+        localId: true,
+        title: true,
       description: true,
       status: true,
       type: true,
@@ -157,20 +157,25 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
     take: candidateLimit,
   });
 
-  for (const candidate of candidates as CandidateRow[]) {
+	for (const candidate of candidates as CandidateRow[]) {
     const bindings = await projectRuntimeBindingRepository.findByProject(candidate.projectId, input.orgId);
     const runtimeBinding = resolveProjectRuntimeBinding(bindings, {
       hostOs: runnerHostOs,
       runnerProfile,
     });
 
-    const runtimeMetadata = runtimeBinding
+	const runtimeMetadata = runtimeBinding
       ? {
           runtimeBinding,
           git: {
             mode: runtimeBinding.gitPolicy,
             baseBranch: runtimeBinding.defaultBaseBranch,
-            branch: null,
+            branch: buildDeterministicBranchName(
+              candidate.id,
+              candidate.type ?? 'TASK',
+              input.agentName,
+              runtimeBinding.allowedBranchPrefix,
+            ),
             prUrl: null,
             prNumber: null,
           },
@@ -185,12 +190,12 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
           AND expires_at <= now()
       `;
 
-      const lockedTask = await tx.$queryRaw<LockedTaskRow[]>`
-        SELECT
-          t.id,
-          t.org_id AS "orgId",
-          t.project_id AS "projectId",
-          t.feature_id AS "featureId",
+		const lockedTask = await tx.$queryRaw<LockedTaskRow[]>`
+			SELECT
+				t.id,
+				t.org_id AS "orgId",
+				t.project_id AS "projectId",
+				t.feature_id AS "featureId",
           t.local_id AS "localId",
           t.title,
           t.description,
@@ -348,4 +353,35 @@ export function assertClaimedTask(result: ClaimedTaskResult | null): ClaimedTask
     throw new ConflictError('Nenhuma task elegível disponível para claim');
   }
   return result;
+}
+
+const SAFE_BRANCH_RE = /[^a-zA-Z0-9/_\-]/g;
+
+export function buildDeterministicBranchName(
+  taskId: string,
+  taskType: string,
+  agentName: string,
+  allowedPrefix: string | null,
+): string {
+  const shortID = taskId.length > 8 ? taskId.slice(0, 8) : taskId;
+
+  let slug = agentName.toLowerCase().replace(SAFE_BRANCH_RE, '-').replace(/-+$/, '');
+  if (!slug) slug = 'agent';
+
+  const typeSlug = (taskType || 'task').toLowerCase();
+
+  let name = `${slug}/${typeSlug}-${shortID}`;
+
+  if (allowedPrefix) {
+    const prefix = allowedPrefix.replace(/\/$/, '');
+    name = `${prefix}/${typeSlug}-${shortID}`;
+  }
+
+  name = name.replace(SAFE_BRANCH_RE, '-').replace(/--+/g, '-').replace(/^-|-$/g, '');
+
+  if (name.length > 128) {
+    name = name.slice(0, 128).replace(/-+$/, '');
+  }
+
+  return name;
 }
