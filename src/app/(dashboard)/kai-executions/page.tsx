@@ -45,7 +45,8 @@ function formatTimeAgo(date: Date): string {
 
 export default function ExecutionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const { data, isLoading } = useExecutions(statusFilter ? { status: statusFilter } : undefined);
+  const effectiveFilter = statusFilter && statusFilter !== 'ALL' ? { status: statusFilter } : undefined;
+  const { data, isLoading } = useExecutions(effectiveFilter);
   const { data: agents } = useAgents();
   const [selectedExecution, setSelectedExecution] = useState<any>(null);
 
@@ -64,7 +65,7 @@ export default function ExecutionsPage() {
               <SelectValue placeholder="Todos os status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos os status</SelectItem>
+              <SelectItem value="ALL">Todos os status</SelectItem>
               <SelectItem value="CLAIMED">Claimed</SelectItem>
               <SelectItem value="RUNNING">Running</SelectItem>
               <SelectItem value="SUCCESS">Success</SelectItem>
