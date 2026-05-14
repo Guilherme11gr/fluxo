@@ -40,6 +40,10 @@ type AgentConfig struct {
 	Tool           string `yaml:"tool"`
 	Model          string `yaml:"model"`
 	AgentType      string `yaml:"agent_type"`
+	Role           string `yaml:"role"`
+	RolePrompt     string `yaml:"role_prompt"`
+	OperatingRules []string `yaml:"operating_rules"`
+	OutputSchemaVersion string `yaml:"output_schema_version"`
 	Variant        string `yaml:"variant"`
 	ProjectID      string `yaml:"project_id"`
 	AssigneeID     string `yaml:"assignee_id"`

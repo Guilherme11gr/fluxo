@@ -15,9 +15,6 @@ const claimSchema = z.object({
   leaseMs: z.number().int().positive().optional(),
   tool: z.string().max(50).optional(),
   model: z.string().max(100).optional(),
-  workspaceMode: z.string().max(50).optional(),
-  workspaceRef: z.string().nullable().optional(),
-  workspacePath: z.string().nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -41,9 +38,6 @@ export async function POST(request: Request) {
       leaseMs: data.leaseMs,
       tool: data.tool,
       model: data.model,
-      workspaceMode: data.workspaceMode,
-      workspaceRef: data.workspaceRef,
-      workspacePath: data.workspacePath,
       metadata: data.metadata,
     });
 

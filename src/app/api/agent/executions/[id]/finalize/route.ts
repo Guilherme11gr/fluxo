@@ -17,6 +17,7 @@ const finalizeSchema = z.object({
   status: z.enum(['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED']),
   output: z.string().optional(),
   resultSummary: z.string().optional(),
+  result: z.record(z.string(), z.unknown()).optional(),
   errorMessage: z.string().optional(),
   exitCode: z.number().int().optional(),
   duration: z.number().int().nonnegative().optional(),
@@ -50,6 +51,11 @@ export async function POST(
     const data = finalizeSchema.parse(body);
 
     const finishedAt = data.finishedAt ? new Date(data.finishedAt) : new Date();
+    const mergedMetadata = {
+      ...(execution.metadata ?? {}),
+      ...(data.metadata ?? {}),
+      ...(data.result ? { result: data.result } : {}),
+    };
     const updatedExecution = alreadyTerminal
       ? execution
       : await agentExecutionRepository.updateStatus(id, {
@@ -61,7 +67,7 @@ export async function POST(
           duration: data.duration,
           finishedAt,
           lastHeartbeatAt: finishedAt,
-          metadata: data.metadata,
+          metadata: mergedMetadata,
         });
 
     const taskUpdate: {

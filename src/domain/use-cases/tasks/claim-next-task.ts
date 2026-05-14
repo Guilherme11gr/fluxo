@@ -1,6 +1,13 @@
 import { Prisma } from '@prisma/client';
-import { prisma, agentRepository, runnerInstanceRepository, auditLogRepository } from '@/infra/adapters/prisma';
+import {
+  prisma,
+  agentRepository,
+  runnerInstanceRepository,
+  auditLogRepository,
+  projectRuntimeBindingRepository,
+} from '@/infra/adapters/prisma';
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/errors';
+import { resolveProjectRuntimeBinding, type ResolvedProjectRuntimeBinding } from '@/domain/use-cases/runtime/resolve-project-runtime-binding';
 
 const DEFAULT_LEASE_MS = 90 * 1000;
 const DEFAULT_CANDIDATE_LIMIT = 10;
@@ -61,6 +68,7 @@ export interface ClaimedTaskResult {
     executionId: string | null;
     expiresAt: Date;
   };
+  runtimeBinding: ResolvedProjectRuntimeBinding | null;
 }
 
 type CandidateRow = {
@@ -101,6 +109,19 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
   const candidateLimit = Math.min(Math.max(input.candidateLimit ?? DEFAULT_CANDIDATE_LIMIT, 1), 50);
   const leaseMs = Math.min(Math.max(input.leaseMs ?? DEFAULT_LEASE_MS, 15_000), 15 * 60 * 1000);
 
+  const runnerMetadata = (runner.metadata ?? {}) as Record<string, unknown>;
+  const runnerCapabilities = (runner.capabilities ?? {}) as Record<string, unknown>;
+  const runnerHostOs =
+    (typeof runnerMetadata.hostOs === 'string' && runnerMetadata.hostOs) ||
+    (typeof runnerCapabilities.host_os === 'string' && runnerCapabilities.host_os) ||
+    (typeof runnerCapabilities.hostOs === 'string' && runnerCapabilities.hostOs) ||
+    null;
+  const runnerProfile =
+    (typeof runnerMetadata.runnerProfile === 'string' && runnerMetadata.runnerProfile) ||
+    (typeof runnerCapabilities.runner_profile === 'string' && runnerCapabilities.runner_profile) ||
+    (typeof runnerCapabilities.runnerProfile === 'string' && runnerCapabilities.runnerProfile) ||
+    null;
+
   const candidates = await prisma.task.findMany({
     where: {
       orgId: input.orgId,
@@ -137,6 +158,25 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
   });
 
   for (const candidate of candidates as CandidateRow[]) {
+    const bindings = await projectRuntimeBindingRepository.findByProject(candidate.projectId, input.orgId);
+    const runtimeBinding = resolveProjectRuntimeBinding(bindings, {
+      hostOs: runnerHostOs,
+      runnerProfile,
+    });
+
+    const runtimeMetadata = runtimeBinding
+      ? {
+          runtimeBinding,
+          git: {
+            mode: runtimeBinding.gitPolicy,
+            baseBranch: runtimeBinding.defaultBaseBranch,
+            branch: null,
+            prUrl: null,
+            prNumber: null,
+          },
+        }
+      : {};
+
     const claimed = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
         DELETE FROM public.execution_leases
@@ -209,10 +249,13 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
           status: 'CLAIMED',
           tool: input.tool ?? null,
           model: input.model ?? null,
-          workspaceMode: input.workspaceMode ?? 'shared_project',
+          workspaceMode: runtimeBinding?.executionMode ?? input.workspaceMode ?? 'shared_project',
           workspaceRef: input.workspaceRef ?? null,
-          workspacePath: input.workspacePath ?? null,
-          metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+          workspacePath: runtimeBinding?.repoPath ?? input.workspacePath ?? null,
+          metadata: {
+            ...(input.metadata ?? {}),
+            ...runtimeMetadata,
+          } as Prisma.InputJsonValue,
           startedAt: new Date(),
           lastHeartbeatAt: new Date(),
         },
@@ -258,6 +301,7 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
           executionId: execution.id,
           expiresAt: leaseRows[0].expiresAt,
         },
+        runtimeBinding,
       } satisfies ClaimedTaskResult;
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,

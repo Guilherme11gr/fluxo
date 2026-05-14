@@ -12,9 +12,6 @@ type ClaimNextTaskParams struct {
 	LeaseMs          int                    `json:"leaseMs,omitempty"`
 	Tool             string                 `json:"tool,omitempty"`
 	Model            string                 `json:"model,omitempty"`
-	WorkspaceMode    string                 `json:"workspaceMode,omitempty"`
-	WorkspaceRef     string                 `json:"workspaceRef,omitempty"`
-	WorkspacePath    string                 `json:"workspacePath,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -50,6 +47,20 @@ type ClaimedTaskResponse struct {
 		ExecutionID string `json:"executionId"`
 		ExpiresAt  string `json:"expiresAt"`
 	} `json:"lease"`
+	RuntimeBinding struct {
+		ID                  string                 `json:"id"`
+		ProjectID           string                 `json:"projectId"`
+		RunnerProfile       string                 `json:"runnerProfile"`
+		HostOS              string                 `json:"hostOs"`
+		RepoPath            string                 `json:"repoPath"`
+		DefaultBaseBranch   string                 `json:"defaultBaseBranch"`
+		AllowedBranchPrefix string                 `json:"allowedBranchPrefix"`
+		ExecutionMode       string                 `json:"executionMode"`
+		GitProvider         string                 `json:"gitProvider"`
+		PRPolicy            string                 `json:"prPolicy"`
+		GitPolicy           string                 `json:"gitPolicy"`
+		Metadata            map[string]interface{} `json:"metadata"`
+	} `json:"runtimeBinding"`
 }
 
 func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResponse, error) {
@@ -77,15 +88,6 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 	}
 	if params.Model != "" {
 		body["model"] = params.Model
-	}
-	if params.WorkspaceMode != "" {
-		body["workspaceMode"] = params.WorkspaceMode
-	}
-	if params.WorkspaceRef != "" {
-		body["workspaceRef"] = params.WorkspaceRef
-	}
-	if params.WorkspacePath != "" {
-		body["workspacePath"] = params.WorkspacePath
 	}
 	if params.Metadata != nil {
 		body["metadata"] = params.Metadata
@@ -141,6 +143,22 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 		result.Lease.ProjectID, _ = leaseData["projectId"].(string)
 		result.Lease.ExecutionID, _ = leaseData["executionId"].(string)
 		result.Lease.ExpiresAt, _ = leaseData["expiresAt"].(string)
+	}
+	if runtimeBindingData, ok := data["runtimeBinding"].(map[string]interface{}); ok {
+		result.RuntimeBinding.ID, _ = runtimeBindingData["id"].(string)
+		result.RuntimeBinding.ProjectID, _ = runtimeBindingData["projectId"].(string)
+		result.RuntimeBinding.RunnerProfile, _ = runtimeBindingData["runnerProfile"].(string)
+		result.RuntimeBinding.HostOS, _ = runtimeBindingData["hostOs"].(string)
+		result.RuntimeBinding.RepoPath, _ = runtimeBindingData["repoPath"].(string)
+		result.RuntimeBinding.DefaultBaseBranch, _ = runtimeBindingData["defaultBaseBranch"].(string)
+		result.RuntimeBinding.AllowedBranchPrefix, _ = runtimeBindingData["allowedBranchPrefix"].(string)
+		result.RuntimeBinding.ExecutionMode, _ = runtimeBindingData["executionMode"].(string)
+		result.RuntimeBinding.GitProvider, _ = runtimeBindingData["gitProvider"].(string)
+		result.RuntimeBinding.PRPolicy, _ = runtimeBindingData["prPolicy"].(string)
+		result.RuntimeBinding.GitPolicy, _ = runtimeBindingData["gitPolicy"].(string)
+		if metadata, ok := runtimeBindingData["metadata"].(map[string]interface{}); ok {
+			result.RuntimeBinding.Metadata = metadata
+		}
 	}
 
 	if result.Task.ID == "" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -42,6 +43,7 @@ func NewRunnerManager(apiURL, apiKey string, pollInterval, heartbeat time.Durati
 
 func (m *RunnerManager) Register(ctx context.Context) error {
 	hostname, _ := os.Hostname()
+	runnerProfile := hostname
 	runnerID, err := api.RegisterRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), api.RegisterRunnerParams{
 		Hostname: hostname,
 		PID:      os.Getpid(),
@@ -50,7 +52,13 @@ func (m *RunnerManager) Register(ctx context.Context) error {
 			"streaming":        true,
 			"claim_next":       true,
 			"multi_agent":      true,
+			"host_os":          runtime.GOOS,
+			"runner_profile":   runnerProfile,
 			"available_models": m.availableModels,
+		},
+		Metadata: map[string]interface{}{
+			"hostOs":        runtime.GOOS,
+			"runnerProfile": runnerProfile,
 		},
 	})
 	if err != nil {
@@ -171,7 +179,16 @@ func (m *RunnerManager) heartbeatLoop(ctx context.Context) {
 			if m.runnerID == "" {
 				continue
 			}
-			_, err := api.HeartbeatRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), m.runnerID, api.RunnerHeartbeatParams{Status: "ONLINE"})
+			_, err := api.HeartbeatRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), m.runnerID, api.RunnerHeartbeatParams{
+				Status: "ONLINE",
+				Capabilities: map[string]interface{}{
+					"host_os":        runtime.GOOS,
+					"available_models": m.availableModels,
+				},
+				Metadata: map[string]interface{}{
+					"hostOs": runtime.GOOS,
+				},
+			})
 			if err != nil {
 				fmt.Printf("[runner] heartbeat error: %v\n", err)
 			}

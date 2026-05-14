@@ -11,7 +11,6 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
-	"github.com/fluxo-app/fluxo-runner/internal/rag"
 )
 
 // activeTask tracks the current task being executed (for graceful shutdown).
@@ -38,19 +37,32 @@ func RegisterAgent(client *api.Client, agent config.AgentConfig, availableModels
 		"workdir": agent.Workdir,
 	}
 
+	configObj := map[string]interface{}{}
 	if len(availableModels) > 0 {
-		configObj := map[string]interface{}{
-			"available_models": availableModels,
-		}
-		if agent.Model != "" {
-			configObj["model"] = agent.Model
-		}
-		if agent.AgentType != "" {
-			configObj["agent_type"] = agent.AgentType
-		}
-		if agent.Variant != "" {
-			configObj["variant"] = agent.Variant
-		}
+		configObj["available_models"] = availableModels
+	}
+	if agent.Model != "" {
+		configObj["model"] = agent.Model
+	}
+	if agent.AgentType != "" {
+		configObj["agent_type"] = agent.AgentType
+	}
+	if agent.Role != "" {
+		configObj["role"] = agent.Role
+	}
+	if agent.RolePrompt != "" {
+		configObj["role_prompt"] = agent.RolePrompt
+	}
+	if len(agent.OperatingRules) > 0 {
+		configObj["operating_rules"] = agent.OperatingRules
+	}
+	if agent.OutputSchemaVersion != "" {
+		configObj["output_schema_version"] = agent.OutputSchemaVersion
+	}
+	if agent.Variant != "" {
+		configObj["variant"] = agent.Variant
+	}
+	if len(configObj) > 0 {
 		body["config"] = configObj
 	}
 
@@ -197,13 +209,9 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 		})
 	}
 
-	// Step 3: Fetch RAG context
-	fmt.Printf("  \033[90m[%s] Fetching RAG context...\033[0m\n", agent.Name)
-	ragContext := rag.FetchContext(client, task.Title, task.ProjectID)
-
-	// Step 4: Execute
+	// Step 3: Execute
 	fmt.Printf("  \033[33m[%s] Executing with %s...\033[0m\n", agent.Name, agent.Tool)
-	prompt := BuildPrompt(task, agent, ragContext)
+	prompt := BuildPrompt(task, agent)
 
 	var exec executor.Executor
 	switch agent.Tool {

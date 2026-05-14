@@ -34,6 +34,7 @@ model Organization {
   projects             Project[]
   tasks                Task[]
   executions           AgentExecution[]
+  projectRuntimeBindings ProjectRuntimeBinding[]
   runnerInstances      RunnerInstance[]
   executionLeases      ExecutionLease[]
   userProfiles         UserProfile[]
@@ -218,6 +219,7 @@ model Project {
   projectTags     ProjectTag[]
   executions      AgentExecution[]
   executionLeases ExecutionLease[]
+  runtimeBindings ProjectRuntimeBinding[]
   creator         users?        @relation("ProjectCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
   organization    Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tasks           Task[]
@@ -228,6 +230,32 @@ model Project {
   @@index([githubInstallationId], map: "idx_projects_github_installation")
   @@index([githubRepoFullName], map: "idx_projects_github_repo")
   @@map("projects")
+  @@schema("public")
+}
+
+model ProjectRuntimeBinding {
+  id                  String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId               String       @map("org_id") @db.Uuid
+  projectId           String       @map("project_id") @db.Uuid
+  runnerProfile       String       @map("runner_profile") @db.VarChar(100)
+  hostOs              String       @map("host_os") @db.VarChar(20)
+  repoPath            String       @map("repo_path")
+  defaultBaseBranch   String       @default("main") @map("default_base_branch") @db.VarChar(100)
+  allowedBranchPrefix String?      @map("allowed_branch_prefix") @db.VarChar(100)
+  executionMode       String       @default("shared_project") @map("execution_mode") @db.VarChar(50)
+  gitProvider         String?      @map("git_provider") @db.VarChar(50)
+  prPolicy            String       @default("disabled") @map("pr_policy") @db.VarChar(20)
+  gitPolicy           String       @default("no_write") @map("git_policy") @db.VarChar(30)
+  metadata            Json         @default("{}")
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  project             Project      @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([orgId, projectId, runnerProfile, hostOs], map: "uq_project_runtime_bindings_org_project_profile_os")
+  @@index([orgId, projectId], map: "idx_project_runtime_bindings_org_project")
+  @@map("project_runtime_bindings")
   @@schema("public")
 }
 

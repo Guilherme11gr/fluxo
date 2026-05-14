@@ -73,7 +73,7 @@ export default function RunnersPage() {
   }, []);
 
   const handleCreate = useCallback(
-    async (data: { name: string; type: string; tool?: string; config?: Record<string, unknown> }) => {
+    async (data: { name: string; type: string; tool?: string; projectId?: string | null; config?: Record<string, unknown> }) => {
       await createAgent.mutateAsync({ ...data, type: data.type as 'RUNNER' | 'REVIEWER' | 'CUSTOM' });
       setFormOpen(false);
     },
@@ -81,7 +81,7 @@ export default function RunnersPage() {
   );
 
   const handleUpdate = useCallback(
-    async (data: { name: string; type: string; tool?: string; config?: Record<string, unknown> }) => {
+    async (data: { name: string; type: string; tool?: string; projectId?: string | null; config?: Record<string, unknown> }) => {
       if (!editingAgent) return;
       await updateAgent.mutateAsync({
         id: editingAgent.id,

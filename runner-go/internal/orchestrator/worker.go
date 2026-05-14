@@ -10,7 +10,6 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
-	"github.com/fluxo-app/fluxo-runner/internal/rag"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
 
@@ -88,7 +87,6 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		CandidateLimit:   10,
 		Tool:             agent.Tool,
 		Model:            agent.Model,
-		WorkspaceMode:    "shared_project",
 	})
 	if err != nil {
 		fmt.Printf("[%s] claim-next error: %v\n", agent.Name, err)
@@ -109,7 +107,6 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		"agentId": agent.ID,
 	})
 
-	ragContext := rag.FetchContext(client, claimed.Task.Title, claimed.Task.ProjectID)
 	prompt := runner.BuildPrompt(runner.Task{
 		ID:          claimed.Task.ID,
 		Title:       claimed.Task.Title,
@@ -118,7 +115,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		Type:        claimed.Task.Type,
 		ProjectID:   claimed.Task.ProjectID,
 		Status:      claimed.Task.Status,
-	}, agent, ragContext)
+	}, agent)
 
 	var exec executor.Executor
 	switch agent.Tool {
@@ -174,7 +171,12 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		}
 	}()
 
-	result := exec.Execute(execCtx, prompt, agent.Workdir, timeout, func(event executor.StreamEvent) {
+	workdir := agent.Workdir
+	if claimed.RuntimeBinding.RepoPath != "" {
+		workdir = claimed.RuntimeBinding.RepoPath
+	}
+
+	result := exec.Execute(execCtx, prompt, workdir, timeout, func(event executor.StreamEvent) {
 		content := strings.TrimSpace(event.Content)
 		if content == "" {
 			return
@@ -196,12 +198,15 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	duration := int(time.Since(start).Seconds())
 	output := strings.Join(fullOutput, "\n")
 	readableOutput := runner.ExtractReadableOutput(output)
+	strippedOutput := runner.StripStructuredResultBlock(readableOutput)
+	structuredResult := runner.BuildExecutionResultV1(result.Success, readableOutput, result.ExitCode)
+	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), output, result.ExitCode)
 
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
 	var nextAssignee *string
-	errorMessage := truncate(readableOutput, 2000)
+	errorMessage := truncate(strippedOutput, 2000)
 	blockReason := fmt.Sprintf("Agent %s failed while running %s.", agent.Name, agent.Tool)
 	if result.Success {
 		status = "SUCCESS"
@@ -216,7 +221,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	_, err = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 		Status:              status,
 		Output:              output,
-		ResultSummary:       truncate(readableOutput, 500),
+		ResultSummary:       truncate(defaultStr(structuredSummary, strippedOutput), 500),
+		Result:              structuredResult,
 		ErrorMessage:        errorMessage,
 		ExitCode:            result.ExitCode,
 		Duration:            duration,
@@ -227,6 +233,20 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		Metadata: map[string]interface{}{
 			"tool": agent.Tool,
 			"model": agent.Model,
+			"runtimeBinding": map[string]interface{}{
+				"id": claimed.RuntimeBinding.ID,
+				"projectId": claimed.RuntimeBinding.ProjectID,
+				"runnerProfile": claimed.RuntimeBinding.RunnerProfile,
+				"hostOs": claimed.RuntimeBinding.HostOS,
+				"repoPath": claimed.RuntimeBinding.RepoPath,
+				"defaultBaseBranch": claimed.RuntimeBinding.DefaultBaseBranch,
+				"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
+				"executionMode": claimed.RuntimeBinding.ExecutionMode,
+				"gitProvider": claimed.RuntimeBinding.GitProvider,
+				"prPolicy": claimed.RuntimeBinding.PRPolicy,
+				"gitPolicy": claimed.RuntimeBinding.GitPolicy,
+				"metadata": claimed.RuntimeBinding.Metadata,
+			},
 		},
 	})
 	if err != nil {

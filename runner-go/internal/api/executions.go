@@ -16,6 +16,7 @@ type FinalizeExecutionParams struct {
 	Status              string                 `json:"status"`
 	Output              string                 `json:"output,omitempty"`
 	ResultSummary       string                 `json:"resultSummary,omitempty"`
+	Result              map[string]interface{} `json:"result,omitempty"`
 	ErrorMessage        string                 `json:"errorMessage,omitempty"`
 	ExitCode            int                    `json:"exitCode,omitempty"`
 	Duration            int                    `json:"duration,omitempty"`
@@ -113,6 +114,9 @@ func FinalizeExecution(client *Client, execID string, params FinalizeExecutionPa
 	}
 	if params.ResultSummary != "" {
 		body["resultSummary"] = params.ResultSummary
+	}
+	if params.Result != nil {
+		body["result"] = params.Result
 	}
 	if params.ErrorMessage != "" {
 		body["errorMessage"] = params.ErrorMessage

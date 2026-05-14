@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -204,6 +205,10 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 
 	agent.Model = strVal(configMap, "model")
 	agent.AgentType = strVal(configMap, "agent_type")
+	agent.Role = strVal(configMap, "role")
+	agent.RolePrompt = strVal(configMap, "role_prompt")
+	agent.OperatingRules = stringSliceVal(configMap, "operating_rules")
+	agent.OutputSchemaVersion = strVal(configMap, "output_schema_version")
 	agent.Variant = strVal(configMap, "variant")
 	agent.AssigneeID = strVal(configMap, "assignee_agent_id")
 	if agent.AssigneeID == "" {
@@ -261,6 +266,43 @@ func intVal(m map[string]interface{}, key string) int {
 		return n
 	}
 	return 0
+}
+
+func stringSliceVal(m map[string]interface{}, key string) []string {
+	switch v := m[key].(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			str, ok := item.(string)
+			if !ok {
+				continue
+			}
+			str = strings.TrimSpace(str)
+			if str == "" {
+				continue
+			}
+			out = append(out, str)
+		}
+		return out
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		parts := strings.Split(v, "\n")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			out = append(out, part)
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func normalizeTaskStatus(val, fallback string) string {

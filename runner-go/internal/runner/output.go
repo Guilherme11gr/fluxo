@@ -151,7 +151,7 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 	b.WriteString("\n")
 
 	// Extract readable content from JSONL
-	readable := ExtractReadableOutput(output)
+	readable := StripStructuredResultBlock(ExtractReadableOutput(output))
 	if readable != "" {
 		// Truncate if too long for a comment
 		if len(readable) > 3000 {

@@ -52,7 +52,20 @@ function mapRecord(record: any): AgentExecutionRecord {
     finishedAt: record.finishedAt,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
-  };
+	};
+}
+
+function mergeMetadata(
+	existing: Record<string, unknown> | undefined,
+	patch: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	if (!patch) {
+		return existing;
+	}
+	return {
+		...(existing ?? {}),
+		...patch,
+	};
 }
 
 export class AgentExecutionRepository {
@@ -97,9 +110,9 @@ export class AgentExecutionRepository {
     return mapRecord(record);
   }
 
-  async updateStatus(
-    id: string,
-    data: {
+	async updateStatus(
+		id: string,
+		data: {
       status: AgentExecStatus;
       output?: string;
       resultSummary?: string;
@@ -113,8 +126,9 @@ export class AgentExecutionRepository {
       workspacePath?: string | null;
       metadata?: Record<string, unknown>;
     }
-  ): Promise<AgentExecutionRecord> {
-    const updateData: Record<string, unknown> = { status: data.status };
+	): Promise<AgentExecutionRecord> {
+		const existing = await this.findById(id);
+		const updateData: Record<string, unknown> = { status: data.status };
     if (data.output !== undefined) updateData.output = data.output;
     if (data.resultSummary !== undefined) updateData.resultSummary = data.resultSummary;
     if (data.errorMessage !== undefined) updateData.errorMessage = data.errorMessage;
@@ -125,7 +139,7 @@ export class AgentExecutionRepository {
     if (data.workspaceMode !== undefined) updateData.workspaceMode = data.workspaceMode;
     if (data.workspaceRef !== undefined) updateData.workspaceRef = data.workspaceRef;
     if (data.workspacePath !== undefined) updateData.workspacePath = data.workspacePath;
-    if (data.metadata !== undefined) updateData.metadata = data.metadata;
+		if (data.metadata !== undefined) updateData.metadata = mergeMetadata(existing?.metadata, data.metadata);
 
     const record = await this.client.agentExecution.update({
       where: { id },

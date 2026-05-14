@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -22,6 +23,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import { useProjects } from '@/lib/query/hooks';
 import type { Agent } from '@/lib/query/hooks/use-agents';
+import { buildAgentFormPayload, formatOperatingRules } from './agent-form-dialog.helpers';
 
 const FALLBACK_MODELS = [
   'openrouter/anthropic/claude-sonnet-4',
@@ -78,6 +80,18 @@ const EXEC_AGENT_TYPES = [
   { value: 'explore', label: 'Explore' },
 ];
 
+const AGENT_ROLES = [
+  { value: 'builder', label: 'Builder' },
+  { value: 'reviewer', label: 'Reviewer' },
+  { value: 'qa', label: 'QA' },
+  { value: 'ops', label: 'Ops' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const OUTPUT_SCHEMA_VERSIONS = [
+  { value: 'v1', label: 'v1' },
+];
+
 const EXEC_VARIANTS = [
   { value: '', label: 'Padrão' },
   { value: 'high', label: 'High' },
@@ -129,8 +143,12 @@ export function AgentFormDialog({
   const [model, setModel] = useState((config.model as string) ?? '');
 
   // Execution fields — projectId from column first, then config fallback
-  const [projectId, setProjectId] = useState((agent as any)?.projectId ?? (config.project_id as string) ?? '');
+  const [projectId, setProjectId] = useState((agent as any)?.projectId ?? (config.project_id as string) ?? 'all');
   const [agentType, setAgentType] = useState((config.agent_type as string) ?? 'build');
+  const [role, setRole] = useState((config.role as string) ?? 'builder');
+  const [rolePrompt, setRolePrompt] = useState((config.role_prompt as string) ?? '');
+  const [operatingRules, setOperatingRules] = useState(formatOperatingRules(config.operating_rules));
+  const [outputSchemaVersion, setOutputSchemaVersion] = useState((config.output_schema_version as string) ?? 'v1');
   const [variant, setVariant] = useState((config.variant as string) ?? '');
   const [pickStatus, setPickStatus] = useState((config.pick_status as string) ?? 'TODO');
   const [claimStatus, setClaimStatus] = useState((config.claim_status as string) ?? 'DOING');
@@ -139,23 +157,25 @@ export function AgentFormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cfg: Record<string, unknown> = {};
-    if (model) cfg.model = model;
-    cfg.agent_type = agentType;
-    if (variant) cfg.variant = variant;
-    cfg.pick_status = pickStatus;
-    cfg.claim_status = claimStatus;
-    cfg.done_status = doneStatus;
-    const timeoutNum = parseInt(timeout, 10);
-    if (!isNaN(timeoutNum) && timeoutNum > 0) cfg.timeout = timeoutNum;
-
-    onSubmit({
-      name: name.trim(),
-      type,
-      tool: tool || undefined,
-      projectId: projectId || null,
-      config: Object.keys(cfg).length > 0 ? cfg : undefined,
-    });
+    onSubmit(
+      buildAgentFormPayload({
+        name,
+        type,
+        tool,
+        projectId,
+        model,
+        agentType,
+        role,
+        rolePrompt,
+        operatingRules,
+        outputSchemaVersion,
+        variant,
+        pickStatus,
+        claimStatus,
+        doneStatus,
+        timeout,
+      })
+    );
   };
 
   const handleClose = () => {
@@ -163,8 +183,12 @@ export function AgentFormDialog({
     setType(agent?.type ?? 'RUNNER');
     setTool(agent?.tool ?? '');
     setModel((config.model as string) ?? '');
-    setProjectId((config.project_id as string) ?? '');
+    setProjectId(((agent as any)?.projectId as string) ?? (config.project_id as string) ?? 'all');
     setAgentType((config.agent_type as string) ?? 'build');
+    setRole((config.role as string) ?? 'builder');
+    setRolePrompt((config.role_prompt as string) ?? '');
+    setOperatingRules(formatOperatingRules(config.operating_rules));
+    setOutputSchemaVersion((config.output_schema_version as string) ?? 'v1');
     setVariant((config.variant as string) ?? '');
     setPickStatus((config.pick_status as string) ?? 'TODO');
     setClaimStatus((config.claim_status as string) ?? 'DOING');
@@ -286,6 +310,62 @@ export function AgentFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Papel</Label>
+                <Select value={role} onValueChange={setRole}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGENT_ROLES.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Output schema</Label>
+                <Select value={outputSchemaVersion} onValueChange={setOutputSchemaVersion}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OUTPUT_SCHEMA_VERSIONS.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agent-role-prompt">Role prompt</Label>
+              <Textarea
+                id="agent-role-prompt"
+                placeholder="Defina o comportamento base do agent para esse papel"
+                value={rolePrompt}
+                onChange={(e) => setRolePrompt(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agent-operating-rules">Operating rules</Label>
+              <Textarea
+                id="agent-operating-rules"
+                placeholder="Uma regra por linha"
+                value={operatingRules}
+                onChange={(e) => setOperatingRules(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Essas regras entram no prompt final do runner.
+              </p>
             </div>
           </div>
 
