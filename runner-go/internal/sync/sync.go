@@ -229,13 +229,13 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 
 	// Override defaults with config values if present
 	if v := strVal(configMap, "pick_status"); v != "" {
-		agent.PickStatus = v
+		agent.PickStatus = normalizeTaskStatus(v, agent.PickStatus)
 	}
 	if v := strVal(configMap, "claim_status"); v != "" {
-		agent.ClaimStatus = v
+		agent.ClaimStatus = normalizeTaskStatus(v, agent.ClaimStatus)
 	}
 	if v := strVal(configMap, "done_status"); v != "" {
-		agent.DoneStatus = v
+		agent.DoneStatus = normalizeTaskStatus(v, agent.DoneStatus)
 	}
 	if v := intVal(configMap, "timeout"); v > 0 {
 		agent.Timeout = v
@@ -261,4 +261,15 @@ func intVal(m map[string]interface{}, key string) int {
 		return n
 	}
 	return 0
+}
+
+func normalizeTaskStatus(val, fallback string) string {
+	switch val {
+	case "BACKLOG", "TODO", "DOING", "REVIEW", "QA_READY", "DONE":
+		return val
+	case "IN_PROGRESS":
+		return "DOING"
+	default:
+		return fallback
+	}
 }
