@@ -21,6 +21,7 @@ var (
 	once       bool
 	apiKeyFlag string
 	apiURLFlag string
+	agentFlag  string
 )
 
 var runCmd = &cobra.Command{
@@ -135,6 +136,22 @@ Legacy mode (agents in config.yaml):
 			fmt.Println("  \033[33mNo models detected (opencode/claude not found)\033[0m")
 		}
 
+		// Filter to single agent if --agent flag is set
+		if agentFlag != "" {
+			var filtered []config.AgentConfig
+			for _, a := range agents {
+				if a.Name == agentFlag {
+					filtered = append(filtered, a)
+					break
+				}
+			}
+			if len(filtered) == 0 {
+				return fmt.Errorf("agent %q not found. Available: %s", agentFlag, formatAgents(agents))
+			}
+			agents = filtered
+			fmt.Printf("  \033[36mFiltered to agent: %s\033[0m\n\n", agentFlag)
+		}
+
 		// Register all agents
 		fmt.Println("[runner] Registering agents...")
 		for _, agent := range agents {
@@ -246,5 +263,6 @@ func init() {
 	runCmd.Flags().BoolVarP(&once, "once", "", false, "run once and exit (no continuous polling)")
 	runCmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key (overrides config/env)")
 	runCmd.Flags().StringVar(&apiURLFlag, "api-url", "", "API URL (overrides config)")
+	runCmd.Flags().StringVar(&agentFlag, "agent", "", "run only this agent by name (e.g. --agent reviewer)")
 	rootCmd.AddCommand(runCmd)
 }
