@@ -43,6 +43,8 @@ export function AgentSetupDrawer({
   const config = agent.config ?? {};
   const modelInfo = config.model ? ` model=${String(config.model)}` : '';
   const projectIdInfo = config.project_id ? ` project=${String(config.project_id).slice(0, 8)}...` : '';
+  const currentOrigin = typeof window === 'undefined' ? 'http://localhost:3005' : window.location.origin;
+  const exampleApiUrl = `${currentOrigin}/api/agent`;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -167,7 +169,7 @@ fluxo-runner run`}
               <div className="relative">
                 <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre">
 {`runner:
-  api_url: "https://fluxo.agenda-aqui.com/api/agent"
+  api_url: "${exampleApiUrl}"
   api_key_env: "AGENT_API_KEY"
   poll_interval_sec: 30
   sync_interval_sec: 120
@@ -179,7 +181,7 @@ fluxo-runner run`}
                   variant="ghost"
                   size="icon"
                   className="absolute right-2 top-2"
-                  onClick={() => copyToClipboard(`runner:\n  api_url: "https://fluxo.agenda-aqui.com/api/agent"\n  api_key_env: "AGENT_API_KEY"\n  poll_interval_sec: 30\n  sync_interval_sec: 120\n`, 'yaml')}
+                  onClick={() => copyToClipboard(`runner:\n  api_url: "${exampleApiUrl}"\n  api_key_env: "AGENT_API_KEY"\n  poll_interval_sec: 30\n  sync_interval_sec: 120\n`, 'yaml')}
                 >
                   {copiedSection === 'yaml' ? (
                     <Check className="w-3.5 h-3.5 text-green-500" />

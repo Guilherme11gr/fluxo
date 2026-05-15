@@ -78,7 +78,7 @@ echo "   - Monitorar erros por 24h"
 echo ""
 echo "5. Depois de 1 semana estável:"
 echo "   - Pode remover código deprecated (Fase 2)"
-echo "   - Ver docs/architecture/multi-org-production-improvements.md"
+echo "   - Revisar o diff e remover trechos deprecated remanescentes"
 echo ""
 
 echo "✅ Validação concluída! Código pronto para deploy."

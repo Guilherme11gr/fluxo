@@ -3,7 +3,8 @@
  * Centralizes all HTTP calls to the Agent API
  */
 
-const BASE_URL = process.env.AGENT_API_URL || 'https://jt-kill.vercel.app/api/agent';
+const DEFAULT_AGENT_API_URL = 'http://localhost:3005/api/agent';
+const BASE_URL = process.env.AGENT_API_URL || DEFAULT_AGENT_API_URL;
 const API_KEY = process.env.AGENT_API_KEY || '';
 
 export interface ApiResponse<T = unknown> {

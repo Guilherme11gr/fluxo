@@ -1,34 +1,21 @@
-# FluXo Runner MVP — Config
-# Dogfooding: usar FluXo pra melhorar o Lojinha
+# FluXo Runner Config
+# Preencha explicitamente para uso local.
 
 runner:
-  api_url: "https://fluxo.agenda-aqui.com/api/agent"
+  api_url: "http://localhost:3005/api/agent"
   api_key_env: "FLUXO_AGENT_API_KEY"
   poll_interval_sec: 30
   heartbeat_interval_sec: 60
 
 agents:
-  - name: "lojinha-dev"
+  - name: "local-dev"
     tool: "claude"
-    # Sem assignee_id = pega tasks sem assignee (unassigned)
-    # assignee_id: null
-    # Filtrar por projeto
-    project_id: "2eb2d7d4-f11a-44cc-ae9b-e59fef879d88"
-    workdir: "/mnt/d/Users/Guilherme/Documents/development/american-cannabis-site"
+    project_id: "00000000-0000-0000-0000-000000000000"
+    workdir: "/path/to/your/repo"
     pick_status: "TODO"
     claim_status: "DOING"
     done_status: "DONE"
     next_assignee_id: null
     timeout: 300
     context: |
-      You are the Lojinha Dev Agent. You improve the Lojinha storefront platform.
-      Repository: /mnt/d/Users/Guilherme/Documents/development/american-cannabis-site
-      
-      Tech stack: Next.js 15 (App Router), Prisma, Tailwind CSS, TypeScript.
-      
-      Rules:
-      - Read existing code before modifying
-      - Follow existing patterns and conventions
-      - Make minimal, focused changes
-      - Commit with descriptive message when done
-      - If unsure about approach, make the simplest working version
+      Local runner profile. Update this block for your repo before using.

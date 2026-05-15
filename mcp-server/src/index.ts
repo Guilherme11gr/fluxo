@@ -36,6 +36,8 @@ import { ALL_TOOLS } from './tools.js';
 import { TOOL_HANDLERS } from './handlers.js';
 import { apiRequest } from './api-client.js';
 
+const DEFAULT_AGENT_API_URL = 'http://localhost:3005/api/agent';
+
 // ============================================================
 // VALIDATION
 // ============================================================
@@ -50,7 +52,7 @@ function validateEnv(): void {
 Set them in your environment or Claude Desktop config:
   AGENT_API_KEY=agk_xxxxx (required)
   AGENT_NAME=Claude-MCP (optional, sent as X-Agent-Name)
-  AGENT_API_URL=https://... (optional, default: https://jt-kill.vercel.app/api/agent)
+  AGENT_API_URL=https://... (optional, default: http://localhost:3005/api/agent)
 `);
     process.exit(1);
   }
@@ -169,7 +171,7 @@ async function main(): Promise<void> {
   await server.connect(transport);
   
   console.error('🚀 JT-Kill MCP Server started');
-  console.error(`📡 API: ${process.env.AGENT_API_URL || 'https://jt-kill.vercel.app/api/agent'}`);
+  console.error(`📡 API: ${process.env.AGENT_API_URL || DEFAULT_AGENT_API_URL}`);
   console.error(`🔑 Key: ${process.env.AGENT_API_KEY?.substring(0, 12)}...`);
   console.error(`🛠️  Tools: ${ALL_TOOLS.length} available`);
 }

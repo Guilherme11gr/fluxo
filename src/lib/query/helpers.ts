@@ -20,7 +20,6 @@ import { queryKeys } from './query-keys';
  * precisam receber orgId para garantir isolamento de cache multi-org.
  * 
  * @see docs/guides/cache-invalidation-patterns.md
- * @see docs/planning/realtime/IMPLEMENTATION-PROGRESS.md
  */
 
 /**
@@ -88,7 +87,6 @@ export function smartInvalidate(
  * // Após criar task
  * smartInvalidateImmediate(queryClient, queryKeys.tasks.lists(orgId));
  * 
- * @see docs/architecture/CACHE-STANDARDIZATION-PLAN.md
  */
 export function smartInvalidateImmediate(
   queryClient: QueryClient,

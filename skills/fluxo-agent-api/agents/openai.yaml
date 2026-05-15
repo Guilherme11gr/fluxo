@@ -1,4 +1,0 @@
-interface:
-  display_name: "Fluxo Agent API"
-  short_description: "Use a API do Fluxo via curl e helper Python"
-  default_prompt: "Use $fluxo-agent-api para operar a Agent API do Fluxo com FLUXO_AGENT_KEY."

@@ -3,8 +3,7 @@
 ## Read First
 
 - Prefer executable config over prose. Repo docs still mix `FluXo`, `Jira Killer`, and `Agenda Aqui`.
-- Keep `.github/instructions/copilot-instructions.md` and this file as the main agent guidance.
-- Ignore `.github/agents/*` for repo conventions: it targets another project, says light mode first, and references a non-existent `npm run type-check` script.
+- Keep this file as the main agent guidance. Use `.github/instructions/copilot-instructions.md` only as a short companion.
 
 ## Root App
 
@@ -51,14 +50,14 @@ npm run lint        # next lint
 - Tailwind CSS only; shadcn config is `new-york` with CSS variables in `src/app/globals.css`.
 - Dark theme is the real default (`ThemeProvider` uses `defaultTheme="dark"` and `enableSystem={false}`), even though some old docs say otherwise.
 
-## Separate Packages And Tools
+## Separate Packages
 
 - `packages/agent-sdk` is a local `file:` dependency used by the app (`@guilherme/agent-sdk/{next,react,core}`). If you edit it, run `npm run build` in `packages/agent-sdk`; root checks do not rebuild it for you.
-- `mcp-server/` is its own package and tsconfig. `.mcp.json` points at `mcp-server/dist/index.js`, so source changes require `npm run build` in `mcp-server`.
+- `mcp-server/` is its own package and tsconfig. If you change its source, run `npm run build` inside `mcp-server`.
 - `runner/` and `runner-go/` are standalone worker tools, not part of the root app quality gate.
 - `runner/`: `node runner.js --once` runs a single pass.
 - `runner-go/`: `go build -o fluxo-runner .` builds the binary; `./fluxo-runner run --once` runs one pass.
-- The checked-in `runner/config.yaml` currently points at another repo/workdir; do not treat it as local setup for `jt-kill`.
+- The checked-in runner configs are placeholders, not ready-to-run local setup.
 
 ## Env Gotcha
 

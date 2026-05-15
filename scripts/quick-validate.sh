@@ -39,7 +39,7 @@ echo ""
 echo "⚠️ LEMBRE-SE:"
 echo "  1. Testar em STAGING primeiro"
 echo "  2. Fazer BACKUP antes de produção"
-echo "  3. Ver DEPLOY-MULTI-ORG-CHECKLIST.md"
+echo "  3. Confirmar manualmente o plano de deploy antes de produção"
 echo ""
 
 echo "✅ Pronto para commit e deploy!"

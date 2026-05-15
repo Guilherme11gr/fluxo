@@ -208,7 +208,7 @@ function buildPrompt(task, agent, ragContext) {
 
   parts.push("\n## Instructions");
   parts.push("- Execute the task described above.");
-  parts.push("- If you modify code, commit your changes.");
+  parts.push("- If you modify code, summarize the changes clearly.");
   parts.push("- Post a summary of what you did.");
 
   return parts.join("\n");
