@@ -53,3 +53,17 @@ runner-go/config.yaml
 
 # typecheck logs
 typecheck*.log
+
+# tool directories (local agent/editor configs)
+.clinerules/
+.gemini/
+.hermes/
+.playwright-mcp/
+.vscode/
+skills/
+
+# test output
+test-results/
+
+# empty dirs that tools may recreate
+cron/
