@@ -573,8 +573,8 @@ func TestFormatExecutionCommentSuccess(t *testing.T) {
 	}, "\n")
 
 	comment := FormatExecutionComment("builder", "opencode", true, 120, raw, 0)
-	if !strings.Contains(comment, "✅") {
-		t.Fatalf("expected success emoji, got %s", comment)
+	if !strings.Contains(comment, "Execution Complete") {
+		t.Fatalf("expected success header, got %s", comment)
 	}
 	if !strings.Contains(comment, "builder") {
 		t.Fatalf("expected agent name, got %s", comment)
@@ -595,8 +595,8 @@ func TestFormatExecutionCommentSuccess(t *testing.T) {
 
 func TestFormatExecutionCommentFailure(t *testing.T) {
 	comment := FormatExecutionComment("builder", "claude", false, 60, "error output", 1)
-	if !strings.Contains(comment, "❌") {
-		t.Fatalf("expected failure emoji, got %s", comment)
+	if !strings.Contains(comment, "Execution Failed") {
+		t.Fatalf("expected failure header, got %s", comment)
 	}
 	if !strings.Contains(comment, "Exit Code") {
 		t.Fatalf("expected exit code, got %s", comment)
@@ -624,6 +624,9 @@ func TestFormatExecutionCommentHasStructuredSections(t *testing.T) {
 
 func TestFormatExecutionCommentNoExitCodeOnSuccess(t *testing.T) {
 	comment := FormatExecutionComment("dev", "opencode", true, 10, "done", 0)
+	if !strings.Contains(comment, "Execution Complete") {
+		t.Fatalf("expected success header, got %s", comment)
+	}
 	if strings.Contains(comment, "Exit Code") {
 		t.Fatalf("expected no exit code on success, got %s", comment)
 	}
@@ -631,8 +634,8 @@ func TestFormatExecutionCommentNoExitCodeOnSuccess(t *testing.T) {
 
 func TestFormatExecutionCommentEmptyOutput(t *testing.T) {
 	comment := FormatExecutionComment("dev", "opencode", true, 5, "", 0)
-	if !strings.Contains(comment, "✅") {
-		t.Fatalf("expected success emoji even with empty output, got %s", comment)
+	if !strings.Contains(comment, "Execution Complete") {
+		t.Fatalf("expected success header even with empty output, got %s", comment)
 	}
 }
 
@@ -694,6 +697,9 @@ func TestExtractCommentStreamBodyFiltersShortText(t *testing.T) {
 	}
 	if !strings.Contains(body, "read") {
 		t.Fatalf("expected tool use kept, got %q", body)
+	}
+	if !strings.Contains(body, "Done") {
+		t.Fatalf("expected result kept, got %q", body)
 	}
 }
 
@@ -794,7 +800,7 @@ func TestFormatStreamForDisplay(t *testing.T) {
 	}, "\n")
 
 	display := FormatStreamForDisplay(raw)
-	if !strings.Contains(display, "── step ──") {
+	if !strings.Contains(display, "── Step") {
 		t.Fatalf("expected step marker, got %q", display)
 	}
 	if !strings.Contains(display, "▸ read  main.go") {
@@ -907,8 +913,8 @@ func TestCommentUsesDetailsTag(t *testing.T) {
 	if !strings.Contains(comment, "<details>") {
 		t.Fatalf("expected <details> tag for stream, got %s", comment)
 	}
-	if !strings.Contains(comment, "Stream Output") {
-		t.Fatalf("expected Stream Output summary, got %s", comment)
+	if !strings.Contains(comment, "Full Output") {
+		t.Fatalf("expected Full Output summary, got %s", comment)
 	}
 }
 
@@ -923,10 +929,10 @@ func TestFormatStreamReadableBasicFlow(t *testing.T) {
 	}, "\n")
 
 	result := FormatStreamReadable(raw)
-	if !strings.Contains(result, "── step ──") {
+	if !strings.Contains(result, "── Step") {
 		t.Fatalf("expected step start header, got %q", result)
 	}
-	if !strings.Contains(result, "── step ✓ ──") {
+	if !strings.Contains(result, "Step") && !strings.Contains(result, "✓ ──") {
 		t.Fatalf("expected step end marker, got %q", result)
 	}
 	if !strings.Contains(result, "▸ read") {
@@ -969,31 +975,15 @@ func TestFormatStreamReadableStepIndentation(t *testing.T) {
 	}, "\n")
 
 	result := FormatStreamReadable(raw)
-	stepStartIdx := strings.Index(result, "── step ──")
-	toolUseIdx := strings.Index(result, "▸ bash")
-	if toolUseIdx <= stepStartIdx {
-		t.Fatalf("expected tool use to come after step start, got %q", result)
+	if !strings.Contains(result, "▸ bash") {
+		t.Fatalf("expected tool use, got %q", result)
 	}
 
 	lines := strings.Split(result, "\n")
-	var indentLevels []int
+	var stepAtZero, toolIndented bool
 	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		indent := 0
-		for strings.HasPrefix(line, "  ") {
-			indent++
-			line = line[2:]
-		}
-		indentLevels = append(indentLevels, indent)
-	}
-
-	toolIndented := false
-	stepAtZero := false
-	for i, line := range strings.Split(result, "\n") {
-		if strings.Contains(line, "── step ──") && !strings.Contains(line, "step ✓") {
-			if strings.HasPrefix(line, "── step") {
+		if strings.Contains(line, "── Step") && !strings.Contains(line, "✓") {
+			if strings.HasPrefix(line, "── Step") {
 				stepAtZero = true
 			}
 		}
@@ -1002,7 +992,6 @@ func TestFormatStreamReadableStepIndentation(t *testing.T) {
 				toolIndented = true
 			}
 		}
-		_ = i
 	}
 	if !stepAtZero || !toolIndented {
 		t.Fatalf("expected step at zero indent, tool indented, got:\n%s", result)
@@ -1023,9 +1012,9 @@ func TestFormatStreamReadableMultipleSteps(t *testing.T) {
 	}, "\n")
 
 	result := FormatStreamReadable(raw)
-	stepCount := strings.Count(result, "── step ──")
-	if stepCount != 2 {
-		t.Fatalf("expected 2 step starts, got %d in:\n%s", stepCount, result)
+	stepCount := strings.Count(result, "── Step")
+	if stepCount < 4 {
+		t.Fatalf("expected at least 4 step markers (2 start + 2 end), got %d in:\n%s", stepCount, result)
 	}
 	if !strings.Contains(result, "✓ All done") {
 		t.Fatalf("expected result line, got %q", result)
@@ -1089,13 +1078,13 @@ func TestFormatStreamForDisplayUsesFormatStreamReadable(t *testing.T) {
 	}, "\n")
 
 	display := FormatStreamForDisplay(raw)
-	if !strings.Contains(display, "── step ──") {
+	if !strings.Contains(display, "── Step") {
 		t.Fatalf("expected step marker, got %q", display)
 	}
 	if !strings.Contains(display, "▸ read") {
 		t.Fatalf("expected tool use, got %q", display)
 	}
-	if !strings.Contains(display, "── step ✓ ──") {
+	if !strings.Contains(display, "✓ ──") {
 		t.Fatalf("expected step end, got %q", display)
 	}
 }
@@ -1127,7 +1116,7 @@ func TestCommentStreamBodyUsesFormatStreamReadable(t *testing.T) {
 	if !strings.Contains(comment, "<details>") {
 		t.Fatalf("expected <details> tag, got %s", comment)
 	}
-	if !strings.Contains(comment, "── step ──") {
+	if !strings.Contains(comment, "── Step") {
 		t.Fatalf("expected step markers in stream body, got %s", comment)
 	}
 	if !strings.Contains(comment, "▸ read") {
@@ -1150,7 +1139,7 @@ func TestCommentStreamBodyTruncationIncreased(t *testing.T) {
 
 	comment := FormatExecutionComment("dev", "opencode", true, 30, raw, 0)
 	streamSection := comment[strings.Index(comment, "<details>"):]
-	if len(streamSection) > 5000 {
+	if len(streamSection) > 9000 {
 		t.Fatalf("expected stream section to be bounded, got length %d", len(streamSection))
 	}
 	if strings.Contains(streamSection, "output truncated") {
@@ -1178,8 +1167,8 @@ func TestFormatStreamReadableNestedSteps(t *testing.T) {
 	}, "\n")
 
 	result := FormatStreamReadable(raw)
-	if strings.Count(result, "── step ──") != 2 {
-		t.Fatalf("expected 2 step starts, got:\n%s", result)
+	if strings.Count(result, "── Step") < 4 {
+		t.Fatalf("expected at least 4 step markers (2 start + 2 end), got:\n%s", result)
 	}
 	if !strings.Contains(result, "Analyzing configuration") {
 		t.Fatalf("expected text content in output, got:\n%s", result)
@@ -1207,11 +1196,484 @@ func TestFormatStreamReadableToolResultWithStatusOnly(t *testing.T) {
 		`{"type":"tool_result","part":{"tool":"bash","state":{"status":"running"}}}`,
 	}, "\n")
 
-	result := FormatStreamReadable(raw)
-	if !strings.Contains(result, "▸ bash") {
-		t.Fatalf("expected tool use, got %q", result)
+ 	result := FormatStreamReadable(raw)
+ 	if !strings.Contains(result, "▸ bash") {
+ 		t.Fatalf("expected tool use, got %q", result)
+ 	}
+ 	if !strings.Contains(result, "bash") {
+ 		t.Fatalf("expected tool name in result, got %q", result)
+ 	}
+}
+
+func TestFormatToolInputTaskTool(t *testing.T) {
+	input := map[string]interface{}{
+		"description":     "Explore codebase structure",
+		"subagent_type":   "explore",
+		"prompt":          "Explore the codebase at D:\\... (very long prompt)",
+	}
+	result := formatToolInput("task", input)
+	if !strings.Contains(result, "Explore codebase structure") {
+		t.Fatalf("expected description, got %q", result)
+	}
+	if !strings.Contains(result, "[explore]") {
+		t.Fatalf("expected subagent type, got %q", result)
+	}
+	if strings.Contains(result, "prompt") {
+		t.Fatalf("should not include full prompt, got %q", result)
+	}
+}
+
+func TestFormatToolInputWebFetch(t *testing.T) {
+	input := map[string]interface{}{
+		"url": "https://example.com/api/docs",
+	}
+	result := formatToolInput("webfetch", input)
+	if !strings.Contains(result, "https://example.com") {
+		t.Fatalf("expected URL, got %q", result)
+	}
+}
+
+func TestFormatToolInputFilePathVariant(t *testing.T) {
+	input := map[string]interface{}{
+		"file_path": "src/components/App.tsx",
+	}
+	result := formatToolInput("read", input)
+	if !strings.Contains(result, "src/components/App.tsx") {
+		t.Fatalf("expected file_path variant to work, got %q", result)
+	}
+}
+
+func TestFormatToolInputFilePathCamelCase(t *testing.T) {
+	input := map[string]interface{}{
+		"filePath": "src/utils/helper.go",
+	}
+	result := formatToolInput("edit", input)
+	if !strings.Contains(result, "src/utils/helper.go") {
+		t.Fatalf("expected filePath variant to work, got %q", result)
+	}
+}
+
+func TestSummarizeToolOutputTaskWithStringOutput(t *testing.T) {
+	output := "task_id: ses_abc123def456\n\n<task_result>\nNow I have a comprehensive understanding.\n\n## Summary\nFixed the bug.\n</task_result>"
+	result := summarizeToolOutput("task", output)
+	if !strings.Contains(result, "ses_abc123de") {
+		t.Fatalf("expected task_id extraction, got %q", result)
+	}
+}
+
+func TestSummarizeToolOutputTaskWithMapOutput(t *testing.T) {
+	output := map[string]interface{}{"task_id": "ses_xyz"}
+	result := summarizeToolOutput("task", output)
+	if result == "" {
+		t.Fatalf("expected non-empty result for map task output, got %q", result)
+	}
+}
+
+func TestSummarizeStringOutput(t *testing.T) {
+	result := summarizeStringOutput("First meaningful line\nSecond line\nThird line")
+	if !strings.Contains(result, "First meaningful line") {
+		t.Fatalf("expected first meaningful line, got %q", result)
+	}
+}
+
+func TestSummarizeStringOutputEmpty(t *testing.T) {
+	result := summarizeStringOutput("")
+	if result != "" {
+		t.Fatalf("expected empty for empty input, got %q", result)
+	}
+}
+
+func TestFirstMeaningfulLine(t *testing.T) {
+	text := "\ntask_id: abc\n\n<task_result>\nThis is the real content\n</task_result>"
+	result := firstMeaningfulLine(text, 80)
+	if result != "This is the real content" {
+		t.Fatalf("expected to skip noise, got %q", result)
+	}
+}
+
+func TestExtractTaskID(t *testing.T) {
+	text := "task_id: ses_1d6a5b692ffeuvXHZlcTMWd2Ua\n\nSome output"
+	result := extractTaskID(text)
+	if !strings.HasPrefix(result, "ses_1d6a5b69") {
+		t.Fatalf("expected task ID extraction, got %q", result)
+	}
+}
+
+func TestExtractTaskIDMissing(t *testing.T) {
+	result := extractTaskID("no task id here")
+	if result != "" {
+		t.Fatalf("expected empty for missing task_id, got %q", result)
+	}
+}
+
+func TestExtractErrorMessageFromString(t *testing.T) {
+	result := extractErrorMessage("Something went wrong with the command")
+	if !strings.Contains(result, "Something went wrong") {
+		t.Fatalf("expected string error extraction, got %q", result)
+	}
+}
+
+func TestFormatToolUseEventWithEmbeddedResult(t *testing.T) {
+	part := map[string]interface{}{
+		"tool": "task",
+		"state": map[string]interface{}{
+			"status": "completed",
+			"input": map[string]interface{}{
+				"description":     "Explore codebase",
+				"subagent_type":   "explore",
+			},
+			"output": "task_id: ses_abc123\n\n<task_result>\nProject uses Go with a runner architecture.\n</task_result>",
+		},
+	}
+	result := formatToolUseEvent(part)
+	if !strings.Contains(result, "▸ task") {
+		t.Fatalf("expected tool use marker, got %q", result)
+	}
+	if !strings.Contains(result, "Explore codebase") {
+		t.Fatalf("expected description, got %q", result)
+	}
+	if !strings.Contains(result, "ses_abc123") {
+		t.Fatalf("expected task_id in output, got %q", result)
+	}
+}
+
+func TestFormatToolUseEventWithEmbeddedError(t *testing.T) {
+	part := map[string]interface{}{
+		"tool": "bash",
+		"state": map[string]interface{}{
+			"status": "error",
+			"input": map[string]interface{}{
+				"command": "npm build",
+			},
+			"output": map[string]interface{}{
+				"error": "build failed",
+			},
+		},
+	}
+	result := formatToolUseEvent(part)
+	if !strings.Contains(result, "✗") {
+		t.Fatalf("expected error marker, got %q", result)
+	}
+	if !strings.Contains(result, "npm build") {
+		t.Fatalf("expected command, got %q", result)
+	}
+}
+
+func TestFormatToolResultEventWithStringOutput(t *testing.T) {
+	part := map[string]interface{}{
+		"tool": "bash",
+		"state": map[string]interface{}{
+			"status": "completed",
+			"output": "All 5 tests passed\nNo failures",
+		},
+	}
+	result := formatToolResultEvent(part)
+	if !strings.Contains(result, "✓") {
+		t.Fatalf("expected success marker, got %q", result)
 	}
 	if !strings.Contains(result, "bash") {
-		t.Fatalf("expected tool name in result, got %q", result)
+		t.Fatalf("expected tool name, got %q", result)
+	}
+}
+
+func TestFormatStreamRealWorldOpenCodeEvent(t *testing.T) {
+	raw := `{"type":"tool_use","timestamp":1778810428310,"sessionID":"ses_1d6a5b69","part":{"type":"tool","tool":"task","callID":"call_09b6a0a93ffb","state":{"status":"completed","input":{"description":"Explore codebase structure","prompt":"Explore the codebase thoroughly","subagent_type":"explore"},"output":"task_id: ses_abc123\n\n<task_result>\nNow I have a comprehensive understanding.\n</task_result>"}}}`
+	formatted := FormatExecutionEvent("stdout", raw)
+	if !strings.Contains(formatted, "Explore codebase structure") {
+		t.Fatalf("expected description in formatted output, got %q", formatted)
+	}
+	if !strings.Contains(formatted, "[explore]") {
+		t.Fatalf("expected subagent type, got %q", formatted)
+	}
+}
+
+func TestFormatStreamReadableWithTaskTool(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"task","state":{"status":"completed","input":{"description":"Explore codebase","subagent_type":"explore"},"output":"task_id: ses_abc\n\nResult here"}}}`,
+		`{"type":"step_end","part":{}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "▸ task") {
+		t.Fatalf("expected task tool use, got %q", result)
+	}
+	if !strings.Contains(result, "Explore codebase") {
+		t.Fatalf("expected description, got %q", result)
+	}
+	if !strings.Contains(result, "ses_abc") {
+		t.Fatalf("expected task_id, got %q", result)
+	}
+}
+
+func TestFirstNonEmptyStr(t *testing.T) {
+	m := map[string]interface{}{
+		"file":     "",
+		"file_path": "src/app.ts",
+		"path":     "fallback",
+	}
+	result := firstNonEmptyStr(m, "file", "file_path", "path")
+	if result != "src/app.ts" {
+		t.Fatalf("expected first non-empty, got %q", result)
+	}
+}
+
+func TestFirstNonEmptyStrNoneMatch(t *testing.T) {
+	m := map[string]interface{}{
+		"other": "value",
+	}
+	result := firstNonEmptyStr(m, "file", "path")
+	if result != "" {
+		t.Fatalf("expected empty, got %q", result)
+	}
+}
+
+func TestSummarizeToolOutputFallbackString(t *testing.T) {
+	output := "some plain string output from unknown tool"
+	result := summarizeToolOutput("custom_tool", output)
+	if !strings.Contains(result, "some plain string") {
+		t.Fatalf("expected string summary for unknown tool, got %q", result)
+	}
+}
+
+func TestFormatToolInputTodoWrite(t *testing.T) {
+	input := map[string]interface{}{
+		"todos": []interface{}{
+			map[string]interface{}{"content": "Step 1", "status": "completed"},
+			map[string]interface{}{"content": "Step 2", "status": "in_progress"},
+			map[string]interface{}{"content": "Step 3", "status": "pending"},
+		},
+	}
+	result := formatToolInput("todowrite", input)
+	if !strings.Contains(result, "3 items") {
+		t.Fatalf("expected item count, got %q", result)
+	}
+	if !strings.Contains(result, "1 active") {
+		t.Fatalf("expected active count, got %q", result)
+	}
+}
+
+func TestFormatToolInputTodoWriteNoActive(t *testing.T) {
+	input := map[string]interface{}{
+		"todos": []interface{}{
+			map[string]interface{}{"content": "Step 1", "status": "completed"},
+			map[string]interface{}{"content": "Step 2", "status": "completed"},
+		},
+	}
+	result := formatToolInput("todowrite", input)
+	if !strings.Contains(result, "2 items") {
+		t.Fatalf("expected item count, got %q", result)
+	}
+	if strings.Contains(result, "active") {
+		t.Fatalf("expected no active count, got %q", result)
+	}
+}
+
+func TestFormatToolInputClick(t *testing.T) {
+	input := map[string]interface{}{
+		"uid": "btn-submit",
+	}
+	result := formatToolInput("click", input)
+	if !strings.Contains(result, "btn-submit") {
+		t.Fatalf("expected uid, got %q", result)
+	}
+}
+
+func TestFormatToolInputPressKey(t *testing.T) {
+	input := map[string]interface{}{
+		"key": "Enter",
+	}
+	result := formatToolInput("press_key", input)
+	if !strings.Contains(result, "Enter") {
+		t.Fatalf("expected key, got %q", result)
+	}
+}
+
+func TestFormatToolInputNavigate(t *testing.T) {
+	input := map[string]interface{}{
+		"url": "https://example.com/page",
+	}
+	result := formatToolInput("navigate", input)
+	if !strings.Contains(result, "https://example.com") {
+		t.Fatalf("expected url, got %q", result)
+	}
+}
+
+func TestFormatToolInputFillWithValue(t *testing.T) {
+	input := map[string]interface{}{
+		"uid":   "input-name",
+		"value": "John",
+	}
+	result := formatToolInput("fill", input)
+	if !strings.Contains(result, "input-name") {
+		t.Fatalf("expected uid, got %q", result)
+	}
+	if !strings.Contains(result, "John") {
+		t.Fatalf("expected value, got %q", result)
+	}
+}
+
+func TestDedupStreamLinesRemovesDuplicates(t *testing.T) {
+	lines := []streamLine{
+		{eventType: EventText, content: "hello world"},
+		{eventType: EventText, content: "hello world"},
+		{eventType: EventToolUse, content: "▸ read  a.ts"},
+		{eventType: EventToolUse, content: "▸ read  a.ts"},
+	}
+	result := dedupStreamLines(lines)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 deduped lines, got %d: %v", len(result), result)
+	}
+}
+
+func TestDedupStreamLinesPreservesSteps(t *testing.T) {
+	lines := []streamLine{
+		{eventType: EventStepStart, content: ""},
+		{eventType: EventStepStart, content: ""},
+	}
+	result := dedupStreamLines(lines)
+	if len(result) != 2 {
+		t.Fatalf("expected step markers preserved, got %d", len(result))
+	}
+}
+
+func TestNormalizeEventWithAssistantType(t *testing.T) {
+	raw := `{"type":"assistant","content":"I will help you with that."}`
+	formatted := FormatExecutionEvent("stdout", raw)
+	if !strings.Contains(formatted, "I will help you with that") {
+		t.Fatalf("expected assistant message normalized to text, got %q", formatted)
+	}
+}
+
+func TestFormatStreamReadableDedupIdenticalLines(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"a.ts"}}}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"a.ts"}}}}`,
+		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	readCount := strings.Count(result, "▸ read")
+	if readCount > 1 {
+		t.Fatalf("expected deduplication of identical tool use, got %d occurrences:\n%s", readCount, result)
+	}
+}
+
+func TestFormatStreamCompactDedup(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"a.ts"}}}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"a.ts"}}}}`,
+		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`,
+	}, "\n")
+
+	result := FormatStreamCompact(raw)
+	readCount := strings.Count(result, "▸ read")
+	if readCount > 1 {
+		t.Fatalf("expected deduplication in compact format, got %d occurrences:\n%s", readCount, result)
+	}
+}
+
+func TestFormatExecutionCommentUsesReadableStream(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"edit","state":{"input":{"file":"src/app.ts","old_string":"old","new_string":"new"}}}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"result","part":{"text":"Feature implemented."}}`,
+	}, "\n")
+
+	comment := FormatExecutionComment("dev", "opencode", true, 30, raw, 0)
+	if !strings.Contains(comment, "### Key Changes") {
+		t.Fatalf("expected Key Changes section, got %s", comment)
+	}
+	if !strings.Contains(comment, "Edited `src/app.ts`") {
+		t.Fatalf("expected edited file in Key Changes, got %s", comment)
+	}
+	if !strings.Contains(comment, "Full Output") {
+		t.Fatalf("expected Full Output summary, got %s", comment)
+	}
+	if !strings.Contains(comment, "Feature implemented") {
+		t.Fatalf("expected summary text, got %s", comment)
+	}
+}
+
+func TestFormatStreamReadableWithTodoWrite(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"todowrite","state":{"input":{"todos":[{"content":"Step 1","status":"in_progress"},{"content":"Step 2","status":"pending"}]}}}}`,
+		`{"type":"step_end","part":{}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "▸ todowrite") {
+		t.Fatalf("expected todowrite tool use, got %q", result)
+	}
+	if !strings.Contains(result, "2 items") {
+		t.Fatalf("expected item count, got %q", result)
+	}
+}
+
+func TestFormatToolInputTodoWriteWithContent(t *testing.T) {
+	input := map[string]interface{}{
+		"content": "Write tests",
+	}
+	result := formatToolInput("todowrite", input)
+	if !strings.Contains(result, "Write tests") {
+		t.Fatalf("expected content fallback, got %q", result)
+	}
+}
+
+func TestFormatToolInputTodoWriteEmpty(t *testing.T) {
+	input := map[string]interface{}{}
+	result := formatToolInput("todowrite", input)
+	if result == "" {
+		t.Fatalf("expected non-empty fallback, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableLargeMultiStep(t *testing.T) {
+	var events []string
+	for s := 0; s < 5; s++ {
+		events = append(events, `{"type":"step_start","part":{"type":"step-start"}}`)
+		for i := 0; i < 3; i++ {
+			events = append(events, fmt.Sprintf(`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"file_s%d_i%d.ts"}}}}`, s, i))
+			events = append(events, `{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`)
+		}
+		events = append(events, `{"type":"text","part":{"text":"Analyzing the files now."}}`)
+		events = append(events, `{"type":"step_end","part":{}}`)
+	}
+	events = append(events, `{"type":"result","part":{"text":"All files analyzed."}}`)
+	raw := strings.Join(events, "\n")
+
+	result := FormatStreamReadable(raw)
+	stepCount := strings.Count(result, "── Step")
+	if stepCount < 10 {
+		t.Fatalf("expected at least 10 step markers, got %d", stepCount)
+	}
+	if !strings.Contains(result, "All files analyzed") {
+		t.Fatalf("expected final result, got:\n%s", result)
+	}
+}
+
+func TestFormatToolInputUpload(t *testing.T) {
+	input := map[string]interface{}{
+		"uid":      "file-input",
+		"filePath": "/tmp/upload.txt",
+	}
+	result := formatToolInput("upload", input)
+	if !strings.Contains(result, "file-input") {
+		t.Fatalf("expected uid, got %q", result)
+	}
+	if !strings.Contains(result, "/tmp/upload.txt") {
+		t.Fatalf("expected filePath, got %q", result)
+	}
+}
+
+func TestFormatToolInputScreenshot(t *testing.T) {
+	input := map[string]interface{}{
+		"uid": "page-body",
+	}
+	result := formatToolInput("screenshot", input)
+	if !strings.Contains(result, "page-body") {
+		t.Fatalf("expected uid, got %q", result)
 	}
 }

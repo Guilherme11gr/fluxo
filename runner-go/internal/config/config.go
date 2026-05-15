@@ -62,6 +62,15 @@ type AgentConfig struct {
 	// AvailableModels is populated at runtime by detecting installed tools.
 	// Not stored in YAML — sent to the API so the web UI can use it.
 	AvailableModels []string `yaml:"-"`
+
+	// GitPolicy controls the git workflow behavior for this agent.
+	GitPolicy string `yaml:"git_policy"`
+
+	// GitBaseBranch is the protected base branch (default: main).
+	GitBaseBranch string `yaml:"git_base_branch"`
+
+	// GitAllowedPrefix restricts branch names to a given prefix.
+	GitAllowedPrefix string `yaml:"git_allowed_prefix"`
 }
 
 // IsDynamic returns true when no agents are defined in config,

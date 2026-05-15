@@ -167,6 +167,50 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	}
 	logging.Debugf("worker[%s] git prepared branch=%q base=%q commits=%d", agent.Name, preparedGit.Branch, preparedGit.BaseBranch, len(preparedGit.CommitShas))
 
+	preflight := runner.PreflightGitCheck(workdir, gitPolicy, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix)
+	if !preflight.OK {
+		logging.Debugf("worker[%s] preflight check failed: %s", agent.Name, preflight.ErrorMessage)
+		failedGitSnapshot := runner.GitSnapshot{
+			Branch:     preflight.CurrentBranch,
+			BaseBranch: preflight.BaseBranch,
+			CommitShas: []string{},
+			Mode:       string(gitPolicy),
+			CapturedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		errorMessage := preflight.ErrorMessage
+		structuredResult := runner.MergeGitResult(
+			runner.BuildExecutionResultV1(false, errorMessage, 1),
+			failedGitSnapshot,
+		)
+		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
+			Status:        "FAILED",
+			Output:        errorMessage,
+			ResultSummary: truncate(errorMessage, 500),
+			Result:        structuredResult,
+			ErrorMessage:  truncate(errorMessage, 2000),
+			ExitCode:      1,
+			Duration:      0,
+			NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
+			BlockReason:   nullableString(errorMessage),
+			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+			Metadata: map[string]interface{}{
+				"tool":  agent.Tool,
+				"model": agent.Model,
+				"git":   runner.GitMetadataMap(failedGitSnapshot),
+				"preflight": map[string]interface{}{
+					"ok":          preflight.OK,
+					"branch":      preflight.CurrentBranch,
+					"isProtected": preflight.IsProtected,
+					"isDirty":      preflight.IsDirty,
+					"error":       preflight.ErrorMessage,
+				},
+			},
+		})
+		runner.SendHeartbeat(client, agent, "ONLINE")
+		return
+	}
+	logging.Debugf("worker[%s] preflight OK branch=%q dirty=%t protected=%t", agent.Name, preflight.CurrentBranch, preflight.IsDirty, preflight.IsProtected)
+
 	runner.SendHeartbeat(client, agent, "BUSY")
 
 	execMetadata := map[string]interface{}{"git": runner.GitMetadataMap(runner.GitSnapshot{
@@ -328,6 +372,44 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), commentOutput, result.ExitCode)
 
 	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
+
+	if result.Success && gitPolicy != runner.GitPolicyNoWrite && preparedGit.Branch != "" {
+		if commitSHA, err := runner.CommitChanges(workdir, preparedGit.Branch, claimed.Task.ID, claimed.Task.Title); err != nil {
+			fmt.Printf("[%s] post-exec commit error: %v\n", agent.Name, err)
+		} else if commitSHA != "" {
+			logging.Debugf("worker[%s] committed changes sha=%s", agent.Name, commitSHA)
+			gitSnapshot = runner.CaptureGitSnapshot(workdir, preparedGit)
+		}
+
+		if gitPolicy == runner.GitPolicyBranchCommitPR {
+			if err := runner.PushBranch(workdir, preparedGit.Branch); err != nil {
+				fmt.Printf("[%s] push error: %v\n", agent.Name, err)
+			} else {
+				logging.Debugf("worker[%s] pushed branch %s", agent.Name, preparedGit.Branch)
+				isDraftPR := strings.EqualFold(claimed.RuntimeBinding.PRPolicy, "draft")
+				prTitle := fmt.Sprintf("[%s] %s", claimed.Task.Type, claimed.Task.Title)
+				if len(prTitle) > 72 {
+					prTitle = prTitle[:72]
+				}
+				prBody := fmt.Sprintf("Automated execution by **%s** (%s).\n\n**Task:** %s\n**Task ID:** %s", agent.Name, agent.Tool, claimed.Task.Title, claimed.Task.ID)
+				prResult, err := runner.CreatePullRequest(workdir, runner.CreatePROptions{
+					BaseBranch: gitBaseBranch,
+					Title:      prTitle,
+					Body:       prBody,
+					Draft:      isDraftPR,
+				})
+				if err != nil {
+					fmt.Printf("[%s] PR creation error: %v\n", agent.Name, err)
+				} else if prResult != nil {
+					logging.Debugf("worker[%s] created PR #%d %s", agent.Name, prResult.Number, prResult.URL)
+					gitSnapshot.PRUrl = &prResult.URL
+					prNum := prResult.Number
+					gitSnapshot.PRNumber = &prNum
+				}
+			}
+		}
+	}
+
 	structuredResult = runner.MergeGitResult(structuredResult, gitSnapshot)
 
 	status := "FAILED"
@@ -385,6 +467,30 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	_, err = api.FinalizeExecution(client, claimed.Execution.ID, finalizeParams)
 	if err != nil {
 		fmt.Printf("[%s] finalize error: %v\n", agent.Name, err)
+	}
+
+	if result.Success && gitSnapshot.PRUrl != nil && *gitSnapshot.PRUrl != "" {
+		prComment := fmt.Sprintf("## Pull Request Created\n\n**PR:** [#%d](%s)\n**Branch:** %s\n**Base:** %s", func() int {
+			if gitSnapshot.PRNumber != nil {
+				return *gitSnapshot.PRNumber
+			}
+			return 0
+		}(), *gitSnapshot.PRUrl, preparedGit.Branch, gitBaseBranch)
+		_, _ = client.Post("/tasks/"+claimed.Task.ID+"/comments", map[string]interface{}{
+			"content": prComment,
+			"agentId": agent.ID,
+		})
+
+		taskPatch := map[string]interface{}{
+			"prUrl":    *gitSnapshot.PRUrl,
+			"prNumber": func() int {
+				if gitSnapshot.PRNumber != nil {
+					return *gitSnapshot.PRNumber
+				}
+				return 0
+			}(),
+		}
+		_, _ = client.Patch("/tasks/"+claimed.Task.ID, taskPatch)
 	}
 
 	runner.SendHeartbeat(client, agent, "ONLINE")

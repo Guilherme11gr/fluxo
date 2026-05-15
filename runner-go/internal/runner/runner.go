@@ -211,14 +211,48 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	// Step 3: Execute
 	fmt.Printf("  \033[33m[%s] Executing with %s...\033[0m\n", agent.Name, agent.Tool)
+
+	gitPolicy := ResolveGitPolicy(agent.GitPolicy, GitPolicyNoWrite)
+	gitCfg := GitWorkflowConfig{
+		Policy:        gitPolicy,
+		BaseBranch:    agent.GitBaseBranch,
+		AllowedPrefix: agent.GitAllowedPrefix,
+		AgentName:     agent.Name,
+		TaskID:        task.ID,
+		TaskType:      task.Type,
+		TaskTitle:     task.Title,
+		ExecID:        execID,
+		Workdir:       agent.Workdir,
+		PushAfterCommit: PolicyRequiresPush(gitPolicy),
+		CreatePR:      PolicyRequiresPR(gitPolicy),
+		PRDraft:       true,
+	}
+
+	gitWorkflowResult := ExecuteGitWorkflow(gitCfg)
+	if !gitWorkflowResult.PreflightOK {
+		fmt.Printf("  \033[33m[%s] Git preflight warning: %s (continuing in no_write mode)\033[0m\n", agent.Name, gitWorkflowResult.Error)
+		gitPolicy = GitPolicyNoWrite
+		gitCfg.Policy = GitPolicyNoWrite
+		gitCfg.PushAfterCommit = false
+		gitCfg.CreatePR = false
+	} else if gitWorkflowResult.Error != nil {
+		fmt.Printf("  \033[33m[%s] Git branch prepare warning: %s (continuing in no_write mode)\033[0m\n", agent.Name, gitWorkflowResult.Error)
+		gitPolicy = GitPolicyNoWrite
+		gitCfg.Policy = GitPolicyNoWrite
+		gitCfg.PushAfterCommit = false
+		gitCfg.CreatePR = false
+	} else {
+		fmt.Printf("  \033[90m[%s] Git: branch=%s mode=%s\033[0m\n", agent.Name, gitWorkflowResult.BranchName, gitPolicy)
+	}
+
 	prompt := BuildPrompt(task, agent)
 
-	var exec executor.Executor
+	var exec2 executor.Executor
 	switch agent.Tool {
 	case "claude":
-		exec = &executor.ClaudeExecutor{Config: agent}
+		exec2 = &executor.ClaudeExecutor{Config: agent}
 	case "opencode":
-		exec = &executor.OpenCodeExecutor{Config: agent}
+		exec2 = &executor.OpenCodeExecutor{Config: agent}
 	default:
 		fmt.Printf("  \033[31m[%s] Unknown tool: %s\033[0m\n", agent.Name, agent.Tool)
 		activeTask = nil
@@ -233,9 +267,24 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 
 	startTime := time.Now()
 	ctx := context.Background()
-	result := exec.Execute(ctx, prompt, agent.Workdir, timeout, nil)
+	result := exec2.Execute(ctx, prompt, agent.Workdir, timeout, nil)
 	elapsed := time.Since(startTime).Seconds()
 	elapsedInt := int(elapsed)
+
+	if result.Success && PolicyRequiresCommit(gitPolicy) {
+		finalResult := FinalizeGitWorkflow(gitCfg, gitWorkflowResult.Preparation)
+		if finalResult.Error != nil {
+			fmt.Printf("  \033[33m[%s] Git finalize warning: %s\033[0m\n", agent.Name, finalResult.Error)
+		} else {
+			gitWorkflowResult = finalResult
+			if len(finalResult.CommitShas) > 0 {
+				fmt.Printf("  \033[90m[%s] Git: committed %d SHA(s)\033[0m\n", agent.Name, len(finalResult.CommitShas))
+			}
+			if finalResult.PRUrl != nil && *finalResult.PRUrl != "" {
+				fmt.Printf("  \033[90m[%s] Git: PR %s\033[0m\n", agent.Name, *finalResult.PRUrl)
+			}
+		}
+	}
 
 	statusIcon := "\033[32m✓\033[0m"
 	statusText := "SUCCESS"
@@ -272,6 +321,10 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 			}
 			execResult["resultSummary"] = summary
 		}
+		gitMeta := GitMetadataMap(gitWorkflowResult.Snapshot)
+		if len(gitMeta) > 0 {
+			execResult["metadata"] = map[string]interface{}{"git": gitMeta}
+		}
 		api.UpdateExecution(client, execID, execResult)
 	}
 
@@ -292,8 +345,17 @@ func PollAndExecute(client *api.Client, agent config.AgentConfig) {
 	changeReason := fmt.Sprintf("[FluXo Runner][%s] Execution %s with %s", agent.Name, statusText, agent.Tool)
 	patchBody["status"] = doneStatus
 	patchBody["_metadata"] = map[string]interface{}{
-		"status": doneStatus,
-		"changeReason": changeReason,
+		"status":        doneStatus,
+		"changeReason":  changeReason,
+	}
+	if gitWorkflowResult.Snapshot.Mode != "" {
+		patchBody["_metadata"].(map[string]interface{})["git"] = GitMetadataMap(gitWorkflowResult.Snapshot)
+	}
+	if gitWorkflowResult.PRUrl != nil && *gitWorkflowResult.PRUrl != "" {
+		patchBody["prUrl"] = *gitWorkflowResult.PRUrl
+	}
+	if gitWorkflowResult.PRNumber != nil {
+		patchBody["prNumber"] = *gitWorkflowResult.PRNumber
 	}
 	if result.Success && agent.NextAssigneeID != "" {
 		patchBody["assigneeAgentId"] = agent.NextAssigneeID

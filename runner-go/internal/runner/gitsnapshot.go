@@ -38,6 +38,13 @@ func CaptureGitSnapshot(workdir string, prepared GitPreparation) GitSnapshot {
 		snapshot.CommitShas = []string{headSHA}
 	}
 
+	if len(prepared.CommitShas) > 0 {
+		baseSHA := prepared.CommitShas[0]
+		if newSHAs, err := CollectNewCommitSHAs(workdir, baseSHA); err == nil && len(newSHAs) > 0 {
+			snapshot.CommitShas = newSHAs
+		}
+	}
+
 	return snapshot
 }
 

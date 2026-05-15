@@ -47,6 +47,9 @@ import { FocusBadge } from './focus-badge';
 import { useBlockTaskDialog } from '@/hooks/use-block-task-dialog';
 import { useMoveTaskWithUndo } from '@/hooks/use-move-task-undo';
 import { useAuth } from '@/hooks/use-auth';
+import { useAgents } from '@/lib/query/hooks/use-agents';
+import { useUpdateTask } from '@/lib/query/hooks/use-tasks';
+import { Bot } from 'lucide-react';
 import { toast } from 'sonner';
 
 function getAssigneeName(task: TaskWithReadableId) {
@@ -91,6 +94,8 @@ export function TaskDetailModal({
   const { viewer } = useAuth();
   const blockDialog = useBlockTaskDialog(task || { id: '', blocked: false } as any); // Dummy para hooks
   const { moveWithUndo, isPending: isMovePending } = useMoveTaskWithUndo();
+  const { data: agents } = useAgents();
+  const updateTaskMutation = useUpdateTask();
 
   // Get current org slug for deep links
   const currentOrgSlug = viewer?.memberships.find(m => m.orgId === viewer.currentOrgId)?.orgSlug;
@@ -119,6 +124,15 @@ export function TaskDetailModal({
   const handleStatusChange = (newStatus: TaskStatus) => {
     if (!task) return;
     moveWithUndo(task.id, newStatus, task.readableId);
+  };
+
+  const handleAgentChange = (agentId: string) => {
+    if (!task) return;
+    const newAgentId = agentId === 'none' ? null : agentId;
+    updateTaskMutation.mutate({
+      id: task.id,
+      data: { assigneeAgentId: newAgentId },
+    });
   };
 
   // Early return APÓS todos os hooks (Rules of Hooks)
@@ -242,6 +256,33 @@ export function TaskDetailModal({
               <span className="text-xs text-muted-foreground">
                 {getAssigneeName(task)}
               </span>
+            </div>
+
+            <Separator orientation="vertical" className="h-4" />
+
+            {/* Agent Select - Editável */}
+            <div className="flex items-center gap-1.5" title="Agent">
+              <Bot className="h-3.5 w-3.5 text-muted-foreground/80" />
+              <Select
+                value={task.assigneeAgentId || 'none'}
+                onValueChange={handleAgentChange}
+                disabled={updateTaskMutation.isPending}
+              >
+                <SelectTrigger className="h-6 text-xs px-2.5 shadow-sm w-auto gap-1.5 border-0 ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 max-w-[160px]">
+                  <SelectValue placeholder="Sem agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem agent</SelectItem>
+                  {agents?.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      <div className="flex items-center gap-1.5">
+                        <span>{agent.name}</span>
+                        <span className="text-[10px] text-muted-foreground">({agent.tool || 'sem tool'})</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Blocked status - apenas se não estiver DONE */}

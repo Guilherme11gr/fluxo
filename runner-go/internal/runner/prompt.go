@@ -18,6 +18,21 @@ type Task struct {
 	Status      string `json:"status"`
 }
 
+type GitWorkflowConfig struct {
+	Policy           GitPolicy
+	BaseBranch       string
+	AllowedPrefix    string
+	AgentName        string
+	TaskID           string
+	TaskType         string
+	TaskTitle        string
+	ExecID           string
+	Workdir          string
+	PushAfterCommit  bool
+	CreatePR         bool
+	PRDraft          bool
+}
+
 type PreviousExecutionContext struct {
 	ID            string
 	Status        string

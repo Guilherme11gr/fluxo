@@ -107,3 +107,87 @@ func TestBuildPersistedExecutionOutputFormatsStreamAndPrefixesFailure(t *testing
 		t.Fatalf("expected formatted tool result, got %q", persisted)
 	}
 }
+
+func TestGitWorkflowPolicyParsing(t *testing.T) {
+	if runner.ParseGitPolicy("branch_only") != runner.GitPolicyBranchOnly {
+		t.Fatal("expected branch_only policy")
+	}
+	if runner.ParseGitPolicy("branch_commit_pr") != runner.GitPolicyBranchCommitPR {
+		t.Fatal("expected branch_commit_pr policy")
+	}
+	if runner.ParseGitPolicy("") != runner.GitPolicyNoWrite {
+		t.Fatal("expected no_write as default")
+	}
+}
+
+func TestGitWorkflowBranchNameDeterministic(t *testing.T) {
+	id1 := "5223add6-34fb-4088-aa3f-329d81fad580"
+	name1 := runner.BuildBranchName(id1, "TASK", "builder", "")
+	if name1 != "builder/task-5223add6" {
+		t.Fatalf("expected builder/task-5223add6, got %q", name1)
+	}
+
+	name2 := runner.BuildBranchName(id1, "TASK", "builder", "agent/")
+	if name2 != "agent/task-5223add6" {
+		t.Fatalf("expected agent/task-5223add6, got %q", name2)
+	}
+
+	id2 := "5223add6-34fb-4088-aa3f-329d81fad580"
+	name3 := runner.BuildBranchName(id2, "TASK", "builder", "")
+	if name3 != name1 {
+		t.Fatalf("expected deterministic branch name: %q vs %q", name1, name3)
+	}
+}
+
+func TestGitWorkflowPreflightOnProtectedBranch(t *testing.T) {
+	result := runner.PreflightGitCheck("/nonexistent", runner.GitPolicyBranchOnly, "main", "")
+	if result.OK {
+		t.Fatal("expected preflight to fail on non-existent dir or protected branch branch check")
+	}
+}
+
+func TestGitWorkflowNoWriteSkipsEverything(t *testing.T) {
+	result := runner.PreflightGitCheck("", runner.GitPolicyNoWrite, "main", "")
+	if !result.OK {
+		t.Fatal("expected no_write to always pass preflight")
+	}
+}
+
+func TestGitSnapshotMergeReflectsPRInResult(t *testing.T) {
+	snapshot := runner.GitSnapshot{
+		Branch:     "builder/task-test",
+		BaseBranch: "main",
+		CommitShas: []string{"sha1"},
+		Mode:       "branch_commit_pr",
+		CapturedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	result := runner.MergeGitResult(
+		runner.BuildExecutionResultV1(true, "done", 0),
+		snapshot,
+	)
+	gitMap, ok := result["git"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected git map in result")
+	}
+	if gitMap["mode"] != "branch_commit_pr" {
+		t.Fatalf("expected mode=branch_commit_pr, got %v", gitMap["mode"])
+	}
+	if gitMap["branch"] != "builder/task-test" {
+		t.Fatalf("expected branch, got %v", gitMap["branch"])
+	}
+}
+
+func TestHelperFunctions(t *testing.T) {
+	if defaultStr("", "fallback") != "fallback" {
+		t.Fatal("expected fallback for empty string")
+	}
+	if defaultStr("value", "fallback") != "value" {
+		t.Fatal("expected value when non-empty")
+	}
+	if truncate("hello world", 5) != "hello" {
+		t.Fatal("expected truncation")
+	}
+	if truncate("short", 100) != "short" {
+		t.Fatal("expected no truncation for short strings")
+	}
+}
