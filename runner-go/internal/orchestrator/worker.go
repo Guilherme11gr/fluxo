@@ -295,12 +295,27 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	flushEvents(true)
 
 	duration := int(time.Since(start).Seconds())
-	output := strings.Join(fullOutput, "\n")
-	readableOutput := runner.ExtractReadableOutput(output)
+	rawOutput := strings.Join(fullOutput, "\n")
+	readableOutput := runner.ExtractReadableOutput(rawOutput)
 	strippedOutput := runner.StripStructuredResultBlock(readableOutput)
-	structuredResult := runner.BuildExecutionResultV1(result.Success, readableOutput, result.ExitCode)
+	failureHeadline := ""
+	structuredOutput := readableOutput
+	errorMessage := ""
+	blockReason := ""
+	if !result.Success {
+		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, readableOutput, timeout)
+	}
+	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline)
+	structuredResult := runner.BuildExecutionResultV1(result.Success, structuredOutput, result.ExitCode)
 	structuredSummary := runner.ExecutionResultSummary(structuredResult)
-	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), output, result.ExitCode)
+	commentOutput := rawOutput
+	if failureHeadline != "" {
+		commentOutput = strings.TrimSpace(failureHeadline + "\n\n" + commentOutput)
+	}
+	if commentOutput == "" {
+		commentOutput = persistedOutput
+	}
+	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), commentOutput, result.ExitCode)
 
 	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
 	structuredResult = runner.MergeGitResult(structuredResult, gitSnapshot)
@@ -308,8 +323,6 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
 	var nextAssignee *string
-	errorMessage := truncate(strippedOutput, 2000)
-	blockReason := fmt.Sprintf("Agent %s failed while running %s.", agent.Name, agent.Tool)
 	if result.Success {
 		status = "SUCCESS"
 		nextStatus = defaultStr(agent.DoneStatus, "DONE")
@@ -322,7 +335,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 
 	finalizeParams := api.FinalizeExecutionParams{
 		Status:              status,
-		Output:              output,
+		Output:              persistedOutput,
 		ResultSummary:       truncate(defaultStr(structuredSummary, strippedOutput), 500),
 		Result:              structuredResult,
 		ErrorMessage:        errorMessage,
@@ -336,6 +349,11 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			"tool":  agent.Tool,
 			"model": agent.Model,
 			"git":   runner.GitMetadataMap(gitSnapshot),
+			"execution": map[string]interface{}{
+				"timeoutSeconds": int(timeout.Seconds()),
+				"timedOut":       result.TimedOut,
+				"canceled":       result.Canceled,
+			},
 			"runtimeBinding": map[string]interface{}{
 				"id":                  claimed.RuntimeBinding.ID,
 				"projectId":           claimed.RuntimeBinding.ProjectID,
@@ -380,4 +398,60 @@ func nullableString(val string) *string {
 		return nil
 	}
 	return &val
+}
+
+func buildFailureExecutionDetails(agentName, tool string, result executor.Result, readableOutput string, timeout time.Duration) (structuredOutput string, headline string, errorMessage string, blockReason string) {
+	headline = executionFailureHeadline(result, timeout)
+	structuredOutput = headline
+	fullReadableOutput := strings.TrimSpace(readableOutput)
+	visibleReadableOutput := strings.TrimSpace(runner.StripStructuredResultBlock(readableOutput))
+	if fullReadableOutput != "" && fullReadableOutput != headline {
+		structuredOutput = headline + "\n\n" + fullReadableOutput
+	}
+	errorBody := headline
+	if visibleReadableOutput != "" && visibleReadableOutput != headline {
+		errorBody = headline + "\n\nLast readable output:\n" + visibleReadableOutput
+	}
+	errorMessage = truncate(errorBody, 2000)
+
+	switch {
+	case result.TimedOut:
+		blockReason = fmt.Sprintf("Agent %s hit the configured timeout (%s) while running %s.", agentName, runner.FormatDuration(timeout.Seconds()), tool)
+	case result.Canceled:
+		blockReason = fmt.Sprintf("Agent %s was canceled while running %s.", agentName, tool)
+	default:
+		blockReason = fmt.Sprintf("Agent %s failed while running %s.", agentName, tool)
+	}
+
+	return structuredOutput, headline, errorMessage, blockReason
+}
+
+func executionFailureHeadline(result executor.Result, timeout time.Duration) string {
+	switch {
+	case result.TimedOut:
+		return fmt.Sprintf("Execution timed out after %s.", runner.FormatDuration(timeout.Seconds()))
+	case result.Canceled:
+		return "Execution was canceled before completion."
+	case result.ExitCode != 0:
+		return fmt.Sprintf("Execution failed with exit code %d.", result.ExitCode)
+	default:
+		return "Execution failed."
+	}
+}
+
+func buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline string) string {
+	persisted := strings.TrimSpace(runner.FormatStreamForDisplay(rawOutput))
+	if persisted == "" {
+		persisted = strings.TrimSpace(runner.StripStructuredResultBlock(readableOutput))
+	}
+	if persisted == "" {
+		persisted = strings.TrimSpace(rawOutput)
+	}
+	if failureHeadline == "" || strings.HasPrefix(persisted, failureHeadline) {
+		return persisted
+	}
+	if persisted == "" {
+		return failureHeadline
+	}
+	return failureHeadline + "\n\n" + persisted
 }

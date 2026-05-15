@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -20,6 +21,8 @@ type Result struct {
 	Output    string
 	ExitCode  int
 	SessionID string
+	TimedOut  bool
+	Canceled  bool
 }
 
 type StreamEvent struct {
@@ -37,7 +40,11 @@ type Executor interface {
 }
 
 func runCommand(ctx context.Context, command string, args []string, stdinStr, workdir string, env []string, stream StreamFunc) Result {
-	cmd := exec.CommandContext(ctx, command, args...)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return contextResult(ctxErr, "")
+	}
+
+	cmd := exec.Command(command, args...)
 	cmd.Dir = workdir
 	if env != nil {
 		cmd.Env = env
@@ -96,23 +103,39 @@ func runCommand(ctx context.Context, command string, args []string, stdinStr, wo
 	go readPipe("stdout", stdoutPipe, &stdout, &wg)
 	go readPipe("stderr", stderrPipe, &stderr, &wg)
 
-	err = cmd.Wait()
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	terminatedByContext := false
+	select {
+	case err = <-waitCh:
+	case <-ctx.Done():
+		select {
+		case err = <-waitCh:
+		default:
+			terminatedByContext = true
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			err = <-waitCh
+		}
+	}
 	wg.Wait()
 
 	output := stripANSI(strings.TrimSpace(stdout.String()))
 	errOutput := stripANSI(strings.TrimSpace(stderr.String()))
+	combined := combineCommandOutput(output, errOutput)
 
 	if err != nil {
+		if terminatedByContext {
+			return contextResult(ctx.Err(), combined)
+		}
+
 		exitCode := 1
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-		}
-		combined := output
-		if errOutput != "" {
-			if combined != "" {
-				combined += "\n"
-			}
-			combined += errOutput
 		}
 		return Result{
 			Success:  false,
@@ -185,4 +208,41 @@ func (e *OpenCodeExecutor) Execute(ctx context.Context, prompt, workdir string, 
 func stripANSI(s string) string {
 	re := regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
 	return re.ReplaceAllString(s, "")
+}
+
+func combineCommandOutput(output, errOutput string) string {
+	combined := output
+	if errOutput == "" {
+		return combined
+	}
+	if combined != "" {
+		combined += "\n"
+	}
+	combined += errOutput
+	return combined
+}
+
+func contextResult(ctxErr error, output string) Result {
+	switch {
+	case errors.Is(ctxErr, context.DeadlineExceeded):
+		return Result{
+			Success:  false,
+			Output:   output,
+			ExitCode: 124,
+			TimedOut: true,
+		}
+	case errors.Is(ctxErr, context.Canceled):
+		return Result{
+			Success:  false,
+			Output:   output,
+			ExitCode: 130,
+			Canceled: true,
+		}
+	default:
+		return Result{
+			Success:  false,
+			Output:   output,
+			ExitCode: 1,
+		}
+	}
 }
