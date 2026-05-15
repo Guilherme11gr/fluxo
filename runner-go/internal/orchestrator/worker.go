@@ -10,6 +10,7 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
+	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
 
@@ -77,6 +78,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 
 	client := api.NewClient(w.apiURL, w.apiKey, agent.Name)
 	runner.SendHeartbeat(client, agent, "ONLINE")
+	logging.Debugf("worker[%s] polling claim-next pick=%s claim=%s project=%s tool=%s model=%s", agent.Name, defaultStr(agent.PickStatus, "TODO"), defaultStr(agent.ClaimStatus, "DOING"), agent.ProjectID, agent.Tool, agent.Model)
 
 	claimed, err := api.ClaimNextTask(client, api.ClaimNextTaskParams{
 		AgentID:          agent.ID,
@@ -93,8 +95,10 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		return
 	}
 	if claimed == nil {
+		logging.Debugf("worker[%s] no eligible task returned", agent.Name)
 		return
 	}
+	logging.Debugf("worker[%s] claimed task=%s exec=%s runtimeBinding.repoPath=%q runtimeBinding.gitPolicy=%q runtimeBinding.runnerProfile=%q", agent.Name, claimed.Task.ID, claimed.Execution.ID, claimed.RuntimeBinding.RepoPath, claimed.RuntimeBinding.GitPolicy, claimed.RuntimeBinding.RunnerProfile)
 
 	gitPolicy := runner.ParseGitPolicy(claimed.RuntimeBinding.GitPolicy)
 	gitBranch := runner.BuildBranchName(
@@ -111,8 +115,10 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if claimed.RuntimeBinding.RepoPath != "" {
 		workdir = claimed.RuntimeBinding.RepoPath
 	}
+	logging.Debugf("worker[%s] preparing git policy=%s branch=%s base=%s workdir=%q", agent.Name, gitPolicy, gitBranch, gitBaseBranch, workdir)
 	preparedGit, err := runner.PrepareGitBranch(workdir, gitPolicy, gitBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix)
 	if err != nil {
+		logging.Debugf("worker[%s] git preparation failed: %v", agent.Name, err)
 		failedGitSnapshot := runner.GitSnapshot{
 			Branch:     gitBranch,
 			BaseBranch: gitBaseBranch,
@@ -159,6 +165,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		runner.SendHeartbeat(client, agent, "ONLINE")
 		return
 	}
+	logging.Debugf("worker[%s] git prepared branch=%q base=%q commits=%d", agent.Name, preparedGit.Branch, preparedGit.BaseBranch, len(preparedGit.CommitShas))
 
 	runner.SendHeartbeat(client, agent, "BUSY")
 
@@ -229,6 +236,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if timeout <= 0 {
 		timeout = 900 * time.Second
 	}
+	logging.Debugf("worker[%s] executing tool=%s model=%s timeout=%s workdir=%q", agent.Name, agent.Tool, agent.Model, timeout, workdir)
 
 	var (
 		eventMu       sync.Mutex
@@ -276,6 +284,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		if content == "" {
 			return
 		}
+		logging.Debugf("worker[%s] stream[%s] %s", agent.Name, event.Kind, truncate(content, 240))
 		formattedContent := runner.FormatExecutionEvent(event.Kind, content)
 		eventMu.Lock()
 		pendingEvents = append(pendingEvents, api.ExecutionEvent{
@@ -293,6 +302,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	execCancel()
 	<-heartbeatDone
 	flushEvents(true)
+	logging.Debugf("worker[%s] execution finished success=%t exitCode=%d timedOut=%t canceled=%t", agent.Name, result.Success, result.ExitCode, result.TimedOut, result.Canceled)
 
 	duration := int(time.Since(start).Seconds())
 	rawOutput := strings.Join(fullOutput, "\n")
@@ -370,6 +380,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			},
 		},
 	}
+	logging.Debugf("worker[%s] finalizing execution=%s status=%s nextStatus=%s duration=%ds", agent.Name, claimed.Execution.ID, status, nextStatus, duration)
 
 	_, err = api.FinalizeExecution(client, claimed.Execution.ID, finalizeParams)
 	if err != nil {

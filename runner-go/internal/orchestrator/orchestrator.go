@@ -10,6 +10,7 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
+	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	agentsync "github.com/fluxo-app/fluxo-runner/internal/sync"
 )
 
@@ -47,6 +48,7 @@ func NewRunnerManager(apiURL, apiKey string, pollInterval, heartbeat time.Durati
 func (m *RunnerManager) Register(ctx context.Context) error {
 	hostname, _ := os.Hostname()
 	runnerProfile := hostname
+	logging.Debugf("register runner hostname=%s profile=%s hostOS=%s", hostname, runnerProfile, runtime.GOOS)
 	runnerID, err := api.RegisterRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), api.RegisterRunnerParams{
 		Hostname: hostname,
 		PID:      os.Getpid(),
@@ -68,6 +70,7 @@ func (m *RunnerManager) Register(ctx context.Context) error {
 		return err
 	}
 	m.runnerID = runnerID
+	logging.Debugf("runner registered id=%s", runnerID)
 	go m.heartbeatLoop(ctx)
 	return nil
 }

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/fluxo-app/fluxo-runner/internal/logging"
 )
 
 const UserAgent = "FluXo-Runner/0.3.0"
@@ -33,12 +35,17 @@ func NewClient(baseURL, apiKey, agentName string) *Client {
 
 func (c *Client) doRequest(method, path string, body interface{}) (map[string]interface{}, error) {
 	var bodyReader io.Reader
+	var requestBody []byte
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("marshal body: %w", err)
 		}
+		requestBody = data
 		bodyReader = bytes.NewReader(data)
+	}
+	if logging.Enabled() {
+		logging.Debugf("api %s %s request=%s", method, path, truncateForLog(requestBody, 500))
 	}
 
 	req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
@@ -62,6 +69,9 @@ func (c *Client) doRequest(method, path string, body interface{}) (map[string]in
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if logging.Enabled() {
+		logging.Debugf("api %s %s status=%d response=%s", method, path, resp.StatusCode, truncateForLog(respBody, 500))
 	}
 
 	var result map[string]interface{}
@@ -88,4 +98,14 @@ func (c *Client) Post(path string, body interface{}) (map[string]interface{}, er
 // Patch performs a PATCH request.
 func (c *Client) Patch(path string, body interface{}) (map[string]interface{}, error) {
 	return c.doRequest("PATCH", path, body)
+}
+
+func truncateForLog(raw []byte, max int) string {
+	if len(raw) == 0 {
+		return "<empty>"
+	}
+	if max <= 0 || len(raw) <= max {
+		return string(raw)
+	}
+	return string(raw[:max]) + "...(truncated)"
 }

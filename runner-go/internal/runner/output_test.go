@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -908,5 +909,309 @@ func TestCommentUsesDetailsTag(t *testing.T) {
 	}
 	if !strings.Contains(comment, "Stream Output") {
 		t.Fatalf("expected Stream Output summary, got %s", comment)
+	}
+}
+
+func TestFormatStreamReadableBasicFlow(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"main.go"}}}}`,
+		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`,
+		`{"type":"text","part":{"text":"I will now implement the feature."}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"result","part":{"text":"Done implementing."}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "── step ──") {
+		t.Fatalf("expected step start header, got %q", result)
+	}
+	if !strings.Contains(result, "── step ✓ ──") {
+		t.Fatalf("expected step end marker, got %q", result)
+	}
+	if !strings.Contains(result, "▸ read") {
+		t.Fatalf("expected tool use line, got %q", result)
+	}
+	if !strings.Contains(result, "✓ read") {
+		t.Fatalf("expected tool result line, got %q", result)
+	}
+	if !strings.Contains(result, "implement the feature") {
+		t.Fatalf("expected text content, got %q", result)
+	}
+	if !strings.Contains(result, "✓ Done implementing") {
+		t.Fatalf("expected result line, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableEmpty(t *testing.T) {
+	result := FormatStreamReadable("")
+	if result != "" {
+		t.Fatalf("expected empty for empty input, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableNonJSONLines(t *testing.T) {
+	raw := "plain text line\nanother line"
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "plain text line") {
+		t.Fatalf("expected plain text passthrough, got %q", result)
+	}
+	if !strings.Contains(result, "another line") {
+		t.Fatalf("expected second plain text line, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableStepIndentation(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"ls"}}}}`,
+		`{"type":"step_end","part":{}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	stepStartIdx := strings.Index(result, "── step ──")
+	toolUseIdx := strings.Index(result, "▸ bash")
+	if toolUseIdx <= stepStartIdx {
+		t.Fatalf("expected tool use to come after step start, got %q", result)
+	}
+
+	lines := strings.Split(result, "\n")
+	var indentLevels []int
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		indent := 0
+		for strings.HasPrefix(line, "  ") {
+			indent++
+			line = line[2:]
+		}
+		indentLevels = append(indentLevels, indent)
+	}
+
+	toolIndented := false
+	stepAtZero := false
+	for i, line := range strings.Split(result, "\n") {
+		if strings.Contains(line, "── step ──") && !strings.Contains(line, "step ✓") {
+			if strings.HasPrefix(line, "── step") {
+				stepAtZero = true
+			}
+		}
+		if strings.Contains(line, "▸ bash") {
+			if strings.HasPrefix(line, "  ▸ bash") {
+				toolIndented = true
+			}
+		}
+		_ = i
+	}
+	if !stepAtZero || !toolIndented {
+		t.Fatalf("expected step at zero indent, tool indented, got:\n%s", result)
+	}
+}
+
+func TestFormatStreamReadableMultipleSteps(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"a.ts"}}}}`,
+		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"npm test"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","state":{"status":"completed","output":{"exitCode":0,"stdout":"All tests passed"}}}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"result","part":{"text":"All done."}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	stepCount := strings.Count(result, "── step ──")
+	if stepCount != 2 {
+		t.Fatalf("expected 2 step starts, got %d in:\n%s", stepCount, result)
+	}
+	if !strings.Contains(result, "✓ All done") {
+		t.Fatalf("expected result line, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableToolUseAndResultPairing(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"grep","state":{"input":{"pattern":"TODO","path":"src/"}}}}`,
+		`{"type":"tool_result","part":{"tool":"grep","state":{"status":"completed","output":{"matches":5,"files":3}}}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "▸ grep") {
+		t.Fatalf("expected grep tool use, got %q", result)
+	}
+	if !strings.Contains(result, "5 matches in 3 files") {
+		t.Fatalf("expected grep result summary, got %q", result)
+	}
+	if !strings.Contains(result, "✓ grep") {
+		t.Fatalf("expected grep success marker, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableTextAfterToolUseGetsNewline(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"x.ts"}}}}`,
+		`{"type":"text","part":{"text":"Now I'll edit the file."}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "▸ read") {
+		t.Fatalf("expected tool use line, got %q", result)
+	}
+	if !strings.Contains(result, "Now I'll edit the file.") {
+		t.Fatalf("expected text content, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableErrorResult(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"bad_cmd"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","state":{"status":"error","output":{"error":"command not found"}}}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "✗ bash") {
+		t.Fatalf("expected error marker, got %q", result)
+	}
+	if !strings.Contains(result, "command not found") {
+		t.Fatalf("expected error message, got %q", result)
+	}
+}
+
+func TestFormatStreamForDisplayUsesFormatStreamReadable(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"main.go"}}}}`,
+		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`,
+		`{"type":"step_end","part":{}}`,
+	}, "\n")
+
+	display := FormatStreamForDisplay(raw)
+	if !strings.Contains(display, "── step ──") {
+		t.Fatalf("expected step marker, got %q", display)
+	}
+	if !strings.Contains(display, "▸ read") {
+		t.Fatalf("expected tool use, got %q", display)
+	}
+	if !strings.Contains(display, "── step ✓ ──") {
+		t.Fatalf("expected step end, got %q", display)
+	}
+}
+
+func TestFormatStreamForDisplayEmptyStillWorks(t *testing.T) {
+	display := FormatStreamForDisplay("")
+	if display != "" {
+		t.Fatalf("expected empty for empty input, got %q", display)
+	}
+}
+
+func TestFormatStreamForDisplayNonJSONStillWorks(t *testing.T) {
+	display := FormatStreamForDisplay("plain text\nmore text")
+	if !strings.Contains(display, "plain text") {
+		t.Fatalf("expected plain text passthrough, got %q", display)
+	}
+}
+
+func TestCommentStreamBodyUsesFormatStreamReadable(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"a.ts"}}}}`,
+		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"result","part":{"text":"Completed."}}`,
+	}, "\n")
+
+	comment := FormatExecutionComment("dev", "opencode", true, 30, raw, 0)
+	if !strings.Contains(comment, "<details>") {
+		t.Fatalf("expected <details> tag, got %s", comment)
+	}
+	if !strings.Contains(comment, "── step ──") {
+		t.Fatalf("expected step markers in stream body, got %s", comment)
+	}
+	if !strings.Contains(comment, "▸ read") {
+		t.Fatalf("expected tool use in stream body, got %s", comment)
+	}
+	if !strings.Contains(comment, "✓ Completed") {
+		t.Fatalf("expected result in stream body, got %s", comment)
+	}
+}
+
+func TestCommentStreamBodyTruncationIncreased(t *testing.T) {
+	var events []string
+	events = append(events, `{"type":"step_start","part":{"type":"step-start"}}`)
+	for i := 0; i < 50; i++ {
+		events = append(events, fmt.Sprintf(`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"file_%d.ts"}}}}`, i))
+		events = append(events, `{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"OK"}}}}`)
+	}
+	events = append(events, `{"type":"step_end","part":{}}`)
+	raw := strings.Join(events, "\n")
+
+	comment := FormatExecutionComment("dev", "opencode", true, 30, raw, 0)
+	streamSection := comment[strings.Index(comment, "<details>"):]
+	if len(streamSection) > 5000 {
+		t.Fatalf("expected stream section to be bounded, got length %d", len(streamSection))
+	}
+	if strings.Contains(streamSection, "output truncated") {
+		t.Logf("truncation applied as expected for large output")
+	}
+}
+
+func TestExtractCommentSummarySkipsShortLines(t *testing.T) {
+	readable := "hi\n\nThis is a meaningful summary that is long enough"
+	summary := extractCommentSummary(readable)
+	if !strings.Contains(summary, "meaningful summary") {
+		t.Fatalf("expected summary to skip short line, got %q", summary)
+	}
+}
+
+func TestFormatStreamReadableNestedSteps(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"config.yaml"}}}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"step_start","part":{"type":"step-start"}}`,
+		`{"type":"text","part":{"text":"Analyzing configuration file for potential issues."}}`,
+		`{"type":"step_end","part":{}}`,
+		`{"type":"result","part":{"text":"Configuration is valid."}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if strings.Count(result, "── step ──") != 2 {
+		t.Fatalf("expected 2 step starts, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Analyzing configuration") {
+		t.Fatalf("expected text content in output, got:\n%s", result)
+	}
+}
+
+func TestFormatStreamReadableConsecutiveTextEvents(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"text","part":{"text":"First part of thought."}}`,
+		`{"type":"text","part":{"text":"Second part of thought."}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "First part") {
+		t.Fatalf("expected first text, got %q", result)
+	}
+	if !strings.Contains(result, "Second part") {
+		t.Fatalf("expected second text, got %q", result)
+	}
+}
+
+func TestFormatStreamReadableToolResultWithStatusOnly(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"echo hi"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","state":{"status":"running"}}}`,
+	}, "\n")
+
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "▸ bash") {
+		t.Fatalf("expected tool use, got %q", result)
+	}
+	if !strings.Contains(result, "bash") {
+		t.Fatalf("expected tool name in result, got %q", result)
 	}
 }

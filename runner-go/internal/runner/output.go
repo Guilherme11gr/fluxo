@@ -469,24 +469,132 @@ func filterReadableTextParts(textParts []string, finalResult string) []string {
 	return filtered
 }
 
+type streamLine struct {
+	eventType StreamEventType
+	content   string
+	indent    int
+}
+
 func FormatStreamForDisplay(raw string) string {
-	lines := strings.Split(raw, "\n")
+	lines := FormatStreamReadable(raw)
+	if lines == "" {
+		return ""
+	}
+	return lines
+}
+
+func FormatStreamReadable(raw string) string {
+	parsed := parseStreamLines(raw)
+	if len(parsed) == 0 {
+		return ""
+	}
+
 	var b strings.Builder
+	indent := 0
+	for i, line := range parsed {
+		switch line.eventType {
+		case EventStepStart:
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			prefix := strings.Repeat("  ", indent)
+			b.WriteString(prefix + "── step ──\n")
+			indent++
+
+		case EventStepEnd:
+			if indent > 0 {
+				indent--
+			}
+			prefix := strings.Repeat("  ", indent)
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString(prefix + "── step ✓ ──")
+
+		case EventToolUse:
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+				b.WriteString("\n")
+			}
+			prefix := strings.Repeat("  ", indent)
+			b.WriteString(prefix + line.content)
+
+		case EventToolResult:
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+				b.WriteString("\n")
+			}
+			prefix := strings.Repeat("  ", indent)
+			b.WriteString(prefix + line.content)
+
+		case EventResult:
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+				b.WriteString("\n")
+			}
+			prefix := strings.Repeat("  ", indent)
+			b.WriteString(prefix + line.content)
+
+		case EventText:
+			if line.content == "" {
+				continue
+			}
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+				if isStructuralEvent(parsed, i-1) {
+					b.WriteString("\n")
+				} else {
+					b.WriteString(" ")
+				}
+			}
+			prefix := strings.Repeat("  ", indent)
+			if isStructuralEvent(parsed, i-1) {
+				b.WriteString(prefix + line.content)
+			} else {
+				b.WriteString(line.content)
+			}
+
+		case EventUnknown:
+			if line.content == "" {
+				continue
+			}
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+				b.WriteString("\n")
+			}
+			prefix := strings.Repeat("  ", indent)
+			b.WriteString(prefix + line.content)
+		}
+	}
+
+	return b.String()
+}
+
+func parseStreamLines(raw string) []streamLine {
+	var result []streamLine
+	lines := strings.Split(raw, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		formatted := FormatExecutionEvent("stdout", line)
-		if formatted == "" {
+		parsed := ParseStreamEvent(line)
+		content := FormatStreamEvent(parsed)
+		if parsed.Type == EventUnknown && content == "" {
+			content = strings.TrimSpace(parsed.Text)
+		}
+		if content == "" && parsed.Type != EventStepStart && parsed.Type != EventStepEnd {
 			continue
 		}
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(formatted)
+		result = append(result, streamLine{
+			eventType: parsed.Type,
+			content:   content,
+		})
 	}
-	return b.String()
+	return result
+}
+
+func isStructuralEvent(lines []streamLine, idx int) bool {
+	if idx < 0 || idx >= len(lines) {
+		return false
+	}
+	t := lines[idx].eventType
+	return t == EventStepStart || t == EventStepEnd || t == EventToolUse || t == EventToolResult || t == EventResult
 }
 
 func FormatDuration(seconds float64) string {
@@ -537,9 +645,9 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 		b.WriteString("\n")
 	}
 
-	streamBody := extractCommentStreamBody(output)
+	streamBody := FormatStreamReadable(output)
 	if streamBody != "" {
-		maxLen := 2000
+		maxLen := 4000
 		if len(streamBody) > maxLen {
 			streamBody = streamBody[:maxLen] + "\n\n*(output truncated)*"
 		}
@@ -556,7 +664,16 @@ func extractCommentSummary(readable string) string {
 	if readable == "" {
 		return ""
 	}
-	lines := strings.SplitN(readable, "\n", 2)
+	lines := strings.Split(readable, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) >= 10 {
+			if len(line) > 500 {
+				return line[:500] + "..."
+			}
+			return line
+		}
+	}
 	first := strings.TrimSpace(lines[0])
 	if len(first) > 500 {
 		return first[:500] + "..."

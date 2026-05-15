@@ -11,6 +11,7 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
+	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	"github.com/fluxo-app/fluxo-runner/internal/orchestrator"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 	"github.com/fluxo-app/fluxo-runner/internal/sync"
@@ -23,6 +24,7 @@ var (
 	apiKeyFlag string
 	apiURLFlag string
 	agentFlag  string
+	debugFlag  bool
 )
 
 var runCmd = &cobra.Command{
@@ -83,6 +85,8 @@ Legacy mode (agents in config.yaml):
 			apiURL = "https://fluxo.agenda-aqui.com/api/agent"
 		}
 
+		logging.SetDebug(debugFlag)
+
 		pollInterval := time.Duration(cfg.Runner.GetPollInterval()) * time.Second
 
 		// Banner
@@ -99,6 +103,10 @@ Legacy mode (agents in config.yaml):
 			fmt.Printf("  Agents: %s\n", formatAgents(cfg.Agents))
 		}
 		fmt.Printf("  Poll: every %ds\n\n", int(pollInterval.Seconds()))
+		if debugFlag {
+			fmt.Println("  Debug: \033[35menabled\033[0m")
+			fmt.Println()
+		}
 
 		// Determine agent list
 		var agents []config.AgentConfig
@@ -242,5 +250,6 @@ func init() {
 	runCmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key (overrides config/env)")
 	runCmd.Flags().StringVar(&apiURLFlag, "api-url", "", "API URL (overrides config)")
 	runCmd.Flags().StringVar(&agentFlag, "agent", "", "run only this agent by name (e.g. --agent reviewer)")
+	runCmd.Flags().BoolVar(&debugFlag, "debug", false, "enable verbose debug logging for API, claim, git and executor events")
 	rootCmd.AddCommand(runCmd)
 }
