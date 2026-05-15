@@ -14,6 +14,15 @@ Use this skill when an agent should fetch documentation context before acting.
 - `src/app/api/agent/docs/[id]/route.ts`
 - `src/app/api/agent/route.ts`
 
+## Real API access
+
+For real FluXo documentation lookups, prefer the cloud Agent API:
+
+- Base URL: `https://fluxo.agenda-aqui.com/api/agent`
+- API key env var: `AGENT_API_KEY`
+
+Use normal Agent API headers, especially `Authorization`, `User-Agent`, and `X-Agent-Name`.
+
 ## Retrieval strategy
 
 Use the cheapest retrieval that still gives enough context.

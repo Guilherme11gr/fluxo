@@ -26,6 +26,19 @@ Prefer the real route files whenever a field in the autodoc looks incomplete.
 
 `GET /api/agent` is the exception: it returns the raw documentation object, not the normal success envelope.
 
+## Real API access
+
+When the user asks to operate the real FluXo data, prefer the real cloud Agent API instead of a local dev server.
+
+- Base URL: `https://fluxo.agenda-aqui.com/api/agent`
+- API key env var: `AGENT_API_KEY`
+- Recommended headers:
+  - `Authorization: Bearer $AGENT_API_KEY`
+  - `User-Agent: OpenCode-Agent/1.0`
+  - `X-Agent-Name: <current agent name>`
+
+If `AGENT_API_KEY` is missing or rejected, stop and ask for the correct key instead of assuming the local app should be started.
+
 ## Discovery workflow
 
 1. Start at `GET /api/agent` to inspect the self-describing docs.
