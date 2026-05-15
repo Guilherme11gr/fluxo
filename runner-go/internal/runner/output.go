@@ -45,15 +45,15 @@ func formatJSONLExecutionLine(line string) string {
 	case "tool_result":
 		return formatToolResultEvent(part)
 	case "step_start":
-		return "[step] started"
+		return "── step ──"
 	case "step_end":
-		return "[step] completed"
+		return "── step ✓ ──"
 	case "result":
 		if text, _ := part["text"].(string); strings.TrimSpace(text) != "" {
-			return text
+			return "✓ " + text
 		}
 		if summary, _ := part["summary"].(string); strings.TrimSpace(summary) != "" {
-			return summary
+			return "✓ " + summary
 		}
 	}
 
@@ -72,11 +72,11 @@ func formatToolUseEvent(part map[string]interface{}) string {
 	if input != nil {
 		display := formatToolInput(toolName, input)
 		if display != "" {
-			return fmt.Sprintf(">> %s  %s", toolName, display)
+			return fmt.Sprintf("▸ %s  %s", toolName, display)
 		}
 	}
 
-	return fmt.Sprintf(">> %s", toolName)
+	return fmt.Sprintf("▸ %s", toolName)
 }
 
 func formatToolInput(toolName string, input interface{}) string {
@@ -136,7 +136,7 @@ func formatToolResultEvent(part map[string]interface{}) string {
 
 	state, _ := part["state"].(map[string]interface{})
 	if state == nil {
-		return fmt.Sprintf("<< %s", toolName)
+		return fmt.Sprintf("◊ %s", toolName)
 	}
 
 	status, _ := state["status"].(string)
@@ -146,21 +146,21 @@ func formatToolResultEvent(part map[string]interface{}) string {
 	case status == "error":
 		errMsg := extractErrorMessage(output)
 		if errMsg != "" {
-			return fmt.Sprintf("<< %s  ERROR: %s", toolName, truncateString(errMsg, 120))
+			return fmt.Sprintf("✗ %s  %s", toolName, truncateString(errMsg, 120))
 		}
-		return fmt.Sprintf("<< %s  ERROR", toolName)
+		return fmt.Sprintf("✗ %s", toolName)
 
 	case output != nil:
 		summary := summarizeToolOutput(toolName, output)
 		if summary != "" {
-			return fmt.Sprintf("<< %s  %s", toolName, summary)
+			return fmt.Sprintf("✓ %s  %s", toolName, summary)
 		}
 	}
 
 	if status != "" {
-		return fmt.Sprintf("<< %s  %s", toolName, status)
+		return fmt.Sprintf("◊ %s  %s", toolName, status)
 	}
-	return fmt.Sprintf("<< %s", toolName)
+	return fmt.Sprintf("◊ %s", toolName)
 }
 
 func summarizeToolOutput(toolName string, output interface{}) string {
@@ -338,21 +338,24 @@ func FormatStreamEvent(parsed *ParsedStreamEvent) string {
 		if parsed.Input != nil {
 			display := formatToolInput(parsed.ToolName, parsed.Input)
 			if display != "" {
-				return fmt.Sprintf(">> %s  %s", parsed.ToolName, display)
+				return fmt.Sprintf("▸ %s  %s", parsed.ToolName, display)
 			}
 		}
-		return fmt.Sprintf(">> %s", parsed.ToolName)
+		return fmt.Sprintf("▸ %s", parsed.ToolName)
 	case EventToolResult:
 		return formatToolResultEvent(map[string]interface{}{
 			"tool":  parsed.ToolName,
 			"state": map[string]interface{}{"status": parsed.Status, "output": parsed.Output},
 		})
 	case EventStepStart:
-		return "[step] started"
+		return "── step ──"
 	case EventStepEnd:
-		return "[step] completed"
+		return "── step ✓ ──"
 	case EventResult:
-		return parsed.Text
+		if parsed.Text != "" {
+			return "✓ " + parsed.Text
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -466,6 +469,39 @@ func filterReadableTextParts(textParts []string, finalResult string) []string {
 	return filtered
 }
 
+func FormatStreamForDisplay(raw string) string {
+	lines := strings.Split(raw, "\n")
+	var b strings.Builder
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		formatted := FormatExecutionEvent("stdout", line)
+		if formatted == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(formatted)
+	}
+	return b.String()
+}
+
+func FormatDuration(seconds float64) string {
+	if seconds < 1 {
+		return "<1s"
+	}
+	totalSecs := int(seconds)
+	mins := totalSecs / 60
+	secs := totalSecs % 60
+	if mins > 0 {
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	}
+	return fmt.Sprintf("%ds", secs)
+}
+
 func FormatExecutionComment(agentName, tool string, success bool, elapsed float64, output string, exitCode int) string {
 	var b strings.Builder
 
@@ -477,7 +513,7 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 
 	b.WriteString(fmt.Sprintf("**Agent:** %s  \n", agentName))
 	b.WriteString(fmt.Sprintf("**Tool:** %s  \n", tool))
-	b.WriteString(fmt.Sprintf("**Duration:** %.0fs  \n", elapsed))
+	b.WriteString(fmt.Sprintf("**Duration:** %s  \n", FormatDuration(elapsed)))
 	if !success && exitCode != 0 {
 		b.WriteString(fmt.Sprintf("**Exit Code:** %d  \n", exitCode))
 	}
@@ -507,10 +543,9 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 		if len(streamBody) > maxLen {
 			streamBody = streamBody[:maxLen] + "\n\n*(output truncated)*"
 		}
-		b.WriteString("### Stream\n\n")
-		b.WriteString("```\n")
+		b.WriteString("<details>\n<summary>Stream Output</summary>\n\n```\n")
 		b.WriteString(streamBody)
-		b.WriteString("\n```\n")
+		b.WriteString("\n```\n\n</details>\n")
 	}
 
 	return b.String()
@@ -553,7 +588,7 @@ func extractCommentStreamBody(raw string) string {
 		}
 		parsed := ParseStreamEvent(line)
 		switch parsed.Type {
-		case EventToolUse, EventToolResult, EventResult:
+		case EventToolUse, EventToolResult, EventResult, EventStepStart, EventStepEnd:
 			if formatted := FormatStreamEvent(parsed); formatted != "" {
 				parts = append(parts, formatted)
 			}
