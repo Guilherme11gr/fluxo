@@ -60,7 +60,7 @@ typecheck*.log
 .hermes/
 .playwright-mcp/
 .vscode/
-skills/
+/skills/
 
 # test output
 test-results/
