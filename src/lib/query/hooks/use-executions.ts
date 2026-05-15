@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCurrentOrgId, isOrgIdValid } from '@/lib/query/hooks/use-org-id';
 import { CACHE_TIMES } from '@/lib/query/cache-config';
 import { queryKeys } from '@/lib/query/query-keys';
+import { toast } from 'sonner';
 
 interface ExecutionListResult {
   items: Record<string, unknown>[];
@@ -83,5 +84,35 @@ export function useExecutionEvents(id: string, afterSeq?: number, enabled = true
     enabled: enabled && !!id && isOrgIdValid(orgId),
     refetchInterval: 3000,
     ...CACHE_TIMES.STANDARD,
+  });
+}
+
+async function killExecution(id: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/executions/${id}/finalize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      status: 'CANCELLED',
+      errorMessage: 'Execution killed by user',
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to kill execution');
+  const json = await res.json();
+  return json.data;
+}
+
+export function useKillExecution() {
+  const queryClient = useQueryClient();
+  const orgId = useCurrentOrgId();
+
+  return useMutation({
+    mutationFn: killExecution,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.executions.list(orgId) });
+      toast.success('Execução finalizada');
+    },
+    onError: () => {
+      toast.error('Erro ao finalizar execução');
+    },
   });
 }

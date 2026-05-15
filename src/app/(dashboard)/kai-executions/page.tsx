@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useExecutionEvents, useExecutions, useLiveExecution } from '@/lib/query/hooks/use-executions';
+import { useExecutionEvents, useExecutions, useLiveExecution, useKillExecution } from '@/lib/query/hooks/use-executions';
 import { useAgents } from '@/lib/query/hooks/use-agents';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Clock, CheckCircle2, XCircle, AlertTriangle, Play, X } from 'lucide-react';
+import { Loader2, Clock, CheckCircle2, XCircle, AlertTriangle, Play, X, StopCircle } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
   CLAIMED: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
@@ -62,6 +62,7 @@ export default function ExecutionsPage() {
   const effectiveFilter = statusFilter && statusFilter !== 'ALL' ? { status: statusFilter } : undefined;
   const { data, isLoading } = useExecutions(effectiveFilter);
   const { data: agents } = useAgents();
+  const killExecutionMutation = useKillExecution();
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   const { data: selectedExecution } = useLiveExecution(selectedExecutionId ?? '', !!selectedExecutionId);
   const { data: executionEvents } = useExecutionEvents(selectedExecutionId ?? '', undefined, !!selectedExecutionId);
@@ -171,9 +172,25 @@ export default function ExecutionsPage() {
             <h3 className="font-semibold text-sm">Detalhes da Execução</h3>
             <div className="flex items-center gap-2">
               {(String((selectedExecution as ExecutionRecord).status) === 'CLAIMED' || String((selectedExecution as ExecutionRecord).status) === 'RUNNING') && (
-                <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 animate-pulse">
-                  Live
-                </Badge>
+                <>
+                  <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 animate-pulse">
+                    Live
+                  </Badge>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1"
+                    disabled={killExecutionMutation.isPending}
+                    onClick={() => {
+                      if (selectedExecutionId && confirm('Tem certeza que deseja matar esta execução?')) {
+                        killExecutionMutation.mutate(selectedExecutionId);
+                      }
+                    }}
+                  >
+                    <StopCircle className="h-3.5 w-3.5" />
+                    Matar
+                  </Button>
+                </>
               )}
               <Button variant="ghost" size="sm" onClick={() => setSelectedExecutionId(null)}>
                 <X className="h-4 w-4" />

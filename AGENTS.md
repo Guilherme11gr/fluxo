@@ -1,144 +1,65 @@
-# AGENTS.md — FluXo (jt-kill)
+# AGENTS.md — jt-kill / FluXo
 
-## Commands
+## Read First
+
+- Prefer executable config over prose. Repo docs still mix `FluXo`, `Jira Killer`, and `Agenda Aqui`.
+- Keep `.github/instructions/copilot-instructions.md` and this file as the main agent guidance.
+- Ignore `.github/agents/*` for repo conventions: it targets another project, says light mode first, and references a non-existent `npm run type-check` script.
+
+## Root App
+
+- Main app is the root package: Next.js 16 App Router, React 19, strict TypeScript, Tailwind v4, Prisma, `better-auth`.
+- Dev server is `http://localhost:3005`: `npm run dev`.
+- `npm run dev:turbo` uses plain `next dev`; the default `dev` and `build` scripts intentionally use `--webpack`.
 
 ```bash
-npm run dev          # Dev server on :3005 (uses --webpack flag)
-npm run build        # prisma generate → rm .next → next build --webpack
-npm run typecheck    # tsc --noEmit
-npm run lint         # next lint
-npm run test         # vitest (env: node, pattern: src/**/*.spec.ts(x))
-npm run db:generate   # prisma generate
-npm run db:push      # prisma db push
-npm run db:migrate    # prisma migrate dev
-npm run db:studio     # prisma studio
+npm run build       # prisma generate, delete .next, next build --webpack
+npm run test        # vitest
+npm run typecheck   # tsc --noEmit
+npm run lint        # next lint
 ```
 
-**Quality gate (required before REVIEW/DONE):** `npm run build && npm run test && npm run typecheck`
+- Focused test: `npm run test -- src/path/to/file.spec.ts`
+- Root Vitest only picks up `src/**/*.spec.ts(x)` and runs in `node`; browser/component test setup is not part of the root app.
+- `npm run build` already runs `prisma generate`. Use `npm run db:generate` only when you need a Prisma client refresh without a full build.
+- Prefer Prisma scripts for schema work: `npm run db:push` for dev sync, `npm run db:migrate` for tracked migrations. Older docs that say `mcp supabase` are stale for this repo.
 
-Pre-commit hook is disabled (`.husky/pre-commit.disabled`). Husky is present but not actively gating.
+## Verification
 
-## Architecture
+- Current repo-local handoff check is `npm run build && npm run test && npm run typecheck`; run `npm run lint` too when touching app code.
+- GitHub Actions currently only runs `npm ci` in the `verify` job. Do not assume CI will catch build, test, or typecheck failures.
 
-Next.js 16+ App Router monorepo-ish project. TypeScript strict mode. Runs on port **3005**.
+## Architecture Reality
 
-```
-src/
-  app/            # Next.js routes (thin controllers only)
-  domain/use-cases/  # Pure business logic, no framework deps
-  infra/adapters/     # Supabase, external API implementations
-  server/services/   # SSR/BFF composition, React cache/revalidateTag
-  shared/             # DTOs, types, validators, utils, errors, HTTP helpers
-  hooks/              # React hooks (extract from components)
-  components/         # UI (shadcn/ui + Tailwind v4)
-  config/             # App config
-  providers/          # React context providers
-  lib/                # Misc shared lib
-  types/              # Global type defs
-```
+- `src/domain/use-cases/**` is the intended home for business logic and usually has adjacent `*.spec.ts` tests.
+- `src/infra/adapters/prisma/index.ts` exports the Prisma singleton plus repository instances. Many existing API routes already import repositories directly from there.
+- When editing an existing endpoint, match the local pattern unless the task is explicitly an architecture refactor; do not create broad route-to-use-case churn as incidental cleanup.
+- Protected user routes should use `extractAuthenticatedTenant()` from `src/shared/http/auth.helpers.ts`. It resolves org context from `x-org-id`, then `jt-current-org`, then the default membership.
+- Agent API routes under `src/app/api/agent/**` use `extractAgentAuth()` instead of session auth.
 
-**Critical layering rules:**
-- Routes → call use cases/services → never contain business logic or direct data access
-- Use cases are pure/testable, depend only on port interfaces, never know about HTTP/Next.js
-- `server/services` are for SSR composition + caching, not for re-implementing business rules
-- `infra/adapters` implement ports — Supabase, external APIs — no domain logic here
+## Domain Gotchas
 
-## Auth & Multi-Tenancy
+- Auth is `better-auth` with Prisma adapter, not Supabase Auth.
+- Multi-tenant model is `Organization -> Project -> Epic -> Feature -> Task`; task workflow includes `QA_READY`.
+- Prisma uses multi-schema Postgres (`auth`, `public`). `DATABASE_URL` should be the Supabase session-pooler URL; `DIRECT_URL` should be the direct `5432` URL for migrations.
+- Dates: use only `@/shared/utils/date-utils`; backend/database stay UTC, UI uses `America/Sao_Paulo`.
+- Money: keep cents in domain/use cases; format only at the UI boundary.
+- Phone display uses `formatPhone()`.
 
-- Auth: **better-auth** (not Supabase Auth)
-- Multi-tenant: all entities belong to an Organization (tenantId)
-- Protected routes MUST use `extractAuthenticatedTenant(supabase)` from `shared/http/`
-- DB uses Prisma with multi-schema (`auth` + `public`)
+## UI
 
-## Database
+- Tailwind CSS only; shadcn config is `new-york` with CSS variables in `src/app/globals.css`.
+- Dark theme is the real default (`ThemeProvider` uses `defaultTheme="dark"` and `enableSystem={false}`), even though some old docs say otherwise.
 
-- **Prisma ORM** with PostgreSQL (Supabase)
-- Multi-schema: `auth` and `public` (see `prisma/schema.prisma` — `previewFeatures = ["multiSchema"]`)
-- `DATABASE_URL` must use session pooler (port 6543, pgbouncer=true)
-- `DIRECT_URL` must use direct connection (port 5432) — needed for migrations
-- Schema changes: `npm run db:push` for dev, `npm run db:migrate` for tracked migrations
+## Separate Packages And Tools
 
-## Key Conventions
+- `packages/agent-sdk` is a local `file:` dependency used by the app (`@guilherme/agent-sdk/{next,react,core}`). If you edit it, run `npm run build` in `packages/agent-sdk`; root checks do not rebuild it for you.
+- `mcp-server/` is its own package and tsconfig. `.mcp.json` points at `mcp-server/dist/index.js`, so source changes require `npm run build` in `mcp-server`.
+- `runner/` and `runner-go/` are standalone worker tools, not part of the root app quality gate.
+- `runner/`: `node runner.js --once` runs a single pass.
+- `runner-go/`: `go build -o fluxo-runner .` builds the binary; `./fluxo-runner run --once` runs one pass.
+- The checked-in `runner/config.yaml` currently points at another repo/workdir; do not treat it as local setup for `jt-kill`.
 
-### Date Handling (CRITICAL)
-- ALWAYS use `@/shared/utils/date-utils` — NEVER use date-fns directly
-- Backend/DB: always UTC. UI: always `America/Sao_Paulo`
-- See `docs/guides/date-handling.md` before touching dates
+## Env Gotcha
 
-### Money
-- Store in **cents** (integer) in domain/use-cases
-- Format only at UI boundary via `formatPrice()` from `@/shared/utils/formatters`
-
-### Phone
-- Display with mask via `formatPhone()`: `(XX) XXXXX-XXXX`
-
-### Styling
-- Tailwind CSS v4 only — NO separate CSS files or CSS-in-JS
-- shadcn/ui components (`new-york` style, see `components.json`)
-- Dark mode first and mandatory
-- Animations: prefer opacity/color/transform — avoid animating dimensions (scale/width/height)
-
-### Path alias
-- `@/*` maps to `./src/*`
-
-### Prisma Client
-- Auto-generated on `npm install` via `postinstall` script
-- If Prisma models change, run `npm run db:generate`
-
-## Env Setup
-
-Copy `.env.example` → `.env.local`. Required values:
-- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `DATABASE_URL` (pooler) / `DIRECT_URL` (direct)
-- `DEEPSEEK_API_KEY` (or configure `FLUXO_CHAT_*` / `ZAI_*` for alternative AI provider)
-- `ADMIN_SECRET` (for protected API endpoints)
-- Optional: `TELEGRAM_BOT_TOKEN`, GitHub integration vars
-
-## Sub-projects
-
-### MCP Server (`mcp-server/`)
-- Separate `package.json` / `tsconfig.json` — NOT part of main build
-- Dev: `cd mcp-server && npm run dev` (tsx)
-- Build: `cd mcp-server && npm run build`
-- Registered in `.mcp.json` at repo root
-- 27 tools for task/epic/feature/project management via Agent API
-
-### Runner (`runner/`)
-- Node.js polling agent for task execution
-- Config: `runner/config.yaml`
-- Run: `node runner/runner.js` (continuous) or `--once` flag
-
-### Runner Go (`runner-go/`)
-- Go binary alternative to `runner/`
-- Build: `go build -o fluxo-runner .`
-
-### Agent SDK (`packages/agent-sdk/`)
-- Local npm package linked via `"file:packages/agent-sdk"` in root package.json
-- Consumer skill for FluXo's Agent API
-
-## Deploy
-
-- **Vercel** (primary): auto-deploy on push to `main`
-- **VPS** (Docker): CI builds image → rsync to VPS → deploy script
-- See `deploy/fluxo/` for VPS deploy scripts
-- Build command: `prisma generate && next build --webpack` (standalone output)
-- After visual changes: increment `VERSION` in `public/sw.js` for PWA cache bust
-
-## Testing
-
-- Vitest, node environment, files matching `src/**/*.spec.ts(x)`
-- No snapshot or integration test infrastructure observed
-- Use cases should have matching `.md` documentation (per project convention)
-
-## Task Status Workflow
-
-`BACKLOG → TODO → DOING → REVIEW → QA_READY → DONE`
-
-Bug workflow: QA can click "Report Bug" on a Feature, creating a linked BUG Task that blocks the Feature.
-
-## Existing Instruction Sources
-
-- `.github/instructions/copilot-instructions.md` — detailed architecture rules, coding standards, quality gates
-- `.clinerules/mcp-jt-kill.md` — MCP server usage guide for AI agents
-- `AGENT_API.md` — Agent API endpoint reference
-- `docs/AI-CONTEXT.md` — AI context summary
+- `.env.example` still shows `NEXT_PUBLIC_APP_URL=http://localhost:3000`, but the actual dev server is `:3005`. For auth, GitHub install, or local callback work, use `http://localhost:3005` for app/auth URLs.

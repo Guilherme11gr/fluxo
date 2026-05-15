@@ -672,7 +672,7 @@ ${thought}
    */
   async summarizeOldMessages(messages) {
     const prompt = `Summarize this conversation in 2-3 sentences, keeping key information:
-${messages.map((m) => `${m.role}: ${m.content}`).join("\n")}`;
+${messages.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.filter((p) => p.type === "text").map((p) => p.text).join(" ") + (m.content.some((p) => p.type === "image_url") ? " [image attached]" : "") : String(m.content)}`).join("\n")}`;
     try {
       const { provider } = this.config;
       const url = `${provider.baseUrl}/chat/completions`;
@@ -841,10 +841,11 @@ function createAgentRoute(config) {
     try {
       const body = await req.json();
       const routeContext = { req, body };
-      const { message, sessionId, retryLast, confirmId, confirmed } = body;
+      const { message, sessionId, retryLast, confirmId, confirmed, images } = body;
       console.log("[AgentSDK] Request received:", {
         sessionId,
         message: message?.substring(0, 50),
+        imagesCount: images?.length || 0,
         retryLast,
         confirmId,
         confirmed
@@ -894,7 +895,16 @@ function createAgentRoute(config) {
           );
         }
       } else {
-        history.push({ role: "user", content: message });
+        const hasImages = Array.isArray(images) && images.length > 0;
+        if (hasImages) {
+          const contentParts = [
+            { type: "text", text: message },
+            ...images.map((img) => ({ type: "image_url", image_url: { url: img.data } }))
+          ];
+          history.push({ role: "user", content: contentParts });
+        } else {
+          history.push({ role: "user", content: message });
+        }
       }
       const provider = await resolveAgentRouteValue(config.provider, routeContext);
       const systemPrompt = await resolveAgentRouteValue(config.systemPrompt, routeContext);
