@@ -18,6 +18,12 @@ describe('createTask', () => {
     vi.clearAllMocks();
   });
 
+  const mockFeatureRepository = {
+    findById: vi.fn(),
+    findSystemFeature: vi.fn(),
+    update: vi.fn(),
+  } as any;
+
   it('should create a task successfully', async () => {
     const input = {
       orgId: 'org-1',
@@ -51,13 +57,51 @@ describe('createTask', () => {
     };
 
     vi.mocked(mockRepo.create).mockResolvedValue(expectedTask);
+    vi.mocked(mockFeatureRepository.findById).mockResolvedValue({ id: 'feat-1', status: 'TODO' });
 
     const result = await createTask(input, {
       taskRepository: mockRepo,
-      featureRepository: { findById: vi.fn().mockResolvedValue({ id: 'feat-1' }) } as any
+      featureRepository: mockFeatureRepository,
     });
 
     expect(result).toEqual(expectedTask);
     expect(mockRepo.create).toHaveBeenCalledWith(input);
+  });
+
+  it('should reopen a done feature when creating an active task', async () => {
+    const input = {
+      orgId: 'org-1',
+      featureId: 'feat-1',
+      title: 'Follow-up Task',
+      status: 'DOING' as const,
+    };
+
+    vi.mocked(mockFeatureRepository.findById).mockResolvedValue({ id: 'feat-1', status: 'DONE' });
+    vi.mocked(mockRepo.create).mockResolvedValue({
+      id: 'task-2',
+      orgId: 'org-1',
+      featureId: 'feat-1',
+      projectId: 'proj-1',
+      localId: 2,
+      title: 'Follow-up Task',
+      description: null,
+      status: 'DOING',
+      type: 'TASK',
+      priority: 'MEDIUM',
+      points: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      modules: [],
+      assigneeId: null,
+      blocked: false,
+      statusChangedAt: null,
+    } as Task);
+
+    await createTask(input, {
+      taskRepository: mockRepo,
+      featureRepository: mockFeatureRepository,
+    });
+
+    expect(mockRepo.create).toHaveBeenCalledWith(expect.objectContaining({ featureId: 'feat-1', status: 'DOING' }));
   });
 });

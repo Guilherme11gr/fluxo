@@ -4,6 +4,9 @@ export * from './date-utils';
 // Formatters
 export * from './formatters';
 
+// Task status helpers
+export * from './task-status';
+
 // Rate limiting
 export * from './rate-limit';
 
@@ -35,4 +38,3 @@ export {
   RateLimitError,
   handleError,
 } from '../errors';
-

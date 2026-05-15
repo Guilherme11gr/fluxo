@@ -2,6 +2,7 @@
  * ProjectDoc Repository - Prisma Adapter
  */
 import type { PrismaClient, ProjectDoc as PrismaProjectDoc } from '@prisma/client';
+import { NotFoundError, ValidationError } from '@/shared/errors';
 
 export interface ProjectDoc {
   id: string;
@@ -35,11 +36,17 @@ export interface UpdateProjectDocInput {
 export class ProjectDocRepository {
   constructor(private prisma: PrismaClient) { }
 
+  private dedupeTagIds(tagIds?: string[]): string[] {
+    return tagIds ? Array.from(new Set(tagIds)) : [];
+  }
+
   /**
    * Create a new project doc
    */
   async create(data: CreateProjectDocInput): Promise<ProjectDoc> {
     return this.prisma.$transaction(async (tx) => {
+      const tagIds = this.dedupeTagIds(data.tagIds);
+
       // 1. Create doc
       const doc = await tx.projectDoc.create({
         data: {
@@ -51,23 +58,23 @@ export class ProjectDocRepository {
       });
 
       // 2. Validate and assign tags (if provided)
-      if (data.tagIds && data.tagIds.length > 0) {
+      if (tagIds.length > 0) {
         // Validate tags belong to same project and org
         const validTagCount = await tx.projectTag.count({
           where: {
-            id: { in: data.tagIds },
+            id: { in: tagIds },
             projectId: data.projectId,
             orgId: data.orgId,
           },
         });
 
-        if (validTagCount !== data.tagIds.length) {
-          throw new Error('Uma ou mais tags não pertencem a este projeto');
+        if (validTagCount !== tagIds.length) {
+          throw new ValidationError('Uma ou mais tags são inválidas ou não pertencem a este projeto');
         }
 
         // Create tag assignments
         await tx.docTagAssignment.createMany({
-          data: data.tagIds.map((tagId) => ({
+          data: tagIds.map((tagId) => ({
             docId: doc.id,
             tagId,
           })),
@@ -139,6 +146,8 @@ export class ProjectDocRepository {
    */
   async update(id: string, orgId: string, data: UpdateProjectDocInput): Promise<ProjectDoc> {
     return this.prisma.$transaction(async (tx) => {
+      const tagIds = data.tagIds === undefined ? undefined : this.dedupeTagIds(data.tagIds);
+
       // 1. Verify doc exists and get projectId
       const existing = await tx.projectDoc.findFirst({
         where: { id, orgId },
@@ -146,11 +155,11 @@ export class ProjectDocRepository {
       });
 
       if (!existing) {
-        throw new Error('ProjectDoc not found');
+        throw new NotFoundError('Documento');
       }
 
       // 2. Update doc fields
-      const { tagIds, ...docData } = data;
+      const { tagIds: _tagIds, ...docData } = data;
       const doc = await tx.projectDoc.update({
         where: { id },
         data: docData,
@@ -169,7 +178,7 @@ export class ProjectDocRepository {
           });
 
           if (validTagCount !== tagIds.length) {
-            throw new Error('Uma ou mais tags não pertencem a este projeto');
+            throw new ValidationError('Uma ou mais tags são inválidas ou não pertencem a este projeto');
           }
         }
 
@@ -195,7 +204,7 @@ export class ProjectDocRepository {
     // Verify belongs to org before delete
     const existing = await this.findById(id, orgId);
     if (!existing) {
-      throw new Error('ProjectDoc not found');
+      throw new NotFoundError('Documento');
     }
 
     await this.prisma.projectDoc.delete({

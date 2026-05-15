@@ -1,9 +1,10 @@
 import type { Task, TaskType, TaskPriority, StoryPoints, TaskFocus } from '@/shared/types';
 import type { TaskRepository, FeatureRepository } from '@/infra/adapters/prisma';
+import { NotFoundError, ValidationError } from '@/shared/errors';
 
 export interface CreateTaskInput {
   orgId: string;
-  projectId: string;
+  projectId?: string;
   featureId?: string | null;
   title: string;
   description?: string | null;
@@ -40,11 +41,20 @@ export async function createTask(
 
   // Magic Link: se não informou feature, usar Sustentação
   if (!featureId) {
+    if (!input.projectId) {
+      throw new ValidationError('projectId é obrigatório quando featureId não é informado');
+    }
+
     const sustentation = await featureRepository.findSystemFeature(input.projectId);
     if (!sustentation) {
       throw new Error('Feature de Sustentação não encontrada. O projeto pode estar corrompido.');
     }
     featureId = sustentation.id;
+  }
+
+  const feature = await featureRepository.findById(featureId, input.orgId);
+  if (!feature) {
+    throw new NotFoundError('Feature', featureId);
   }
 
   return await taskRepository.create({

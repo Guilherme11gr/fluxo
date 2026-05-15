@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { AgentAuthError } from './agent-auth';
+import { DomainError } from '@/shared/errors';
 
 interface AgentSuccessResponse<T> {
   success: true;
@@ -70,6 +71,10 @@ export function agentError(
 export function handleAgentError(error: unknown): NextResponse<AgentErrorResponse> {
   if (error instanceof AgentAuthError) {
     return agentError('AUTH_ERROR', error.message, error.statusCode);
+  }
+
+  if (error instanceof DomainError) {
+    return agentError(error.code, error.message, error.statusCode);
   }
 
   if (error instanceof Error) {

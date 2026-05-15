@@ -63,7 +63,7 @@ describe('updateTask', () => {
 
     const result = await updateTask(id, orgId, userId, input, { 
       taskRepository: mockRepo,
-      auditLogRepository: mockAuditRepo
+      auditLogRepository: mockAuditRepo,
     });
 
     expect(result).toEqual(updatedTask);
@@ -110,7 +110,7 @@ describe('updateTask', () => {
 
     await updateTask(id, orgId, userId, input, { 
       taskRepository: mockRepo,
-      auditLogRepository: mockAuditRepo
+      auditLogRepository: mockAuditRepo,
     });
 
     expect(mockAuditRepo.log).toHaveBeenCalledWith(
@@ -163,7 +163,7 @@ describe('updateTask', () => {
 
     await updateTask(id, orgId, userId, input, { 
       taskRepository: mockRepo,
-      auditLogRepository: mockAuditRepo
+      auditLogRepository: mockAuditRepo,
     }, {
       source: 'agent',
       agentName: 'Gepeto',
@@ -201,7 +201,7 @@ describe('updateTask', () => {
 
     await expect(updateTask(id, orgId, userId, input, { 
       taskRepository: mockRepo,
-      auditLogRepository: mockAuditRepo
+      auditLogRepository: mockAuditRepo,
     }))
       .rejects.toThrow(NotFoundError);
   });

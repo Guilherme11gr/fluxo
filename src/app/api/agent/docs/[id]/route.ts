@@ -43,7 +43,8 @@ export async function GET(
 
 const updateDocSchema = z.object({
   title: z.string().min(1).optional(),
-  content: z.string().optional(),
+  content: z.string().min(1, 'Content is required').optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
 });
 
 export async function PATCH(
@@ -107,10 +108,12 @@ export async function PATCH(
         authMethod,
         previousTitle: existing.title,
         nextTitle: updated.title,
+        tagIds: updateData.tagIds,
       },
     }).catch(() => {});
 
-    return agentSuccess(updated);
+    const result = await projectDocRepository.findByIdWithTags(id, orgId);
+    return agentSuccess(result ?? updated);
   } catch (error) {
     return handleAgentError(error);
   }

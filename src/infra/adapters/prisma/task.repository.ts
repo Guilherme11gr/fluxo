@@ -11,6 +11,7 @@ import type {
 } from '@/shared/types';
 import { buildReadableId } from '@/shared/types/task.types';
 import { ValidationError } from '@/shared/errors';
+import { ACTIVE_TASK_STATUSES } from '@/shared/utils/task-status';
 
 export interface CreateTaskInput {
   orgId: string;
@@ -48,66 +49,94 @@ export interface UpdateTaskInput {
 export class TaskRepository {
   constructor(private prisma: PrismaClient) { }
 
+  private async reopenFeatureIfNeeded(
+    tx: Pick<PrismaClient, 'feature'>,
+    featureId: string,
+    orgId: string,
+    status: TaskStatus | undefined
+  ) {
+    if (!status || !ACTIVE_TASK_STATUSES.includes(status)) {
+      return;
+    }
+
+    const feature = await tx.feature.findFirst({
+      where: { id: featureId, orgId },
+      select: { id: true, status: true },
+    });
+
+    if (feature?.status === 'DONE') {
+      await tx.feature.update({
+        where: { id: featureId },
+        data: { status: 'DOING' },
+      });
+    }
+  }
+
   /**
    * Create task with auto-generated local_id
    * Trigger set_task_local_id() handles local_id generation
    */
   async create(input: CreateTaskInput): Promise<Task> {
-    // Fetch feature with project data for validation
-    const feature = await this.prisma.feature.findFirst({
-      where: {
-        id: input.featureId,
-        epic: { project: { orgId: input.orgId } },
-      },
-      select: {
-        epicId: true,
-        epic: {
-          select: {
-            projectId: true,
-            project: { select: { modules: true } }
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Fetch feature with project data for validation
+      const feature = await tx.feature.findFirst({
+        where: {
+          id: input.featureId,
+          epic: { project: { orgId: input.orgId } },
+        },
+        select: {
+          id: true,
+          status: true,
+          epicId: true,
+          epic: {
+            select: {
+              projectId: true,
+              project: { select: { modules: true } }
+            }
           }
-        }
-      },
-    });
+        },
+      });
 
-    if (!feature) {
-      throw new ValidationError(
-        `Feature ${input.featureId} não encontrada ou não pertence à organização`
-      );
-    }
-
-    // Validate modules exist in project (if provided)
-    if (input.modules && input.modules.length > 0) {
-      const projectModules = feature.epic.project.modules;
-      const invalidModules = input.modules.filter(m => !projectModules.includes(m));
-      if (invalidModules.length > 0) {
+      if (!feature) {
         throw new ValidationError(
-          `Módulos inválidos: ${invalidModules.join(', ')}. Módulos válidos: ${projectModules.join(', ') || 'nenhum'}`
+          `Feature ${input.featureId} não encontrada ou não pertence à organização`
         );
       }
-    }
 
-    const result = await this.prisma.task.create({
-      data: {
-        orgId: input.orgId,
-        projectId: feature.epic.projectId, // Will be verified by trigger
-        featureId: input.featureId,
-        // Calculate next localId (bypass missing trigger)
-        localId: await this.getNextLocalId(feature.epic.projectId),
-        title: input.title,
-        description: input.description,
-        status: input.status ?? 'BACKLOG',
-        type: input.type ?? 'TASK',
-        priority: input.priority ?? 'MEDIUM',
-        points: input.points ?? null,
-        modules: input.modules ?? [],
-        assigneeId: input.assigneeId,
-        createdBy: input.createdBy,
-        focus: input.focus ?? null,
-      },
+      // Validate modules exist in project (if provided)
+      if (input.modules && input.modules.length > 0) {
+        const projectModules = feature.epic.project.modules;
+        const invalidModules = input.modules.filter(m => !projectModules.includes(m));
+        if (invalidModules.length > 0) {
+          throw new ValidationError(
+            `Módulos inválidos: ${invalidModules.join(', ')}. Módulos válidos: ${projectModules.join(', ') || 'nenhum'}`
+          );
+        }
+      }
+
+      const status = input.status ?? 'BACKLOG';
+      await this.reopenFeatureIfNeeded(tx, input.featureId, input.orgId, status);
+
+      return tx.task.create({
+        data: {
+          orgId: input.orgId,
+          projectId: feature.epic.projectId,
+          featureId: input.featureId,
+          localId: await this.getNextLocalId(feature.epic.projectId),
+          title: input.title,
+          description: input.description,
+          status,
+          type: input.type ?? 'TASK',
+          priority: input.priority ?? 'MEDIUM',
+          points: input.points ?? null,
+          modules: input.modules ?? [],
+          assigneeId: input.assigneeId,
+          createdBy: input.createdBy,
+          focus: input.focus ?? null,
+        },
+      });
     });
 
-    // Cast points to StoryPoints type (Prisma returns number | null)
     return result as Task;
   }
 
@@ -414,15 +443,27 @@ export class TaskRepository {
     orgId: string,
     input: UpdateTaskInput
   ): Promise<Task> {
-    // OPTIMIZED: Use updateMany with orgId filter, then re-fetch if needed
-    const result = await this.prisma.task.updateMany({
-      where: { id, orgId },
-      data: input,
-    });
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.task.findFirst({
+        where: { id, orgId },
+        select: { id: true, featureId: true },
+      });
 
-    if (result.count === 0) {
-      throw new Error('Task not found');
-    }
+      if (!existing) {
+        throw new Error('Task not found');
+      }
+
+      await this.reopenFeatureIfNeeded(tx, existing.featureId, orgId, input.status);
+
+      const result = await tx.task.updateMany({
+        where: { id, orgId },
+        data: input,
+      });
+
+      if (result.count === 0) {
+        throw new Error('Task not found');
+      }
+    });
 
     const updated = await this.findById(id, orgId);
     if (!updated) throw new Error('Task not found');
@@ -592,15 +633,21 @@ export class TaskRepository {
       where.feature = { epicId };
     }
 
-    // General board filter: only show tasks from active features (TODO/DOING) and open epics
+    // General board filter: keep open epics only, but do not hide active tasks just because the
+    // parent feature is DONE. This avoids tasks disappearing from the board after follow-up work.
     if (!featureId && !epicId) {
-      const activeFeatures = { feature: { status: { in: ['TODO', 'DOING'] } } };
       const openEpics = { feature: { epic: { status: { not: 'CLOSED' } } } };
+      const visibleFeatureOrTask = {
+        OR: [
+          { feature: { status: { in: ['TODO', 'DOING'] } } },
+          { status: { in: ACTIVE_TASK_STATUSES } },
+        ],
+      };
 
       if (where.AND && Array.isArray(where.AND)) {
-        where.AND.push(activeFeatures, openEpics);
+        where.AND.push(visibleFeatureOrTask, openEpics);
       } else {
-        where.AND = [activeFeatures, openEpics];
+        where.AND = [visibleFeatureOrTask, openEpics];
       }
     }
 

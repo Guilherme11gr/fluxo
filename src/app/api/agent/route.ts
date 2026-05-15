@@ -224,6 +224,7 @@ const API_DOCS = {
       auth: true,
       query: {
         projectId: { type: 'uuid', required: true, description: 'Project ID' },
+        tagId: { type: 'uuid', required: false, description: 'Filter docs by assigned tag ID' },
         limit: { type: 'number', default: 50, max: 100 },
       },
       response: { data: '[Doc]', meta: '{ total: number }' },
@@ -237,6 +238,7 @@ const API_DOCS = {
         title: { type: 'string', required: true },
         projectId: { type: 'uuid', required: true },
         content: { type: 'string', required: true, description: 'Markdown content' },
+        tagIds: { type: 'uuid[]', required: false, description: 'Optional initial tags to assign to the doc' },
       },
       response: { data: 'Doc' },
     },
@@ -256,9 +258,51 @@ const API_DOCS = {
       params: { id: { type: 'uuid', required: true } },
       body: {
         title: { type: 'string', required: false },
-        content: { type: 'string', required: false },
+        content: { type: 'string', required: false, description: 'Markdown content, must be non-empty when provided' },
+        tagIds: { type: 'uuid[]', required: false, description: 'Replace all tags assigned to the doc' },
       },
       response: { data: 'Doc' },
+    },
+    {
+      method: 'GET',
+      path: '/api/agent/docs/:id/tags',
+      description: 'List all tags assigned to a doc',
+      auth: true,
+      params: { id: { type: 'uuid', required: true } },
+      response: { data: '[Tag]' },
+    },
+    {
+      method: 'PUT',
+      path: '/api/agent/docs/:id/tags',
+      description: 'Replace all tags assigned to a doc',
+      auth: true,
+      params: { id: { type: 'uuid', required: true } },
+      body: {
+        tagIds: { type: 'uuid[]', required: true, description: 'Complete set of tag IDs for the doc' },
+      },
+      response: { data: '[Tag]' },
+    },
+    {
+      method: 'POST',
+      path: '/api/agent/docs/:id/tags',
+      description: 'Append one or more tags to a doc without duplicating existing assignments',
+      auth: true,
+      params: { id: { type: 'uuid', required: true } },
+      body: {
+        tagIds: { type: 'uuid[]', required: true, description: 'One or more tag IDs to append' },
+      },
+      response: { data: '[Tag]' },
+    },
+    {
+      method: 'DELETE',
+      path: '/api/agent/docs/:id/tags/:tagId',
+      description: 'Remove a specific tag from a doc',
+      auth: true,
+      params: {
+        id: { type: 'uuid', required: true },
+        tagId: { type: 'uuid', required: true },
+      },
+      response: { data: '[Tag]' },
     },
     {
       method: 'DELETE',
