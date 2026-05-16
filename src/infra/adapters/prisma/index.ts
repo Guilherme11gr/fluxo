@@ -25,6 +25,7 @@ import { RunnerInstanceRepository } from './runner-instance.repository';
 import { ExecutionLeaseRepository } from './execution-lease.repository';
 import { AgentExecutionEventRepository } from './agent-execution-event.repository';
 import { ProjectRuntimeBindingRepository } from './project-runtime-binding.repository';
+import { ProjectMemoryRepository } from './project-memory.repository';
 
 // Singleton Prisma Client
 // https://www.prisma.io/docs/guides/performance-and-optimization/connection-management#prismaclient-in-long-running-applications
@@ -94,6 +95,7 @@ export const runnerInstanceRepository = new RunnerInstanceRepository(prisma);
 export const executionLeaseRepository = new ExecutionLeaseRepository(prisma);
 export const agentExecutionEventRepository = new AgentExecutionEventRepository(prisma);
 export const projectRuntimeBindingRepository = new ProjectRuntimeBindingRepository(prisma);
+export const projectMemoryRepository = new ProjectMemoryRepository(prisma);
 
 // Re-export for convenience
 export {
@@ -117,6 +119,7 @@ export {
   ExecutionLeaseRepository,
   AgentExecutionEventRepository,
   ProjectRuntimeBindingRepository,
+  ProjectMemoryRepository,
   DocSearchRepository,
   DocChunksRepository,
 };

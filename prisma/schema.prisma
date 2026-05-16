@@ -29,6 +29,8 @@ model Organization {
   memberships   OrgMembership[]
   pokerSessions PokerSession[]
   projectDocs   ProjectDoc[]
+  projectMemories ProjectMemory[]
+  projectMemoryChunks ProjectMemoryChunk[]
   projectNotes  ProjectNote[]
   projectTags          ProjectTag[]
   projects             Project[]
@@ -215,6 +217,7 @@ model Project {
   createdBy       String?       @map("created_by") @db.Uuid
   epics           Epic[]
   projectDocs     ProjectDoc[]
+  projectMemories ProjectMemory[]
   projectNotes    ProjectNote[]
   projectTags     ProjectTag[]
   executions      AgentExecution[]
@@ -307,6 +310,53 @@ model ProjectNote {
   @@index([projectId, status], map: "idx_project_notes_project_status")
   @@index([createdBy], map: "idx_project_notes_created_by")
   @@map("project_notes")
+  @@schema("public")
+}
+
+model ProjectMemory {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId        String               @map("org_id") @db.Uuid
+  projectId    String               @map("project_id") @db.Uuid
+  taskId       String?              @map("task_id") @db.Uuid
+  executionId  String?              @map("execution_id") @db.Uuid
+  kind         String               @db.VarChar(40)
+  title        String?
+  content      String
+  source       String               @default("execution_result") @db.VarChar(40)
+  contentHash  String               @map("content_hash") @db.VarChar(64)
+  metadata     Json                 @default("{}")
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  chunks       ProjectMemoryChunk[]
+  execution    AgentExecution?      @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  organization Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  task         Task?                @relation(fields: [taskId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([orgId, projectId, kind, contentHash], map: "uq_project_memories_org_project_kind_hash")
+  @@index([orgId, projectId], map: "idx_project_memories_org_project")
+  @@index([projectId, createdAt(sort: Desc)], map: "idx_project_memories_project_created")
+  @@index([taskId], map: "idx_project_memories_task")
+  @@index([executionId], map: "idx_project_memories_execution")
+  @@map("project_memories")
+  @@schema("public")
+}
+
+model ProjectMemoryChunk {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  memoryId     String         @map("memory_id") @db.Uuid
+  orgId        String         @map("org_id") @db.Uuid
+  content      String
+  chunkIndex   Int            @map("chunk_index")
+  embedding    Unsupported("vector")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  memory       ProjectMemory  @relation(fields: [memoryId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organization Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([memoryId, chunkIndex], map: "uq_project_memory_chunks_memory_chunk")
+  @@index([memoryId], map: "idx_project_memory_chunks_memory")
+  @@index([orgId], map: "idx_project_memory_chunks_org")
+  @@map("project_memory_chunks")
   @@schema("public")
 }
 
@@ -422,6 +472,7 @@ model Task {
   pokerSession    PokerSession?
   tagAssignments  TaskTagAssignment[]
   executions      AgentExecution[]
+  memories        ProjectMemory[]
   assignee        users?              @relation("TaskAssignee", fields: [assigneeId], references: [id], onUpdate: NoAction)
   assigneeAgent   Agent?              @relation("TaskAssigneeAgent", fields: [assigneeAgentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   creator         users?              @relation("TaskCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
@@ -1079,6 +1130,7 @@ model AgentExecution {
   task            Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
   project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   organization    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  memories        ProjectMemory[]
   lease           ExecutionLease?
   events          AgentExecutionEvent[]
 

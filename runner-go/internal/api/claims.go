@@ -80,6 +80,15 @@ type ClaimedTaskResponse struct {
 			PRNumber   *int     `json:"prNumber"`
 		} `json:"git"`
 	} `json:"previousExecution"`
+	RetrievedMemory []struct {
+		ID       string                 `json:"id"`
+		Kind     string                 `json:"kind"`
+		Title    string                 `json:"title"`
+		Content  string                 `json:"content"`
+		Source   string                 `json:"source"`
+		Score    float64                `json:"score"`
+		Metadata map[string]interface{} `json:"metadata"`
+	} `json:"retrievedMemory"`
 }
 
 func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResponse, error) {
@@ -241,6 +250,44 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 				parsed := int(prNumber)
 				result.PreviousExecution.Git.PRNumber = &parsed
 			}
+		}
+	}
+	if retrievedMemoryData, ok := data["retrievedMemory"].([]interface{}); ok {
+		result.RetrievedMemory = make([]struct {
+			ID       string                 `json:"id"`
+			Kind     string                 `json:"kind"`
+			Title    string                 `json:"title"`
+			Content  string                 `json:"content"`
+			Source   string                 `json:"source"`
+			Score    float64                `json:"score"`
+			Metadata map[string]interface{} `json:"metadata"`
+		}, 0, len(retrievedMemoryData))
+		for _, value := range retrievedMemoryData {
+			memoryData, ok := value.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			memory := struct {
+				ID       string                 `json:"id"`
+				Kind     string                 `json:"kind"`
+				Title    string                 `json:"title"`
+				Content  string                 `json:"content"`
+				Source   string                 `json:"source"`
+				Score    float64                `json:"score"`
+				Metadata map[string]interface{} `json:"metadata"`
+			}{}
+			memory.ID, _ = memoryData["id"].(string)
+			memory.Kind, _ = memoryData["kind"].(string)
+			memory.Title, _ = memoryData["title"].(string)
+			memory.Content, _ = memoryData["content"].(string)
+			memory.Source, _ = memoryData["source"].(string)
+			if score, ok := memoryData["score"].(float64); ok {
+				memory.Score = score
+			}
+			if metadata, ok := memoryData["metadata"].(map[string]interface{}); ok {
+				memory.Metadata = metadata
+			}
+			result.RetrievedMemory = append(result.RetrievedMemory, memory)
 		}
 	}
 

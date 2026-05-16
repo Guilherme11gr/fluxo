@@ -175,3 +175,85 @@ func TestClaimNextTaskParsesPreviousExecution(t *testing.T) {
 		t.Fatalf("expected previous exit code 1, got %+v", claimed.PreviousExecution.ExitCode)
 	}
 }
+
+func TestClaimNextTaskParsesRetrievedMemory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"task": {
+					"id": "task-1",
+					"orgId": "org-1",
+					"projectId": "project-1",
+					"featureId": "feature-1",
+					"localId": 12,
+					"title": "Retry execution",
+					"description": "desc",
+					"status": "DOING",
+					"type": "TASK",
+					"priority": "HIGH"
+				},
+				"execution": {
+					"id": "exec-2",
+					"orgId": "org-1",
+					"taskId": "task-1",
+					"projectId": "project-1",
+					"agentId": "agent-1",
+					"runnerInstanceId": "runner-1",
+					"status": "CLAIMED",
+					"tool": "opencode",
+					"model": "glm-5.1",
+					"metadata": {},
+					"startedAt": "2026-05-14T00:10:00Z"
+				},
+				"lease": {
+					"id": "lease-1",
+					"projectId": "project-1",
+					"executionId": "exec-2",
+					"expiresAt": "2026-05-14T00:11:00Z"
+				},
+				"runtimeBinding": {
+					"id": "binding-1",
+					"projectId": "project-1",
+					"runnerProfile": "windows-dev",
+					"hostOs": "windows",
+					"repoPath": "D:/code/fluxo",
+					"defaultBaseBranch": "main",
+					"allowedBranchPrefix": "agent/",
+					"executionMode": "branch_per_task",
+					"gitProvider": "github",
+					"prPolicy": "draft",
+					"gitPolicy": "branch_commit_pr",
+					"metadata": {}
+				},
+				"retrievedMemory": [
+					{
+						"id": "memory-1",
+						"kind": "memory",
+						"title": null,
+						"content": "Deploy em VPS usa docker compose no diretorio /srv/app.",
+						"source": "execution_result_v1",
+						"score": 4.2,
+						"metadata": {"candidateType": "memory_candidate"}
+					}
+				]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", "runner")
+	claimed, err := ClaimNextTask(client, ClaimNextTaskParams{
+		AgentID:          "agent-1",
+		RunnerInstanceID: "runner-1",
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextTask returned error: %v", err)
+	}
+	if claimed == nil || len(claimed.RetrievedMemory) != 1 {
+		t.Fatalf("expected one retrieved memory, got %+v", claimed)
+	}
+	if claimed.RetrievedMemory[0].Content != "Deploy em VPS usa docker compose no diretorio /srv/app." {
+		t.Fatalf("expected retrieved memory content to be parsed, got %q", claimed.RetrievedMemory[0].Content)
+	}
+}

@@ -10,6 +10,7 @@ import {
   taskRepository,
 } from '@/infra/adapters/prisma';
 import { updateTask } from '@/domain/use-cases/tasks/update-task';
+import { ingestExecutionMemory } from '@/domain/use-cases/memory/ingest-execution-memory';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,24 @@ const finalizeSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+type FinalizeExecutionStatus = 'SUCCESS' | 'FAILED' | 'TIMEOUT' | 'CANCELLED';
+
+function buildMemoryIngestionState(status: 'pending' | 'completed' | 'failed', updatedAt: Date) {
+  return {
+    status,
+    updatedAt: updatedAt.toISOString(),
+  };
+}
+
+function extractStoredResult(metadata: Record<string, unknown>): Record<string, unknown> | undefined {
+  const storedResult = metadata.result;
+  if (!storedResult || typeof storedResult !== 'object' || Array.isArray(storedResult)) {
+    return undefined;
+  }
+
+  return storedResult as Record<string, unknown>;
+}
+
 function extractGitPayload(data: {
   result?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -44,6 +63,23 @@ function extractGitPayload(data: {
   }
 
   return undefined;
+}
+
+function shouldIngestMemory(
+  execution: { status: FinalizeExecutionStatus; metadata: Record<string, unknown> },
+  effectiveStatus: FinalizeExecutionStatus,
+  result: Record<string, unknown> | undefined,
+): boolean {
+  if (effectiveStatus !== 'SUCCESS' || !result) {
+    return false;
+  }
+
+  const memoryState = execution.metadata.memoryIngestion;
+  if (!memoryState || typeof memoryState !== 'object' || Array.isArray(memoryState)) {
+    return true;
+  }
+
+  return (memoryState as Record<string, unknown>).status !== 'completed';
 }
 
 export async function POST(
@@ -68,49 +104,64 @@ export async function POST(
     const data = finalizeSchema.parse(body);
 
     const finishedAt = data.finishedAt ? new Date(data.finishedAt) : new Date();
+    const resultPayload = data.result ?? extractStoredResult(execution.metadata ?? {});
+    const effectiveExecutionStatus = (alreadyTerminal ? execution.status : data.status) as FinalizeExecutionStatus;
+    const shouldQueueMemoryIngestion = shouldIngestMemory(execution, effectiveExecutionStatus, resultPayload);
     const mergedMetadata = {
       ...(execution.metadata ?? {}),
       ...(data.metadata ?? {}),
-      ...(data.result ? { result: data.result } : {}),
+      ...(resultPayload ? { result: resultPayload } : {}),
+      ...(shouldQueueMemoryIngestion ? {
+        memoryIngestion: buildMemoryIngestionState('pending', finishedAt),
+      } : {}),
     };
-    const updatedExecution = alreadyTerminal
+    let updatedExecution = alreadyTerminal
       ? execution
       : await agentExecutionRepository.updateStatus(id, {
           status: data.status,
           output: data.output,
-          resultSummary: data.resultSummary,
-          errorMessage: data.errorMessage,
-          exitCode: data.exitCode,
+        resultSummary: data.resultSummary,
+        errorMessage: data.errorMessage,
+        exitCode: data.exitCode,
           duration: data.duration,
           finishedAt,
           lastHeartbeatAt: finishedAt,
           metadata: mergedMetadata,
         });
 
-    const taskUpdate: {
-      status?: 'BACKLOG' | 'TODO' | 'DOING' | 'REVIEW' | 'QA_READY' | 'DONE';
-      blocked: boolean;
-      blockReason?: string | null;
-      assigneeAgentId?: string | null;
-    } = {
-      blocked: data.status !== 'SUCCESS',
-    };
-
-    if (data.nextStatus) {
-      taskUpdate.status = data.nextStatus;
+    if (alreadyTerminal && shouldQueueMemoryIngestion) {
+      updatedExecution = await agentExecutionRepository.updateStatus(id, {
+        status: execution.status,
+        metadata: mergedMetadata,
+      });
     }
 
-    if (data.status === 'SUCCESS') {
-      taskUpdate.blocked = false;
-      if (data.nextAssigneeAgentId !== undefined) {
-        taskUpdate.assigneeAgentId = data.nextAssigneeAgentId;
-      }
-    } else {
-      taskUpdate.blockReason = data.blockReason ?? data.errorMessage ?? 'Execution failed';
-    }
+    let responseExecution = updatedExecution;
 
     const task = await taskRepository.findById(execution.taskId, auth.orgId);
-    if (task) {
+    if (task && !alreadyTerminal) {
+      const taskUpdate: {
+        status?: 'BACKLOG' | 'TODO' | 'DOING' | 'REVIEW' | 'QA_READY' | 'DONE';
+        blocked: boolean;
+        blockReason?: string | null;
+        assigneeAgentId?: string | null;
+      } = {
+        blocked: effectiveExecutionStatus !== 'SUCCESS',
+      };
+
+      if (data.nextStatus) {
+        taskUpdate.status = data.nextStatus;
+      }
+
+      if (effectiveExecutionStatus === 'SUCCESS') {
+        taskUpdate.blocked = false;
+        if (data.nextAssigneeAgentId !== undefined) {
+          taskUpdate.assigneeAgentId = data.nextAssigneeAgentId;
+        }
+      } else {
+        taskUpdate.blockReason = data.blockReason ?? data.errorMessage ?? 'Execution failed';
+      }
+
       const shouldUpdateTask =
         (taskUpdate.status !== undefined && task.status !== taskUpdate.status) ||
         task.blocked !== taskUpdate.blocked ||
@@ -135,7 +186,7 @@ export async function POST(
       }
 
       const gitResult = extractGitPayload({
-        result: data.result,
+        result: resultPayload,
         metadata: data.metadata,
       });
       if (gitResult) {
@@ -174,7 +225,37 @@ export async function POST(
       }
     }
 
-    return agentSuccess(updatedExecution);
+    if (shouldQueueMemoryIngestion) {
+      const memoryIngestionSucceeded = await ingestExecutionMemory({
+        orgId: auth.orgId,
+        projectId: execution.projectId,
+        taskId: execution.taskId,
+        executionId: execution.id,
+        agentName: auth.agentName,
+        tool: execution.tool,
+        model: execution.model,
+        result: resultPayload,
+      }).then(() => true).catch((error) => {
+        console.error('[agent-api] Memory ingestion failed during execution finalize', error);
+        return false;
+      });
+
+      const memoryIngestionUpdatedAt = new Date();
+      responseExecution = await agentExecutionRepository.updateStatus(id, {
+        status: updatedExecution.status,
+        metadata: {
+          memoryIngestion: buildMemoryIngestionState(
+            memoryIngestionSucceeded ? 'completed' : 'failed',
+            memoryIngestionUpdatedAt,
+          ),
+        },
+      }).catch((error) => {
+        console.error('[agent-api] Failed to persist memory ingestion status', error);
+        return responseExecution;
+      });
+    }
+
+    return agentSuccess(responseExecution);
   } catch (error) {
     return handleAgentError(error);
   }

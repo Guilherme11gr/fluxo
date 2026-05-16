@@ -6,9 +6,11 @@ import {
   runnerInstanceRepository,
   auditLogRepository,
   projectRuntimeBindingRepository,
+  projectMemoryRepository,
 } from '@/infra/adapters/prisma';
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/errors';
 import { resolveProjectRuntimeBinding, type ResolvedProjectRuntimeBinding } from '@/domain/use-cases/runtime/resolve-project-runtime-binding';
+import type { ProjectMemorySearchResult } from '@/infra/adapters/prisma/project-memory.repository';
 
 const DEFAULT_LEASE_MS = 90 * 1000;
 const DEFAULT_CANDIDATE_LIMIT = 10;
@@ -71,6 +73,7 @@ export interface ClaimedTaskResult {
   };
   runtimeBinding: ResolvedProjectRuntimeBinding | null;
   previousExecution: PreviousExecutionSummary | null;
+  retrievedMemory: ProjectMemorySearchResult[];
 }
 
 export interface PreviousExecutionGitSummary {
@@ -95,7 +98,7 @@ export interface PreviousExecutionSummary {
   git: PreviousExecutionGitSummary | null;
 }
 
-type ClaimedTaskBaseResult = Omit<ClaimedTaskResult, 'previousExecution'>;
+type ClaimedTaskBaseResult = Omit<ClaimedTaskResult, 'previousExecution' | 'retrievedMemory'>;
 
 type CandidateRow = {
   id: string;
@@ -157,6 +160,15 @@ function extractExecutionGit(metadata: Record<string, unknown>): PreviousExecuti
     prUrl: typeof gitRecord.prUrl === 'string' ? gitRecord.prUrl : null,
     prNumber,
   };
+}
+
+export function buildMemorySearchQuery(taskTitle: string, taskDescription: string | null | undefined): string {
+  const parts = [taskTitle, taskDescription ?? '']
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => value.replace(/\s+/g, ' '));
+
+  return parts.join(' ').slice(0, 800);
 }
 
 export function buildDeterministicBranchName(
@@ -432,6 +444,19 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
             git: extractExecutionGit(previousExecutionRecord.metadata),
           }
         : null;
+      const memoryQuery = buildMemorySearchQuery(claimed.task.title, claimed.task.description);
+      let retrievedMemory: ProjectMemorySearchResult[] = [];
+
+      if (memoryQuery) {
+        try {
+          retrievedMemory = await projectMemoryRepository.hybridSearch(input.orgId, memoryQuery, {
+            projectId: claimed.task.projectId,
+            limit: 5,
+          });
+        } catch (error) {
+          console.error('[claim-next] Project memory retrieval failed; continuing without memory context', error);
+        }
+      }
 
       await auditLogRepository.log({
         orgId: input.orgId,
@@ -455,6 +480,7 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
       return {
         ...claimed,
         previousExecution,
+        retrievedMemory,
       };
     }
   }

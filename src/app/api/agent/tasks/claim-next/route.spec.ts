@@ -105,6 +105,17 @@ describe('POST /api/agent/tasks/claim-next', () => {
           prNumber: null,
         },
       },
+      retrievedMemory: [
+        {
+          id: 'memory-1',
+          kind: 'memory',
+          title: null,
+          content: 'Deploy em VPS usa docker compose no diretorio /srv/app.',
+          source: 'execution_result_v1',
+          score: 4.2,
+          metadata: {},
+        },
+      ],
     });
   });
 
@@ -150,5 +161,11 @@ describe('POST /api/agent/tasks/claim-next', () => {
         errorMessage: 'command failed',
       })
     );
+    expect(json.data.retrievedMemory).toEqual([
+      expect.objectContaining({
+        id: 'memory-1',
+        kind: 'memory',
+      }),
+    ]);
   });
 });

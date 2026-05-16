@@ -201,7 +201,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 					"ok":          preflight.OK,
 					"branch":      preflight.CurrentBranch,
 					"isProtected": preflight.IsProtected,
-					"isDirty":      preflight.IsDirty,
+					"isDirty":     preflight.IsDirty,
 					"error":       preflight.ErrorMessage,
 				},
 			},
@@ -258,7 +258,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		}
 	}
 
-	prompt := runner.BuildPromptWithPreviousExecution(runner.Task{
+	retrievedMemory := make([]runner.RetrievedProjectMemoryContext, 0, len(claimed.RetrievedMemory))
+	for _, memory := range claimed.RetrievedMemory {
+		retrievedMemory = append(retrievedMemory, runner.RetrievedProjectMemoryContext{
+			ID:      memory.ID,
+			Kind:    memory.Kind,
+			Title:   memory.Title,
+			Content: memory.Content,
+			Source:  memory.Source,
+		})
+	}
+
+	prompt := runner.BuildPromptWithExecutionContext(runner.Task{
 		ID:          claimed.Task.ID,
 		Title:       claimed.Task.Title,
 		Description: claimed.Task.Description,
@@ -266,7 +277,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		Type:        claimed.Task.Type,
 		ProjectID:   claimed.Task.ProjectID,
 		Status:      claimed.Task.Status,
-	}, agent, previousExecution)
+	}, agent, previousExecution, retrievedMemory)
 
 	var exec executor.Executor
 	switch agent.Tool {
@@ -482,7 +493,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		})
 
 		taskPatch := map[string]interface{}{
-			"prUrl":    *gitSnapshot.PRUrl,
+			"prUrl": *gitSnapshot.PRUrl,
 			"prNumber": func() int {
 				if gitSnapshot.PRNumber != nil {
 					return *gitSnapshot.PRNumber

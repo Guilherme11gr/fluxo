@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeterministicBranchName } from './claim-next-task';
+import { buildDeterministicBranchName, buildMemorySearchQuery } from './claim-next-task';
 
 describe('claim next task helpers', () => {
   it('keeps branch building deterministic', () => {
@@ -79,5 +79,20 @@ describe('buildDeterministicBranchName', () => {
       null,
     );
     expect(name).toBe('dev/feature-abc12345');
+  });
+});
+
+describe('buildMemorySearchQuery', () => {
+  it('joins title and description into a compact search query', () => {
+    const query = buildMemorySearchQuery(
+      'Deploy app na VPS',
+      'Usar docker compose e validar nginx antes de reiniciar.',
+    );
+
+    expect(query).toBe('Deploy app na VPS Usar docker compose e validar nginx antes de reiniciar.');
+  });
+
+  it('returns only the title when description is empty', () => {
+    expect(buildMemorySearchQuery('Planejar memory v1', null)).toBe('Planejar memory v1');
   });
 });
