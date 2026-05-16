@@ -32,6 +32,10 @@ const finalizeSchema = z.object({
 
 type FinalizeExecutionStatus = 'SUCCESS' | 'FAILED' | 'TIMEOUT' | 'CANCELLED';
 
+function isFinalizeExecutionStatus(value: string): value is FinalizeExecutionStatus {
+  return ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED'].includes(value);
+}
+
 function buildMemoryIngestionState(status: 'pending' | 'completed' | 'failed', updatedAt: Date) {
   return {
     status,
@@ -99,14 +103,32 @@ export async function POST(
       return agentError('NOT_FOUND', 'Agent not found', 404);
     }
 
-    const alreadyTerminal = ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED'].includes(execution.status);
+    const terminalExecutionStatus = isFinalizeExecutionStatus(execution.status)
+      ? execution.status
+      : null;
+    const alreadyTerminal = terminalExecutionStatus !== null;
     const body = await request.json();
     const data = finalizeSchema.parse(body);
 
     const finishedAt = data.finishedAt ? new Date(data.finishedAt) : new Date();
     const resultPayload = data.result ?? extractStoredResult(execution.metadata ?? {});
-    const effectiveExecutionStatus = (alreadyTerminal ? execution.status : data.status) as FinalizeExecutionStatus;
-    const shouldQueueMemoryIngestion = shouldIngestMemory(execution, effectiveExecutionStatus, resultPayload);
+    let executionForMemory: {
+      status: FinalizeExecutionStatus;
+      metadata: Record<string, unknown>;
+    };
+    if (terminalExecutionStatus) {
+      executionForMemory = {
+        status: terminalExecutionStatus,
+        metadata: execution.metadata ?? {},
+      };
+    } else {
+      executionForMemory = {
+        status: data.status,
+        metadata: execution.metadata ?? {},
+      };
+    }
+    const effectiveExecutionStatus = executionForMemory.status;
+    const shouldQueueMemoryIngestion = shouldIngestMemory(executionForMemory, effectiveExecutionStatus, resultPayload);
     const mergedMetadata = {
       ...(execution.metadata ?? {}),
       ...(data.metadata ?? {}),

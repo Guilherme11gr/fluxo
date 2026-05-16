@@ -11,6 +11,7 @@ const context = {
   userDisplayName: 'Koike',
   origin: 'https://fluxo.test',
   cookieHeader: null,
+  agentRolePrompt: '',
 };
 
 function getTool(name: string) {
@@ -419,14 +420,12 @@ describe('agent-chat/tools', () => {
       .spyOn(InternalAgentApiClient.prototype, 'get')
       .mockResolvedValue([
         { id: 'u-1', displayName: 'Guilherme', email: 'g@test.com' },
-        { id: 'u-2', displayName: 'Gepeto', email: 'gepeto@test.com' },
-        { id: 'u-3', displayName: 'Ana', email: 'ana@test.com' },
       ]);
 
     const searchMember = getTool('search_member');
     const result: any = await searchMember.execute({ name: 'gui' });
 
-    expect(get).toHaveBeenCalledWith('/api/users');
+    expect(get).toHaveBeenCalledWith('/api/users', { search: 'gui' });
     expect(result.members).toHaveLength(1);
     expect(result.members[0].id).toBe('u-1');
 
@@ -437,13 +436,13 @@ describe('agent-chat/tools', () => {
     const get = vi
       .spyOn(InternalAgentApiClient.prototype, 'get')
       .mockResolvedValue([
-        { id: 'u-1', displayName: 'Guilherme', email: 'guilherme@fluxo.com' },
         { id: 'u-2', displayName: 'Dev Bot', email: 'dev@fluxo.com' },
       ]);
 
     const searchMember = getTool('search_member');
     const result: any = await searchMember.execute({ name: 'dev@fluxo' });
 
+    expect(get).toHaveBeenCalledWith('/api/users', { search: 'dev@fluxo' });
     expect(result.members).toHaveLength(1);
     expect(result.members[0].displayName).toBe('Dev Bot');
 
@@ -453,13 +452,12 @@ describe('agent-chat/tools', () => {
   it('returns empty array when no member matches search', async () => {
     const get = vi
       .spyOn(InternalAgentApiClient.prototype, 'get')
-      .mockResolvedValue([
-        { id: 'u-1', displayName: 'Guilherme', email: 'g@test.com' },
-      ]);
+      .mockResolvedValue([]);
 
     const searchMember = getTool('search_member');
     const result: any = await searchMember.execute({ name: 'xyz' });
 
+    expect(get).toHaveBeenCalledWith('/api/users', { search: 'xyz' });
     expect(result.members).toHaveLength(0);
     expect(result.message).toContain('xyz');
 

@@ -10,6 +10,7 @@ const context = {
   userDisplayName: 'Koike',
   origin: 'https://fluxo.test',
   cookieHeader: 'sb=token',
+  agentRolePrompt: '',
 };
 
 afterEach(() => {
