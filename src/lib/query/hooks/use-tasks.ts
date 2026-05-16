@@ -33,6 +33,7 @@ interface CreateTaskInput {
   modules?: string[];
   assigneeId?: string | null;
   projectId?: string;
+  focus?: TaskFocus | null;
 }
 
 interface UpdateTaskInput {

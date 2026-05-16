@@ -26,6 +26,16 @@ export interface Organization {
   updatedAt: Date;
 }
 
+// GitHub Installation (tenant-scoped)
+export interface GithubInstallation {
+  id: number;
+  orgId: string;
+  installationId: number;
+  accountLogin: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // Project
 export interface Project {
   id: string;
@@ -34,7 +44,7 @@ export interface Project {
   key: string; // Prefix for task IDs (APP, SDK, etc)
   description: string | null;
   modules: string[];
-  githubInstallationId: number | null;
+  githubInstallationId: number | null; // FK to GithubInstallation.id
   githubRepoFullName: string | null;
   githubRepoUrl: string | null;
   createdAt: Date;

@@ -300,7 +300,8 @@ export function TaskDialog({
           points: formData.points === "Sem estimativa" ? null : formData.points,
           modules: formData.modules,
           assigneeId: formData.assigneeId,
-          projectId: resolvedProjectId
+          projectId: resolvedProjectId,
+          focus: formData.focus,
         });
         // Assign tags to newly created task
         if (formData.tags.length > 0 && newTask?.id) {

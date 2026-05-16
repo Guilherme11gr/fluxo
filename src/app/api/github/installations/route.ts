@@ -27,16 +27,15 @@ export async function GET(request: NextRequest) {
       return jsonError('FORBIDDEN', 'Unauthorized org', 403);
     }
 
-    const existingProject = await prisma.project.findFirst({
-      where: { orgId: tenantId, githubInstallationId: { not: null } },
-      select: { githubInstallationId: true },
+    const ghInstallation = await prisma.githubInstallation.findFirst({
+      where: { orgId: tenantId },
     });
 
-    if (!existingProject?.githubInstallationId) {
+    if (!ghInstallation) {
       return jsonSuccess({ hasInstallation: false });
     }
 
-    const installationId = existingProject.githubInstallationId;
+    const installationId = ghInstallation.installationId;
 
     const jwt = generateAppJwt();
 
@@ -53,6 +52,9 @@ export async function GET(request: NextRequest) {
 
     if (!installationRes.ok) {
       if (installationRes.status === 404) {
+        await prisma.githubInstallation.delete({
+          where: { id: ghInstallation.id },
+        }).catch(() => {});
         return jsonSuccess({ hasInstallation: false });
       }
       throw new Error(`GitHub API error: ${installationRes.status}`);

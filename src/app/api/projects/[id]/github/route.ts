@@ -8,7 +8,6 @@ import { generateAppJwt } from '@/shared/github/app-auth';
 import { z } from 'zod';
 
 const linkRepoSchema = z.object({
-  installationId: z.number().int().positive(),
   repoFullName: z.string().min(1),
 });
 
@@ -30,8 +29,16 @@ export async function POST(
       return jsonError('NOT_FOUND', 'Project not found', 404);
     }
 
-    if (project.githubInstallationId) {
-      return jsonError('CONFLICT', 'Project already has a GitHub integration', 409);
+    const ghInstallation = project.githubInstallationId
+      ? await prisma.githubInstallation.findUnique({
+          where: { id: project.githubInstallationId },
+        })
+      : await prisma.githubInstallation.findFirst({
+          where: { orgId: tenantId },
+        });
+
+    if (!ghInstallation) {
+      return jsonError('NO_INSTALLATION', 'No GitHub installation found for this organization. Install the GitHub App first.', 400);
     }
 
     const body = await request.json();
@@ -42,11 +49,11 @@ export async function POST(
       });
     }
 
-    const { installationId, repoFullName } = parsed.data;
+    const { repoFullName } = parsed.data;
 
     const jwt = generateAppJwt();
     const installationRes = await fetch(
-      `https://api.github.com/app/installations/${installationId}`,
+      `https://api.github.com/app/installations/${ghInstallation.installationId}`,
       {
         headers: {
           Authorization: `Bearer ${jwt}`,
@@ -63,7 +70,7 @@ export async function POST(
     await prisma.project.update({
       where: { id },
       data: {
-        githubInstallationId: installationId,
+        githubInstallationId: ghInstallation.id,
         githubRepoFullName: repoFullName,
         githubRepoUrl: `https://github.com/${repoFullName}`,
       },

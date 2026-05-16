@@ -6,22 +6,33 @@ export async function handleInstallation(event: WebhookEvent): Promise<void> {
   if (!event.installation?.id) return;
 
   if (event.action === 'deleted') {
-    await prisma.project.updateMany({
-      where: { githubInstallationId: event.installation.id },
-      data: {
-        githubInstallationId: null,
-        githubRepoFullName: null,
-        githubRepoUrl: null,
-      },
+    const ghInstall = await prisma.githubInstallation.findFirst({
+      where: { installationId: event.installation.id },
     });
+    if (ghInstall) {
+      await prisma.project.updateMany({
+        where: { githubInstallationId: ghInstall.id },
+        data: {
+          githubInstallationId: null,
+          githubRepoFullName: null,
+          githubRepoUrl: null,
+        },
+      });
+      await prisma.githubInstallation.delete({
+        where: { id: ghInstall.id },
+      });
+    }
     return;
   }
 
   if (event.action === 'created' || event.action === 'new_permissions_accepted') {
     const repo = event.repository;
-    if (repo) {
+    const ghInstall = await prisma.githubInstallation.findFirst({
+      where: { installationId: event.installation.id },
+    });
+    if (ghInstall && repo) {
       await prisma.project.updateMany({
-        where: { githubInstallationId: event.installation.id },
+        where: { githubInstallationId: ghInstall.id },
         data: {
           githubRepoFullName: repo.full_name,
           githubRepoUrl: repo.html_url,

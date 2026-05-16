@@ -107,7 +107,7 @@ export function GitHubIntegrationCard({
   }, [projectId, orgId, isGitHubAppConfigured]);
 
   const handleLinkRepo = useCallback(async () => {
-    if (!selectedRepo || !installation?.installationId) return;
+    if (!selectedRepo) return;
 
     setIsLinking(true);
     try {
@@ -115,7 +115,6 @@ export function GitHubIntegrationCard({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          installationId: installation.installationId,
           repoFullName: selectedRepo,
         }),
       });

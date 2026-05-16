@@ -58,6 +58,7 @@ const updateTaskSchema = z.object({
   blockReason: z.string().min(10).nullable().optional(),
   assigneeId: z.string().uuid().nullable().optional(),
   assigneeAgentId: z.string().uuid().nullable().optional(),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).nullable().optional(),
   tagIds: z.array(z.string().uuid()).optional(),
   // Agent-provided metadata (optional)
   _metadata: agentMetadataSchema,

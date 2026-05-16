@@ -19,6 +19,7 @@ const listQuerySchema = z.object({
   epicId: z.string().uuid().optional(),
   projectId: z.string().uuid().optional(),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'DONE']).optional(),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).optional(),
   search: z.string().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
       epicId: searchParams.get('epicId') || undefined,
       projectId: searchParams.get('projectId') || undefined,
       status: searchParams.get('status') || undefined,
+      focus: searchParams.get('focus') || undefined,
       search: searchParams.get('search') || undefined,
       limit: searchParams.get('limit') || 50,
     });
@@ -40,7 +42,7 @@ export async function GET(request: NextRequest) {
       return agentError('VALIDATION_ERROR', 'Invalid query parameters', 400);
     }
 
-    const { epicId, projectId, status, search, limit } = query.data;
+    const { epicId, projectId, status, focus, search, limit } = query.data;
 
     // Build filter
     let features;
@@ -54,6 +56,16 @@ export async function GET(request: NextRequest) {
     // Apply status filter if provided
     if (status) {
       features = features.filter(f => f.status === status);
+    }
+
+    // Apply focus filter if provided (THIS_WEEK includes TODAY)
+    if (focus) {
+      features = features.filter((f: any) => {
+        if (focus === 'THIS_WEEK') {
+          return f.focus === 'TODAY' || f.focus === 'THIS_WEEK';
+        }
+        return f.focus === focus;
+      });
     }
 
     // Apply search filter if provided
@@ -75,6 +87,7 @@ export async function GET(request: NextRequest) {
       status: f.status,
       epicId: f.epicId,
       createdAt: f.createdAt,
+      focus: f.focus ?? null,
       ...(f._count ? { taskCount: f._count.tasks } : {}),
       ...(f.health ? { health: f.health } : {}),
     }));
@@ -92,6 +105,7 @@ const createFeatureSchema = z.object({
   epicId: z.string().uuid('Invalid epic ID'),
   description: z.string().optional(),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'DONE']).default('BACKLOG'),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).nullable().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -105,7 +119,7 @@ export async function POST(request: NextRequest) {
       return agentError('VALIDATION_ERROR', parsed.error.issues[0].message, 400);
     }
 
-    const { title, epicId, description, status } = parsed.data;
+    const { title, epicId, description, status, focus } = parsed.data;
 
     // Verify epic exists
     const epic = await epicRepository.findById(epicId, orgId);
@@ -118,6 +132,7 @@ export async function POST(request: NextRequest) {
       epicId,
       description: description || null,
       status,
+      focus: focus ?? null,
       orgId,
     });
 

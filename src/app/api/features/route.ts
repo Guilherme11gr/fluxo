@@ -14,6 +14,7 @@ const featuresQuerySchema = z.object({
     projectId: z.string().uuid().optional(),
     status: z.enum(['BACKLOG', 'TODO', 'DOING', 'DONE']).optional(),
     statuses: z.string().optional(),
+    focus: z.enum(['TODAY', 'THIS_WEEK']).optional(),
     search: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(200).default(200),
 });
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
       return jsonError('INVALID_PARAMS', parsed.error.issues.map(i => i.message).join(', '), 400);
     }
 
-    const { epicId, projectId, status, statuses, search, limit } = parsed.data;
+    const { epicId, projectId, status, statuses, focus, search, limit } = parsed.data;
 
     let features;
     if (epicId) {
@@ -57,6 +58,15 @@ export async function GET(request: NextRequest) {
         f.title?.toLowerCase().includes(lowerSearch) ||
         f.description?.toLowerCase().includes(lowerSearch)
       );
+    }
+
+    if (focus) {
+      features = features.filter((f: any) => {
+        if (focus === 'THIS_WEEK') {
+          return f.focus === 'TODAY' || f.focus === 'THIS_WEEK';
+        }
+        return f.focus === focus;
+      });
     }
 
     return jsonSuccess(features.slice(0, limit));

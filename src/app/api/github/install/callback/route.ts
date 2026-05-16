@@ -90,18 +90,31 @@ export async function GET(request: NextRequest) {
 
   if (setupAction === 'uninstall') {
     if (state?.projectId && state?.orgId) {
-      await prisma.project.updateMany({
-        where: {
-          id: state.projectId,
-          orgId: state.orgId,
-          githubInstallationId: installationIdNum,
-        },
+      await prisma.project.update({
+        where: { id: state.projectId },
         data: {
           githubInstallationId: null,
           githubRepoFullName: null,
           githubRepoUrl: null,
         },
       });
+
+      const ghInstall = await prisma.githubInstallation.findFirst({
+        where: { installationId: installationIdNum },
+      });
+      if (ghInstall) {
+        await prisma.project.updateMany({
+          where: { githubInstallationId: ghInstall.id },
+          data: {
+            githubInstallationId: null,
+            githubRepoFullName: null,
+            githubRepoUrl: null,
+          },
+        });
+        await prisma.githubInstallation.delete({
+          where: { id: ghInstall.id },
+        });
+      }
     }
     return NextResponse.redirect(
       new URL(`/projects/${state?.projectId || ''}?github=uninstalled`, baseUrl)
@@ -109,14 +122,19 @@ export async function GET(request: NextRequest) {
   }
 
   if (!state) {
-    const project = await prisma.project.findFirst({
-      where: { githubInstallationId: installationIdNum },
-      select: { id: true },
+    const ghInstall = await prisma.githubInstallation.findFirst({
+      where: { installationId: installationIdNum },
     });
-    if (project) {
-      return NextResponse.redirect(
-        new URL(`/projects/${project.id}?github=installed`, baseUrl)
-      );
+    if (ghInstall) {
+      const project = await prisma.project.findFirst({
+        where: { githubInstallationId: ghInstall.id },
+        select: { id: true },
+      });
+      if (project) {
+        return NextResponse.redirect(
+          new URL(`/projects/${project.id}?github=installed`, baseUrl)
+        );
+      }
     }
     return NextResponse.redirect(
       new URL('/projects?github=installed', baseUrl)
@@ -138,10 +156,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  await prisma.project.updateMany({
-    where: { id: state.projectId, orgId: state.orgId },
+  const ghInstallation = await prisma.githubInstallation.upsert({
+    where: { installationId: installationIdNum },
+    update: {},
+    create: {
+      orgId: state.orgId,
+      installationId: installationIdNum,
+    },
+  });
+
+  await prisma.project.update({
+    where: { id: state.projectId },
     data: {
-      githubInstallationId: installationIdNum,
+      githubInstallationId: ghInstallation.id,
     },
   });
 

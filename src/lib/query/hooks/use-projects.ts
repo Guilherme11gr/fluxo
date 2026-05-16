@@ -14,7 +14,7 @@ export interface Project {
   key: string;
   description?: string | null;
   modules?: string[];
-  githubInstallationId?: number | null;
+  githubInstallationId?: number | null; // FK to GithubInstallation.id
   githubRepoFullName?: string | null;
   githubRepoUrl?: string | null;
   _count?: { epics: number; tasks: number };

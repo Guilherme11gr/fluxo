@@ -6,12 +6,6 @@ import { handleError } from '@/shared/errors';
 import { prisma } from '@/infra/adapters/prisma';
 import { getRepository, getRef, createBranch } from '@/shared/github/api-client';
 
-/**
- * POST /api/tasks/[id]/github/branch
- * Create a GitHub branch from a task.
- *
- * Branch name format: feat/{PROJECT_KEY}-{localId}-{slug-of-title}
- */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -21,7 +15,6 @@ export async function POST(
     const supabase = await createClient();
     const { tenantId } = await extractAuthenticatedTenant(supabase);
 
-    // 1. Fetch task with feature->epic->project relations
     const task = await prisma.task.findUnique({
       where: { id, orgId: tenantId },
       include: {
@@ -50,7 +43,6 @@ export async function POST(
 
     const project = task.feature.epic.project;
 
-    // 2. Validate GitHub integration is configured
     if (!project.githubInstallationId || !project.githubRepoFullName) {
       return jsonError(
         'GITHUB_NOT_CONFIGURED',
@@ -59,7 +51,19 @@ export async function POST(
       );
     }
 
-    const installationId = project.githubInstallationId;
+    const ghInstallation = await prisma.githubInstallation.findUnique({
+      where: { id: project.githubInstallationId },
+    });
+
+    if (!ghInstallation) {
+      return jsonError(
+        'GITHUB_NOT_CONFIGURED',
+        'Integração com GitHub não configurada neste projeto. Configure o repositório GitHub nas configurações do projeto.',
+        404
+      );
+    }
+
+    const installationId = ghInstallation.installationId;
     const [owner, repo] = project.githubRepoFullName.split('/');
 
     if (!owner || !repo) {
@@ -70,15 +74,12 @@ export async function POST(
       );
     }
 
-    // 3. Get default branch from GitHub API
     const repository = await getRepository(installationId, owner, repo);
     const defaultBranch = repository.default_branch;
 
-    // 4. Get latest commit SHA of default branch
     const ref = await getRef(installationId, owner, repo, `heads/${defaultBranch}`);
     const commitSha = ref.object.sha;
 
-    // 5. Build branch name: feat/{PROJECT_KEY}-{localId}-{slug-of-title}
     const slug = task.title
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, '')
@@ -89,10 +90,8 @@ export async function POST(
 
     const branchName = `feat/${project.key}-${task.localId}-${slug}`;
 
-    // 6. Create the branch
     await createBranch(installationId, { owner, repo, branchName, sha: commitSha });
 
-    // 7. Return result
     const branchUrl = `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(branchName)}`;
 
     return jsonSuccess({
@@ -103,7 +102,6 @@ export async function POST(
   } catch (error) {
     const { status, body } = handleError(error);
 
-    // Provide more context for GitHub API errors
     if (error instanceof Error && error.message.startsWith('GitHub API error')) {
       const githubStatusMatch = error.message.match(/\((\d+)/);
       const ghStatus = githubStatusMatch ? parseInt(githubStatusMatch[1], 10) : 502;

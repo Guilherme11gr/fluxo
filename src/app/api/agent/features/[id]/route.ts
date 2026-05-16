@@ -45,6 +45,7 @@ const updateFeatureSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'DONE']).optional(),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).nullable().optional(),
 });
 
 export async function PATCH(

@@ -26,6 +26,7 @@ const listQuerySchema = z.object({
   assigneeAgentId: z.string().uuid().optional(),
   tagId: z.string().uuid().optional(),
   blocked: z.enum(['true', 'false']).transform((val) => val === 'true').optional(),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).optional(),
   search: z.string().optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
       assigneeAgentId: searchParams.get('assigneeAgentId') || undefined,
       tagId: searchParams.get('tagId') || undefined,
       blocked: searchParams.get('blocked') || undefined,
+      focus: searchParams.get('focus') || undefined,
       search: searchParams.get('search') || undefined,
       limit: searchParams.get('limit') || 50,
     });
@@ -56,7 +58,7 @@ export async function GET(request: NextRequest) {
 
     const {
       featureId, epicId, projectId, status,
-      type, priority, assigneeId, assigneeAgentId, tagId, blocked, search,
+      type, priority, assigneeId, assigneeAgentId, tagId, blocked, focus, search,
       limit
     } = query.data;
 
@@ -71,6 +73,7 @@ export async function GET(request: NextRequest) {
     if (assigneeAgentId) filter.assigneeAgentId = assigneeAgentId;
     if (tagId) filter.tagId = tagId;
     if (blocked !== undefined) filter.blocked = blocked;
+    if (focus) filter.focus = focus;
     if (search) filter.search = search;
     if (epicId) filter.epicId = epicId;
 
@@ -101,6 +104,7 @@ const createTaskSchema = z.object({
   type: z.enum(['TASK', 'BUG']).default('TASK'),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
   status: z.enum(['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE']).default('BACKLOG'),
+  focus: z.enum(['TODAY', 'THIS_WEEK']).nullable().optional(),
   _metadata: agentMetadataSchema,
 });
 
@@ -115,7 +119,7 @@ export async function POST(request: NextRequest) {
       return agentError('VALIDATION_ERROR', parsed.error.issues[0].message, 400);
     }
 
-    const { title, featureId, description, type, priority, status, _metadata: agentMetadata } = parsed.data;
+    const { title, featureId, description, type, priority, status, focus, _metadata: agentMetadata } = parsed.data;
 
     // Verify feature exists
     const feature = await featureRepository.findById(featureId, orgId);
@@ -130,6 +134,7 @@ export async function POST(request: NextRequest) {
       type,
       priority,
       status,
+      focus: focus ?? null,
       orgId,
     });
 
