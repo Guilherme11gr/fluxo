@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -114,6 +115,54 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	workdir := agent.Workdir
 	if claimed.RuntimeBinding.RepoPath != "" {
 		workdir = claimed.RuntimeBinding.RepoPath
+	}
+	workdir = strings.TrimSpace(workdir)
+	if workdir == "" {
+		errorMessage := fmt.Sprintf(
+			"Execution cannot start without a resolved workdir. agent.workdir and runtimeBinding.repoPath are both empty for agent %s.",
+			agent.Name,
+		)
+		if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+			errorMessage += fmt.Sprintf(" Runner current directory is %q, but runner-go now requires an explicit workdir for stable execution.", cwd)
+		}
+		if claimed.RuntimeBinding.ID == "" {
+			errorMessage += " No project runtime binding matched this runner instance."
+		}
+
+		structuredResult := runner.BuildExecutionResultV1(false, errorMessage, 1)
+		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
+			Status:        "FAILED",
+			Output:        errorMessage,
+			ResultSummary: truncate(errorMessage, 500),
+			Result:        structuredResult,
+			ErrorMessage:  truncate(errorMessage, 2000),
+			ExitCode:      1,
+			Duration:      0,
+			NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
+			BlockReason:   nullableString(errorMessage),
+			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+			Metadata: map[string]interface{}{
+				"tool":  agent.Tool,
+				"model": agent.Model,
+				"git":   runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
+				"runtimeBinding": map[string]interface{}{
+					"id":                  claimed.RuntimeBinding.ID,
+					"projectId":           claimed.RuntimeBinding.ProjectID,
+					"runnerProfile":       claimed.RuntimeBinding.RunnerProfile,
+					"hostOs":              claimed.RuntimeBinding.HostOS,
+					"repoPath":            claimed.RuntimeBinding.RepoPath,
+					"defaultBaseBranch":   claimed.RuntimeBinding.DefaultBaseBranch,
+					"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
+					"executionMode":       claimed.RuntimeBinding.ExecutionMode,
+					"gitProvider":         claimed.RuntimeBinding.GitProvider,
+					"prPolicy":            claimed.RuntimeBinding.PRPolicy,
+					"gitPolicy":           claimed.RuntimeBinding.GitPolicy,
+					"metadata":            claimed.RuntimeBinding.Metadata,
+				},
+			},
+		})
+		runner.SendHeartbeat(client, agent, "ONLINE")
+		return
 	}
 	logging.Debugf("worker[%s] preparing git policy=%s branch=%s base=%s workdir=%q", agent.Name, gitPolicy, gitBranch, gitBaseBranch, workdir)
 	preparedGit, err := runner.PrepareGitBranch(workdir, gitPolicy, gitBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix)

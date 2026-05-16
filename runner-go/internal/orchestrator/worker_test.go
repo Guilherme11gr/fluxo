@@ -1,10 +1,17 @@
 package orchestrator
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/fluxo-app/fluxo-runner/internal/api"
+	"github.com/fluxo-app/fluxo-runner/internal/config"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
@@ -150,6 +157,121 @@ func TestGitWorkflowNoWriteSkipsEverything(t *testing.T) {
 	result := runner.PreflightGitCheck("", runner.GitPolicyNoWrite, "main", "")
 	if !result.OK {
 		t.Fatal("expected no_write to always pass preflight")
+	}
+}
+
+func TestRunOnceFinalizesFailureWhenEffectiveWorkdirIsEmpty(t *testing.T) {
+	var (
+		mu            sync.Mutex
+		finalizeBody  map[string]interface{}
+		heartbeats    []string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data": map[string]any{"id": "agent-reg-1"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/agents/agent-reg-1/heartbeat":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode heartbeat body: %v", err)
+			}
+			mu.Lock()
+			if status, _ := body["status"].(string); status != "" {
+				heartbeats = append(heartbeats, status)
+			}
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(`{
+				"data": {
+					"task": {
+						"id": "task-1",
+						"orgId": "org-1",
+						"projectId": "project-1",
+						"featureId": "feature-1",
+						"localId": 12,
+						"title": "Inspect runner lifecycle",
+						"description": "desc",
+						"status": "DOING",
+						"type": "TASK",
+						"priority": "HIGH"
+					},
+					"execution": {
+						"id": "exec-1",
+						"orgId": "org-1",
+						"taskId": "task-1",
+						"projectId": "project-1",
+						"agentId": "agent-1",
+						"runnerInstanceId": "runner-1",
+						"status": "CLAIMED",
+						"tool": "opencode",
+						"model": "glm-5.1",
+						"metadata": {},
+						"startedAt": "2026-05-16T00:00:00Z"
+					},
+					"lease": {
+						"id": "lease-1",
+						"projectId": "project-1",
+						"executionId": "exec-1",
+						"expiresAt": "2026-05-16T00:01:00Z"
+					}
+				}
+			}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-1/finalize":
+			if err := json.NewDecoder(r.Body).Decode(&finalizeBody); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	agent := config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "fluxo-runner-go",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+	}
+	if runner.RegisterAgent(api.NewClient(server.URL, "test-key", agent.Name), agent, nil) == "" {
+		t.Fatal("expected agent registration to succeed")
+	}
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", agent, time.Second)
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected execution to be finalized")
+	}
+	if status, _ := finalizeBody["status"].(string); status != "FAILED" {
+		t.Fatalf("expected FAILED finalize status, got %v", finalizeBody["status"])
+	}
+	errorMessage, _ := finalizeBody["errorMessage"].(string)
+	if !strings.Contains(errorMessage, "Execution cannot start without a resolved workdir") {
+		t.Fatalf("expected explicit missing workdir message, got %q", errorMessage)
+	}
+	if !strings.Contains(errorMessage, "No project runtime binding matched this runner instance.") {
+		t.Fatalf("expected runtime binding hint, got %q", errorMessage)
+	}
+	result, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected structured result map, got %#v", finalizeBody["result"])
+	}
+	if summary, _ := result["summary"].(string); !strings.Contains(summary, "Execution cannot start without a resolved workdir") {
+		t.Fatalf("expected structured summary to mention missing workdir, got %q", summary)
+	}
+	if len(heartbeats) < 2 || heartbeats[0] != "ONLINE" || heartbeats[len(heartbeats)-1] != "ONLINE" {
+		t.Fatalf("expected ONLINE heartbeats around failure, got %#v", heartbeats)
 	}
 }
 

@@ -26,7 +26,24 @@ export async function POST(
 
     const body = await request.json().catch(() => ({}));
     const data = heartbeatSchema.parse(body);
-    const updated = await runnerInstanceRepository.updateHeartbeat(id, data);
+    const mergedCapabilities = data.capabilities
+      ? {
+          ...((runner.capabilities ?? {}) as Record<string, unknown>),
+          ...data.capabilities,
+        }
+      : undefined;
+    const mergedMetadata = data.metadata
+      ? {
+          ...((runner.metadata ?? {}) as Record<string, unknown>),
+          ...data.metadata,
+        }
+      : undefined;
+
+    const updated = await runnerInstanceRepository.updateHeartbeat(id, {
+      status: data.status,
+      ...(mergedCapabilities ? { capabilities: mergedCapabilities } : {}),
+      ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
+    });
     return agentSuccess(updated);
   } catch (error) {
     return handleAgentError(error);

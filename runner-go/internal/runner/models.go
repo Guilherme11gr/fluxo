@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 var (
 	detectedModels []string
 	modelsOnce     sync.Once
+	modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 )
 
 // DiscoverModels detects available models from installed tools (opencode, claude).
@@ -71,10 +73,41 @@ func runModelCmd(name string, args ...string) []string {
 	var models []string
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "{") || strings.HasPrefix(line, "[") {
+		if !looksLikeModelID(line) {
 			continue
 		}
 		models = append(models, line)
 	}
 	return models
+}
+
+func looksLikeModelID(line string) bool {
+	if line == "" || strings.HasPrefix(line, "{") || strings.HasPrefix(line, "[") {
+		return false
+	}
+	if !modelIDPattern.MatchString(line) {
+		return false
+	}
+	if strings.ContainsAny(line, "/:-.") {
+		return true
+	}
+	return containsLetter(line) && containsDigit(line)
+}
+
+func containsLetter(value string) bool {
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			return true
+		}
+	}
+	return false
+}
+
+func containsDigit(value string) bool {
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	return false
 }

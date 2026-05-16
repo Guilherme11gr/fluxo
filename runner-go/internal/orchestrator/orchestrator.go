@@ -11,6 +11,7 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
 	"github.com/fluxo-app/fluxo-runner/internal/logging"
+	"github.com/fluxo-app/fluxo-runner/internal/runner"
 	agentsync "github.com/fluxo-app/fluxo-runner/internal/sync"
 )
 
@@ -123,6 +124,7 @@ func (m *RunnerManager) RunOnce(ctx context.Context, agents []config.AgentConfig
 		}()
 	}
 	wg.Wait()
+	m.setAgentsOffline(agents)
 	_, _ = api.HeartbeatRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), m.runnerID, api.RunnerHeartbeatParams{Status: "OFFLINE"})
 	return nil
 }
@@ -163,13 +165,25 @@ func (m *RunnerManager) reconcileAgents(ctx context.Context, agents []config.Age
 
 func (m *RunnerManager) stopAll() {
 	m.agentsMu.Lock()
+	agents := make([]config.AgentConfig, 0, len(m.workers))
 	defer m.agentsMu.Unlock()
 	for id, worker := range m.workers {
+		worker.mu.RLock()
+		agents = append(agents, worker.agent)
+		worker.mu.RUnlock()
 		worker.Stop()
 		delete(m.workers, id)
 	}
+	m.setAgentsOffline(agents)
 	if m.runnerID != "" {
 		_, _ = api.HeartbeatRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), m.runnerID, api.RunnerHeartbeatParams{Status: "OFFLINE"})
+	}
+}
+
+func (m *RunnerManager) setAgentsOffline(agents []config.AgentConfig) {
+	for _, agent := range agents {
+		client := api.NewClient(m.apiURL, m.apiKey, agent.Name)
+		runner.SendHeartbeat(client, agent, "OFFLINE")
 	}
 }
 
