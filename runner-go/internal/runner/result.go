@@ -3,17 +3,19 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 )
 
 type StructuredResultSource string
 
 const (
-	StructuredResultSourceModel    StructuredResultSource = "model"
-	StructuredResultSourceRepaired StructuredResultSource = "repaired"
+	StructuredResultSourceModel     StructuredResultSource = "model"
+	StructuredResultSourceRepaired  StructuredResultSource = "repaired"
 	StructuredResultSourceExtracted StructuredResultSource = "extracted"
-	StructuredResultSourceDerived  StructuredResultSource = "derived"
+	StructuredResultSourceDerived   StructuredResultSource = "derived"
 )
 
 type ExecutionResultBuildMeta struct {
@@ -77,7 +79,7 @@ type ExecutionResultV1 struct {
 	Git              ExecutionResultGit              `json:"git"`
 	Followups        []string                        `json:"followups"`
 	MemoryCandidates []string                        `json:"memoryCandidates"`
-	SkillCandidates []ExecutionResultSkillCandidate `json:"skillCandidates"`
+	SkillCandidates  []ExecutionResultSkillCandidate `json:"skillCandidates"`
 }
 
 func BuildExecutionResultV1(success bool, readableOutput string, exitCode int) map[string]interface{} {
@@ -123,7 +125,6 @@ func BuildExecutionResultV1WithContextAndMeta(success bool, readableOutput strin
 	return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, ExecutionResultBuildMeta{}, ctx)
 }
 
-
 func buildDerivedExecutionResult(success bool, strippedOutput, readableOutput string, exitCode int, meta ExecutionResultBuildMeta, ctx ExecutionResultDerivedContext) (map[string]interface{}, ExecutionResultBuildMeta) {
 	filesTouched := dedupeAndSortStrings(ctx.FilesTouched)
 	checksRun := cloneExecutionChecks(ctx.ChecksRun)
@@ -165,20 +166,14 @@ func ParseExecutionResultV1(text string) (*ExecutionResultV1, error) {
 }
 
 func ParseExecutionResultV1Map(data map[string]interface{}) (*ExecutionResultV1, error) {
-	bytes, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
+	if data == nil {
+		return nil, fmt.Errorf("execution result is nil")
 	}
-	var result ExecutionResultV1
-	if err := json.Unmarshal(bytes, &result); err != nil {
-		return nil, err
-	}
+
+	result := normalizeExecutionResultV1(data)
 	ensureExecutionResultDefaults(&result)
 	if result.SchemaVersion == "" {
 		result.SchemaVersion = "v1"
-	}
-	if result.Status == "" {
-		return nil, fmt.Errorf("status is required")
 	}
 	if result.Git.Mode == "" {
 		result.Git.Mode = "manual"
@@ -457,4 +452,436 @@ func cloneExecutionChecks(checks []ExecutionResultCheck) []ExecutionResultCheck 
 	cloned := make([]ExecutionResultCheck, len(checks))
 	copy(cloned, checks)
 	return cloned
+}
+
+func normalizeExecutionResultV1(data map[string]interface{}) ExecutionResultV1 {
+	return ExecutionResultV1{
+		SchemaVersion:    normalizeExecutionString(data["schemaVersion"]),
+		Status:           normalizeExecutionStatus(data["status"]),
+		Summary:          normalizeExecutionString(data["summary"]),
+		WhatChanged:      normalizeExecutionStringSlice(data["whatChanged"]),
+		Decisions:        normalizeExecutionStringSlice(data["decisions"]),
+		Risks:            normalizeExecutionStringSlice(data["risks"]),
+		ChecksRun:        normalizeExecutionChecks(data["checksRun"]),
+		FilesTouched:     normalizeExecutionStringSlice(data["filesTouched"]),
+		Git:              normalizeExecutionGit(data["git"]),
+		Followups:        normalizeExecutionStringSlice(data["followups"]),
+		MemoryCandidates: normalizeExecutionStringSlice(data["memoryCandidates"]),
+		SkillCandidates:  normalizeExecutionSkillCandidates(data["skillCandidates"]),
+	}
+}
+
+func normalizeExecutionStatus(value interface{}) string {
+	raw := strings.ToLower(normalizeExecutionString(value))
+	switch raw {
+	case "success", "successful", "succeeded", "completed", "done", "ok", "passed":
+		return "success"
+	case "failed", "failure", "fail", "timed_out", "timeout", "cancelled", "canceled":
+		return "failed"
+	case "error", "errored":
+		return "error"
+	case "":
+		return ""
+	}
+
+	switch {
+	case strings.Contains(raw, "success"), strings.Contains(raw, "pass"), strings.Contains(raw, "done"), strings.Contains(raw, "complete"):
+		return "success"
+	case strings.Contains(raw, "error"):
+		return "error"
+	case strings.Contains(raw, "fail"), strings.Contains(raw, "timeout"), strings.Contains(raw, "cancel"):
+		return "failed"
+	default:
+		return ""
+	}
+}
+
+func normalizeExecutionStringSlice(value interface{}) []string {
+	items := executionSliceItems(value)
+	if items == nil {
+		return splitExecutionListString(normalizeExecutionString(value))
+	}
+
+	result := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		for _, entry := range splitExecutionListString(normalizeExecutionString(item)) {
+			if entry == "" {
+				continue
+			}
+			if _, ok := seen[entry]; ok {
+				continue
+			}
+			seen[entry] = struct{}{}
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+func normalizeExecutionChecks(value interface{}) []ExecutionResultCheck {
+	items := executionSliceItems(value)
+	if items == nil {
+		check := normalizeExecutionCheck(value)
+		if check == nil {
+			return []ExecutionResultCheck{}
+		}
+		return []ExecutionResultCheck{*check}
+	}
+
+	result := make([]ExecutionResultCheck, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		check := normalizeExecutionCheck(item)
+		if check == nil {
+			continue
+		}
+		key := check.Name + "\x00" + check.Status
+		if check.Details != nil {
+			key += "\x00" + *check.Details
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, *check)
+	}
+	return result
+}
+
+func normalizeExecutionCheck(value interface{}) *ExecutionResultCheck {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case ExecutionResultCheck:
+		check := typed
+		check.Name = normalizeExecutionString(check.Name)
+		check.Status = normalizeExecutionCheckStatus(check.Status)
+		if check.Status == "" {
+			check.Status = "skipped"
+		}
+		if check.Details != nil {
+			details := normalizeExecutionString(*check.Details)
+			if details == "" {
+				check.Details = nil
+			} else {
+				check.Details = &details
+			}
+		}
+		if check.Name == "" {
+			if check.Details == nil {
+				return nil
+			}
+			check.Name = *check.Details
+			check.Details = nil
+		}
+		return &check
+	case map[string]interface{}:
+		name := firstNonEmptyExecutionString(typed["name"], typed["command"], typed["check"], typed["title"])
+		details := firstNonEmptyExecutionString(typed["details"], typed["message"], typed["summary"])
+		if name == "" {
+			name = details
+			details = ""
+		}
+		if name == "" {
+			return nil
+		}
+		status := normalizeExecutionCheckStatus(typed["status"])
+		if status == "" {
+			status = normalizeExecutionCheckStatus(name)
+		}
+		if status == "" {
+			status = "skipped"
+		}
+		var detailsPtr *string
+		if details != "" && details != name {
+			detailsPtr = &details
+		}
+		return &ExecutionResultCheck{Name: name, Status: status, Details: detailsPtr}
+	default:
+		name := normalizeExecutionString(value)
+		if name == "" {
+			return nil
+		}
+		status := normalizeExecutionCheckStatus(name)
+		if status == "" {
+			status = "skipped"
+		}
+		return &ExecutionResultCheck{Name: name, Status: status}
+	}
+}
+
+func normalizeExecutionCheckStatus(value interface{}) string {
+	raw := strings.ToLower(normalizeExecutionString(value))
+	switch raw {
+	case "passed", "pass", "success", "successful", "succeeded", "completed", "ok":
+		return "passed"
+	case "failed", "fail", "failure", "error", "errored":
+		return "failed"
+	case "skipped", "skip", "not_run", "not-run", "pending", "cancelled", "canceled", "unknown":
+		return "skipped"
+	case "":
+		return ""
+	}
+
+	switch {
+	case strings.Contains(raw, "fail"), strings.Contains(raw, "error"):
+		return "failed"
+	case strings.Contains(raw, "pass"), strings.Contains(raw, "success"), strings.Contains(raw, "complete"), strings.Contains(raw, "ok"):
+		return "passed"
+	case strings.Contains(raw, "skip"), strings.Contains(raw, "pending"), strings.Contains(raw, "cancel"):
+		return "skipped"
+	default:
+		return ""
+	}
+}
+
+func normalizeExecutionGit(value interface{}) ExecutionResultGit {
+	switch typed := value.(type) {
+	case nil:
+		return ExecutionResultGit{}
+	case ExecutionResultGit:
+		git := typed
+		git.Mode = normalizeExecutionString(git.Mode)
+		git.BaseBranch = normalizeExecutionStringPointer(git.BaseBranch)
+		git.Branch = normalizeExecutionStringPointer(git.Branch)
+		git.CommitShas = normalizeExecutionStringSlice(git.CommitShas)
+		git.PRUrl = normalizeExecutionStringPointer(git.PRUrl)
+		git.PRNumber = normalizeExecutionIntPointer(git.PRNumber)
+		return git
+	case map[string]interface{}:
+		return ExecutionResultGit{
+			Mode:       normalizeExecutionString(typed["mode"]),
+			BaseBranch: normalizeExecutionStringPointer(typed["baseBranch"]),
+			Branch:     normalizeExecutionStringPointer(typed["branch"]),
+			CommitShas: normalizeExecutionStringSlice(typed["commitShas"]),
+			PRUrl:      normalizeExecutionStringPointer(typed["prUrl"]),
+			PRNumber:   normalizeExecutionIntPointer(typed["prNumber"]),
+		}
+	default:
+		mode := normalizeExecutionString(value)
+		if mode == "" {
+			return ExecutionResultGit{}
+		}
+		return ExecutionResultGit{Mode: mode, CommitShas: []string{}}
+	}
+}
+
+func normalizeExecutionSkillCandidates(value interface{}) []ExecutionResultSkillCandidate {
+	items := executionSliceItems(value)
+	if items == nil {
+		candidate := normalizeExecutionSkillCandidate(value)
+		if candidate == nil {
+			return []ExecutionResultSkillCandidate{}
+		}
+		return []ExecutionResultSkillCandidate{*candidate}
+	}
+
+	result := make([]ExecutionResultSkillCandidate, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		candidate := normalizeExecutionSkillCandidate(item)
+		if candidate == nil {
+			continue
+		}
+		key := candidate.Name + "\x00" + candidate.Reason
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, *candidate)
+	}
+	return result
+}
+
+func normalizeExecutionSkillCandidate(value interface{}) *ExecutionResultSkillCandidate {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case ExecutionResultSkillCandidate:
+		candidate := typed
+		candidate.Name = normalizeExecutionString(candidate.Name)
+		candidate.Reason = normalizeExecutionString(candidate.Reason)
+		if candidate.Name == "" {
+			return nil
+		}
+		return &candidate
+	case map[string]interface{}:
+		name := firstNonEmptyExecutionString(typed["name"], typed["skill"], typed["id"], typed["title"])
+		reason := firstNonEmptyExecutionString(typed["reason"], typed["why"], typed["description"], typed["summary"])
+		if name == "" {
+			if reason == "" {
+				return nil
+			}
+			name = reason
+			reason = ""
+		}
+		return &ExecutionResultSkillCandidate{Name: name, Reason: reason}
+	default:
+		name := normalizeExecutionString(value)
+		if name == "" {
+			return nil
+		}
+		return &ExecutionResultSkillCandidate{Name: name}
+	}
+}
+
+func executionSliceItems(value interface{}) []interface{} {
+	if value == nil {
+		return nil
+	}
+	if items, ok := value.([]interface{}); ok {
+		return items
+	}
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() {
+		return nil
+	}
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return nil
+	}
+	items := make([]interface{}, 0, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		items = append(items, rv.Index(i).Interface())
+	}
+	return items
+}
+
+func splitExecutionListString(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if !strings.Contains(value, "\n") {
+		return []string{value}
+	}
+
+	lines := strings.Split(value, "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
+		line = strings.TrimPrefix(line, "• ")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		result = append(result, line)
+	}
+	if len(result) == 0 {
+		return []string{value}
+	}
+	return result
+}
+
+func firstNonEmptyExecutionString(values ...interface{}) string {
+	for _, value := range values {
+		if normalized := normalizeExecutionString(value); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func normalizeExecutionStringPointer(value interface{}) *string {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case *string:
+		if typed == nil {
+			return nil
+		}
+		normalized := normalizeExecutionString(*typed)
+		if normalized == "" {
+			return nil
+		}
+		return &normalized
+	default:
+		normalized := normalizeExecutionString(value)
+		if normalized == "" {
+			return nil
+		}
+		return &normalized
+	}
+}
+
+func normalizeExecutionIntPointer(value interface{}) *int {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case *int:
+		if typed == nil {
+			return nil
+		}
+		parsed := *typed
+		return &parsed
+	case int:
+		parsed := typed
+		return &parsed
+	case int64:
+		parsed := int(typed)
+		return &parsed
+	case float64:
+		parsed := int(typed)
+		return &parsed
+	case string:
+		normalized := strings.TrimSpace(typed)
+		if normalized == "" {
+			return nil
+		}
+		parsed, err := strconv.Atoi(normalized)
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	default:
+		rv := reflect.ValueOf(value)
+		if !rv.IsValid() {
+			return nil
+		}
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			parsed := int(rv.Int())
+			return &parsed
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			parsed := int(rv.Uint())
+			return &parsed
+		case reflect.Float32, reflect.Float64:
+			parsed := int(rv.Float())
+			return &parsed
+		default:
+			return nil
+		}
+	}
+}
+
+func normalizeExecutionString(value interface{}) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case *string:
+		if typed == nil {
+			return ""
+		}
+		return strings.TrimSpace(*typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		rv := reflect.ValueOf(value)
+		if !rv.IsValid() {
+			return ""
+		}
+		switch rv.Kind() {
+		case reflect.Bool,
+			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64:
+			return strings.TrimSpace(fmt.Sprint(value))
+		default:
+			return ""
+		}
+	}
 }

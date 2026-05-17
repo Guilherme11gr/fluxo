@@ -16,8 +16,8 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
-	"github.com/fluxo-app/fluxo-runner/internal/extractor"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
+	"github.com/fluxo-app/fluxo-runner/internal/extractor"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
 
@@ -241,7 +241,7 @@ func TestValidateExtractedResultNormalizesSuccessPath(t *testing.T) {
 		"schemaVersion": "broken",
 		"status":        "failed",
 		"summary":       "",
-		"whatChanged":   []string{},
+		"whatChanged":   []string{"Hardened extraction fallback validation."},
 		"decisions":     []string{},
 		"risks":         []string{},
 		"checksRun":     []map[string]interface{}{},
@@ -271,11 +271,79 @@ func TestValidateExtractedResultNormalizesSuccessPath(t *testing.T) {
 	if normalized["status"] != "success" {
 		t.Fatalf("expected status forced to success, got %#v", normalized)
 	}
-	if normalized["summary"] != "Updated runner-go/internal/orchestrator/worker.go." {
-		t.Fatalf("expected fallback summary, got %#v", normalized)
+	if normalized["summary"] != "Hardened extraction fallback validation." {
+		t.Fatalf("expected summary to reuse meaningful whatChanged content, got %#v", normalized)
 	}
 	if got := ifaceStrings(normalized["filesTouched"]); len(got) != 1 || got[0] != "runner-go/internal/orchestrator/worker.go" {
 		t.Fatalf("expected runner files to win, got %#v", normalized["filesTouched"])
+	}
+}
+
+func TestValidateExtractedResultCoercesSingularExtractorFields(t *testing.T) {
+	normalized, err := validateExtractedResult(map[string]interface{}{
+		"status":      "completed",
+		"summary":     "",
+		"whatChanged": "Improved extracted result normalization for malformed Gemini payloads.",
+		"decisions":   "Kept runner-derived facts authoritative when the extractor omits them.",
+		"checksRun": map[string]interface{}{
+			"name":   "go test ./...",
+			"status": "completed",
+		},
+		"filesTouched":    "runner-go/internal/runner/result.go",
+		"git":             "manual",
+		"skillCandidates": "fluxo-runner-output-v1",
+	}, extractedValidationContext{
+		ExecSuccess:     true,
+		FilesTouched:    []string{"runner-go/internal/orchestrator/worker.go"},
+		FallbackSummary: "Updated runner-go/internal/orchestrator/worker.go.",
+	})
+	if err != nil {
+		t.Fatalf("expected malformed extractor payload to be normalized, got %v", err)
+	}
+	if normalized["summary"] != "Improved extracted result normalization for malformed Gemini payloads." {
+		t.Fatalf("expected summary to reuse whatChanged entry, got %#v", normalized["summary"])
+	}
+	if got := ifaceStrings(normalized["decisions"]); len(got) != 1 || got[0] != "Kept runner-derived facts authoritative when the extractor omits them." {
+		t.Fatalf("expected decisions string to become array, got %#v", normalized["decisions"])
+	}
+	checks, ok := normalized["checksRun"].([]interface{})
+	if !ok || len(checks) != 1 {
+		t.Fatalf("expected one normalized check, got %#v", normalized["checksRun"])
+	}
+	check, ok := checks[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected normalized check map, got %#v", checks[0])
+	}
+	if check["status"] != "passed" {
+		t.Fatalf("expected completed check to normalize to passed, got %#v", check)
+	}
+	if got := ifaceStrings(normalized["filesTouched"]); len(got) != 1 || got[0] != "runner-go/internal/orchestrator/worker.go" {
+		t.Fatalf("expected runner-detected files to override extractor files, got %#v", normalized["filesTouched"])
+	}
+	skillCandidates, ok := normalized["skillCandidates"].([]interface{})
+	if !ok || len(skillCandidates) != 1 {
+		t.Fatalf("expected normalized skill candidate, got %#v", normalized["skillCandidates"])
+	}
+	skill, ok := skillCandidates[0].(map[string]interface{})
+	if !ok || skill["name"] != "fluxo-runner-output-v1" {
+		t.Fatalf("expected skill candidate string to become object, got %#v", skillCandidates[0])
+	}
+}
+
+func TestValidateExtractedResultRejectsMeaninglessPayload(t *testing.T) {
+	_, err := validateExtractedResult(map[string]interface{}{
+		"status": "success",
+		"git":    "manual",
+	}, extractedValidationContext{
+		ExecSuccess:     true,
+		FilesTouched:    []string{"runner-go/internal/orchestrator/worker.go"},
+		FallbackSummary: "Updated runner-go/internal/orchestrator/worker.go.",
+	})
+	if err == nil {
+		t.Fatal("expected meaningless extractor payload to be rejected")
+	}
+	if !strings.Contains(err.Error(), "meaningful structured content") {
+		t.Fatalf("expected meaningful-content error, got %v", err)
 	}
 }
 
@@ -329,14 +397,14 @@ func TestTryExtractStructuredResultUsesConfiguredExtractor(t *testing.T) {
 	}
 
 	worker := NewAgentWorker("http://example.com", "key", "runner-1", config.AgentConfig{
-		Name: "builder",
-		Tool: "opencode",
+		Name:  "builder",
+		Tool:  "opencode",
 		Model: "glm-5.1",
 	}, time.Second, &config.ResultExtractorConfig{
-		Enabled:   boolPtr(true),
-		Provider:  "gemini",
-		Model:     "gemini-3.1-flash-lite",
-		APIKey:    "test-key",
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
 		TimeoutSec: 10,
 	})
 
@@ -375,24 +443,20 @@ func TestRunOncePromotesDerivedResultToExtracted(t *testing.T) {
 		}
 		return &stubExtractor{result: map[string]interface{}{
 			"schemaVersion": "v1",
-			"status":        "failed",
+			"status":        "completed",
 			"summary":       "",
-			"whatChanged":   []string{"Extractor inferred changes."},
-			"decisions":     []string{},
+			"whatChanged":   "Extractor inferred changes.",
+			"decisions":     "Kept derived fallback data for any facts missing from the model output.",
 			"risks":         []string{},
-			"checksRun":     []map[string]interface{}{},
-			"filesTouched":  []string{},
-			"git": map[string]interface{}{
-				"mode":       "",
-				"baseBranch": nil,
-				"branch":     nil,
-				"commitShas": []string{},
-				"prUrl":      nil,
-				"prNumber":   nil,
+			"checksRun": map[string]interface{}{
+				"name":   "go test ./...",
+				"status": "completed",
 			},
+			"filesTouched":     []string{},
+			"git":              "manual",
 			"followups":        []string{},
 			"memoryCandidates": []string{},
-			"skillCandidates":  []map[string]interface{}{},
+			"skillCandidates":  "fluxo-runner-output-v1",
 		}}, nil
 	}
 
@@ -437,10 +501,10 @@ func TestRunOncePromotesDerivedResultToExtracted(t *testing.T) {
 		DoneStatus:  "DONE",
 		Timeout:     30,
 	}, time.Second, &config.ResultExtractorConfig{
-		Enabled:   boolPtr(true),
-		Provider:  "gemini",
-		Model:     "gemini-3.1-flash-lite",
-		APIKey:    "test-key",
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
 		TimeoutSec: 10,
 	})
 	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
@@ -472,8 +536,11 @@ func TestRunOncePromotesDerivedResultToExtracted(t *testing.T) {
 	if got := ifaceStrings(result["filesTouched"]); len(got) != 1 || got[0] != "changed.txt" {
 		t.Fatalf("expected runner-detected filesTouched, got %#v", result["filesTouched"])
 	}
-	if summary, _ := result["summary"].(string); !strings.Contains(summary, "changed.txt") {
-		t.Fatalf("expected fallback summary to mention changed file, got %#v", result["summary"])
+	if summary, _ := result["summary"].(string); summary != "Extractor inferred changes." {
+		t.Fatalf("expected summary to be promoted from whatChanged, got %#v", result["summary"])
+	}
+	if got := ifaceStrings(result["decisions"]); len(got) != 1 || got[0] != "Kept derived fallback data for any facts missing from the model output." {
+		t.Fatalf("expected malformed decisions field to be normalized, got %#v", result["decisions"])
 	}
 	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
 	if !ok {
@@ -549,10 +616,10 @@ func TestRunOnceFallsBackToDerivedWhenExtractorReturnsNilResult(t *testing.T) {
 		DoneStatus:  "DONE",
 		Timeout:     30,
 	}, time.Second, &config.ResultExtractorConfig{
-		Enabled:   boolPtr(true),
-		Provider:  "gemini",
-		Model:     "gemini-3.1-flash-lite",
-		APIKey:    "test-key",
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
 		TimeoutSec: 10,
 	})
 	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
@@ -598,6 +665,115 @@ func TestRunOnceFallsBackToDerivedWhenExtractorReturnsNilResult(t *testing.T) {
 	}
 	if got := ifaceStrings(result["filesTouched"]); len(got) != 1 || got[0] != "derived.txt" {
 		t.Fatalf("expected derived filesTouched, got %#v", result["filesTouched"])
+	}
+}
+
+func TestRunOnceFallsBackToDerivedWhenExtractorReturnsMeaninglessPayload(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		return &stubExtractor{result: map[string]interface{}{
+			"status": "success",
+			"git":    "manual",
+		}}, nil
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-3","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":14,"title":"Fallback result","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-3","orgId":"org-1","taskId":"task-3","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-3","projectId":"project-1","executionId":"exec-3","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-3","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-3":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-3/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-3/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
+		TimeoutSec: 10,
+	})
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "derived-meaningless.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	outputContract, ok := metadata["outputContract"].(map[string]interface{})
+	if !ok || outputContract["source"] != string(runner.StructuredResultSourceDerived) {
+		t.Fatalf("expected derived outputContract source, got %#v", metadata["outputContract"])
+	}
+	extractorMeta, ok := metadata["extractor"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected extractor metadata, got %#v", metadata["extractor"])
+	}
+	if extractorMeta["success"] != false {
+		t.Fatalf("expected extractor success=false, got %#v", extractorMeta)
+	}
+	if !strings.Contains(fmt.Sprint(extractorMeta["error"]), "meaningful structured content") {
+		t.Fatalf("expected meaningful-content error metadata, got %#v", extractorMeta)
+	}
+	result, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result map, got %#v", finalizeBody["result"])
+	}
+	if result["status"] != "success" {
+		t.Fatalf("expected derived success result, got %#v", result)
+	}
+	if got := ifaceStrings(result["filesTouched"]); len(got) != 1 || got[0] != "derived-meaningless.txt" {
+		t.Fatalf("expected derived filesTouched, got %#v", result["filesTouched"])
+	}
+	if summary, _ := result["summary"].(string); !strings.Contains(summary, "derived-meaningless.txt") {
+		t.Fatalf("expected derived summary to mention changed file, got %#v", result["summary"])
 	}
 }
 
@@ -665,9 +841,9 @@ func TestGitWorkflowNoWriteSkipsEverything(t *testing.T) {
 
 func TestRunOnceFinalizesFailureWhenEffectiveWorkdirIsEmpty(t *testing.T) {
 	var (
-		mu            sync.Mutex
-		finalizeBody  map[string]interface{}
-		heartbeats    []string
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+		heartbeats   []string
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -677,7 +853,7 @@ func TestRunOnceFinalizesFailureWhenEffectiveWorkdirIsEmpty(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/agents":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
-				"data": map[string]any{"id": "agent-reg-1"},
+				"data":    map[string]any{"id": "agent-reg-1"},
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/agents/agent-reg-1/heartbeat":
 			var body map[string]interface{}

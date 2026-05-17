@@ -11,17 +11,17 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
-	"github.com/fluxo-app/fluxo-runner/internal/extractor"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
+	"github.com/fluxo-app/fluxo-runner/internal/extractor"
 	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
 
 type AgentWorker struct {
-	apiURL       string
-	apiKey       string
-	runnerID     string
-	pollInterval time.Duration
+	apiURL          string
+	apiKey          string
+	runnerID        string
+	pollInterval    time.Duration
 	resultExtractor *config.ResultExtractorConfig
 	executorFactory func(agent config.AgentConfig) executor.Executor
 
@@ -34,14 +34,14 @@ var newStructuredResultExtractor = extractor.NewExtractor
 
 func NewAgentWorker(apiURL, apiKey, runnerID string, agent config.AgentConfig, pollInterval time.Duration, resultExtractor *config.ResultExtractorConfig) *AgentWorker {
 	return &AgentWorker{
-		apiURL:       apiURL,
-		apiKey:       apiKey,
-		runnerID:     runnerID,
-		pollInterval: pollInterval,
+		apiURL:          apiURL,
+		apiKey:          apiKey,
+		runnerID:        runnerID,
+		pollInterval:    pollInterval,
 		resultExtractor: resultExtractor,
 		executorFactory: newExecutor,
-		agent:        agent,
-		stopCh:       make(chan struct{}),
+		agent:           agent,
+		stopCh:          make(chan struct{}),
 	}
 }
 
@@ -151,9 +151,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			BlockReason:   nullableString(errorMessage),
 			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
-				"tool":  agent.Tool,
-				"model": agent.Model,
-				"git":   runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
+				"tool":           agent.Tool,
+				"model":          agent.Model,
+				"git":            runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
 				"outputContract": outputContractMetadata(resultMeta),
 				"runtimeBinding": map[string]interface{}{
 					"id":                  claimed.RuntimeBinding.ID,
@@ -204,9 +204,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			BlockReason:   nullableString(errorMessage),
 			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
-				"tool":  agent.Tool,
-				"model": agent.Model,
-				"git":   runner.GitMetadataMap(failedGitSnapshot),
+				"tool":           agent.Tool,
+				"model":          agent.Model,
+				"git":            runner.GitMetadataMap(failedGitSnapshot),
 				"outputContract": outputContractMetadata(resultMeta),
 				"runtimeBinding": map[string]interface{}{
 					"id":                  claimed.RuntimeBinding.ID,
@@ -258,9 +258,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			BlockReason:   nullableString(errorMessage),
 			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
-				"tool":  agent.Tool,
-				"model": agent.Model,
-				"git":   runner.GitMetadataMap(failedGitSnapshot),
+				"tool":           agent.Tool,
+				"model":          agent.Model,
+				"git":            runner.GitMetadataMap(failedGitSnapshot),
 				"outputContract": outputContractMetadata(resultMeta),
 				"preflight": map[string]interface{}{
 					"ok":          preflight.OK,
@@ -545,9 +545,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		BlockReason:         nullableString(blockReason),
 		Comment:             comment,
 		Metadata: map[string]interface{}{
-			"tool":  agent.Tool,
-			"model": agent.Model,
-			"git":   runner.GitMetadataMap(gitSnapshot),
+			"tool":      agent.Tool,
+			"model":     agent.Model,
+			"git":       runner.GitMetadataMap(gitSnapshot),
 			"extractor": extractorMeta,
 			"execution": map[string]interface{}{
 				"timeoutSeconds": int(timeout.Seconds()),
@@ -743,6 +743,9 @@ func validateExtractedResult(result map[string]interface{}, ctx extractedValidat
 	if parsed == nil {
 		return nil, fmt.Errorf("extracted result parsed to nil")
 	}
+	if !hasMeaningfulExtractedContent(parsed, ctx) {
+		return nil, fmt.Errorf("extracted result did not contain meaningful structured content")
+	}
 	parsed.SchemaVersion = "v1"
 	if ctx.ExecSuccess {
 		parsed.Status = "success"
@@ -754,8 +757,13 @@ func validateExtractedResult(result map[string]interface{}, ctx extractedValidat
 	if strings.TrimSpace(parsed.Git.Mode) == "" {
 		parsed.Git.Mode = "manual"
 	}
-	if strings.TrimSpace(parsed.Summary) == "" && strings.TrimSpace(ctx.FallbackSummary) != "" {
-		parsed.Summary = strings.TrimSpace(ctx.FallbackSummary)
+	if strings.TrimSpace(parsed.Summary) == "" {
+		switch {
+		case len(parsed.WhatChanged) > 0 && strings.TrimSpace(parsed.WhatChanged[0]) != "":
+			parsed.Summary = strings.TrimSpace(parsed.WhatChanged[0])
+		case strings.TrimSpace(ctx.FallbackSummary) != "":
+			parsed.Summary = strings.TrimSpace(ctx.FallbackSummary)
+		}
 	}
 	data, err := json.Marshal(parsed)
 	if err != nil {
@@ -766,6 +774,41 @@ func validateExtractedResult(result map[string]interface{}, ctx extractedValidat
 		return nil, fmt.Errorf("normalize extracted result: %w", err)
 	}
 	return normalized, nil
+}
+
+func hasMeaningfulExtractedContent(result *runner.ExecutionResultV1, ctx extractedValidationContext) bool {
+	if result == nil {
+		return false
+	}
+	if strings.TrimSpace(result.Summary) != "" {
+		return true
+	}
+	if len(result.WhatChanged) > 0 {
+		return true
+	}
+	if len(result.Decisions) > 0 {
+		return true
+	}
+	if len(result.Risks) > 0 {
+		return true
+	}
+	if len(result.ChecksRun) > 0 {
+		return true
+	}
+	if len(result.Followups) > 0 {
+		return true
+	}
+	if len(result.MemoryCandidates) > 0 {
+		return true
+	}
+	if len(result.SkillCandidates) > 0 {
+		return true
+	}
+	runnerFiles := dedupeStrings(ctx.FilesTouched)
+	if len(result.FilesTouched) > 0 && len(runnerFiles) == 0 {
+		return true
+	}
+	return false
 }
 
 func dedupeStrings(values []string) []string {

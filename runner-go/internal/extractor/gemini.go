@@ -35,7 +35,7 @@ func NewGeminiExtractor(apiKey, model string, timeoutSec, maxInputChars int) *Ge
 	}
 }
 
-func (e *GeminiExtractor) Name() string    { return "gemini" }
+func (e *GeminiExtractor) Name() string     { return "gemini" }
 func (e *GeminiExtractor) Provider() string { return "gemini" }
 func (e *GeminiExtractor) Model() string    { return e.model }
 
@@ -109,10 +109,10 @@ func (e *GeminiExtractor) Extract(ctx context.Context, req ExtractRequest) (*Ext
 	}
 
 	return &ExtractResult{
-		Result:    result,
-		Source:    SourceExtracted,
-		Model:     e.model,
-		LatencyMs: time.Since(startedAt).Milliseconds(),
+		Result:     result,
+		Source:     SourceExtracted,
+		Model:      e.model,
+		LatencyMs:  time.Since(startedAt).Milliseconds(),
 		InputChars: inputChars,
 	}, nil
 }
@@ -161,13 +161,39 @@ func (e *GeminiExtractor) buildPrompt(req ExtractRequest) string {
 
 	b.WriteString("## Instructions\n")
 	b.WriteString("1. Extract the structured result from the log above.\n")
-	b.WriteString("2. Use these rules:\n")
+	b.WriteString("2. Return a JSON object with this exact shape and field types:\n")
+	b.WriteString(`{
+  "schemaVersion": "v1",
+  "status": "success",
+  "summary": "One-sentence human summary.",
+  "whatChanged": ["Concrete change"],
+  "decisions": ["Technical decision"],
+  "risks": ["Explicit risk if mentioned"],
+  "checksRun": [{"name": "go test ./...", "status": "passed", "details": null}],
+  "filesTouched": ["path/to/file"],
+  "git": {
+    "mode": "manual",
+    "baseBranch": null,
+    "branch": null,
+    "commitShas": [],
+    "prUrl": null,
+    "prNumber": null
+  },
+  "followups": [],
+  "memoryCandidates": [],
+  "skillCandidates": []
+}
+`)
+	b.WriteString("3. Use these rules:\n")
 	b.WriteString("   - status: the execution status provided above\n")
 	b.WriteString(fmt.Sprintf("   - summary: one sentence describing what happened (%d chars max)\n", 200))
 	b.WriteString("   - whatChanged: concrete changes mentioned in the log (implemented X, fixed Y, updated Z)\n")
 	b.WriteString("   - decisions: architectural/design choices the agent made\n")
 	b.WriteString("   - risks: only include risks the agent explicitly mentioned\n")
 	b.WriteString("   - checksRun: only include checks that appear in the log (e.g. npm test, go test)\n")
+	b.WriteString("   - every array field must stay an array even with a single item; never return a bare string for whatChanged, decisions, risks, filesTouched, followups, memoryCandidates, or checksRun\n")
+	b.WriteString("   - checksRun entries must be objects with name, status, and details\n")
+	b.WriteString("   - skillCandidates must be an array of objects with name and reason\n")
 	if len(req.FilesTouched) > 0 {
 		b.WriteString("   - filesTouched: use the exact list provided above unless the log mentions additional files\n")
 	} else {
@@ -182,9 +208,9 @@ func (e *GeminiExtractor) buildPrompt(req ExtractRequest) string {
 	b.WriteString("   - followups: only if the log explicitly mentions follow-up work\n")
 	b.WriteString("   - memoryCandidates: []\n")
 	b.WriteString("   - skillCandidates: []\n")
-	b.WriteString("3. Do NOT invent facts not present in the log.\n")
-	b.WriteString("4. Return ONLY the JSON object, no other text, no markdown fences, no explanation.\n")
-	b.WriteString("5. The JSON must be a valid FluXo ExecutionResultV1 object with schemaVersion: \"v1\".\n")
+	b.WriteString("4. Do NOT invent facts not present in the log.\n")
+	b.WriteString("5. Return ONLY the JSON object, no other text, no markdown fences, no explanation.\n")
+	b.WriteString("6. The JSON must be a valid FluXo ExecutionResultV1 object with schemaVersion: \"v1\".\n")
 
 	return b.String()
 }
@@ -230,8 +256,8 @@ type geminiCandidate struct {
 }
 
 type geminiContent struct {
-	Role  string        `json:"role"`
-	Parts []geminiPart  `json:"parts"`
+	Role  string       `json:"role"`
+	Parts []geminiPart `json:"parts"`
 }
 
 type geminiPart struct {
