@@ -430,13 +430,14 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		}
 	}
 	readableOutput := runner.ExtractReadableOutput(rawOutput)
-	strippedOutput := runner.StripStructuredResultBlock(readableOutput)
+	blockAwareOutput := appendStructuredBlocks(readableOutput, rawOutput)
+	strippedOutput := runner.StripStructuredResultBlock(blockAwareOutput)
 	failureHeadline := ""
-	structuredOutput := readableOutput
+	structuredOutput := blockAwareOutput
 	errorMessage := ""
 	blockReason := ""
 	if !result.Success {
-		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, readableOutput, timeout)
+		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, blockAwareOutput, timeout)
 	}
 	commentOutput := rawOutput
 	if failureHeadline != "" {
@@ -518,6 +519,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	structuredResult = runner.MergeGitResult(structuredResult, gitSnapshot)
 	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
 	structuredSummary := runner.ExecutionResultSummary(structuredResult)
+	agentSummary := parseAgentSummaryMetadata(rawOutput)
 
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
@@ -548,6 +550,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			"tool":      agent.Tool,
 			"model":     agent.Model,
 			"git":       runner.GitMetadataMap(gitSnapshot),
+			"agentSummary": agentSummaryValue(agentSummary),
 			"extractor": extractorMeta,
 			"execution": map[string]interface{}{
 				"timeoutSeconds": int(timeout.Seconds()),
@@ -603,6 +606,21 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	}
 
 	runner.SendHeartbeat(client, agent, "ONLINE")
+}
+
+func parseAgentSummaryMetadata(rawOutput string) *runner.AgentSummaryV1 {
+	summary, err := runner.ParseAgentSummary(rawOutput)
+	if err != nil || summary == nil {
+		return nil
+	}
+	return summary
+}
+
+func agentSummaryValue(summary *runner.AgentSummaryV1) interface{} {
+	if summary == nil {
+		return nil
+	}
+	return summary.ToMap()
 }
 
 func defaultStr(val, def string) string {
@@ -873,8 +891,26 @@ func executionFailureHeadline(result executor.Result, timeout time.Duration) str
 func buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline string, structuredResult map[string]interface{}) string {
 	sanitizedRawOutput := runner.StripStructuredResultBlock(rawOutput)
 	persisted := strings.TrimSpace(runner.FormatStreamForDisplay(sanitizedRawOutput))
+	hasCanonicalStructuredResult := false
+	if structured, err := runner.ParseExecutionResultV1(rawOutput); err == nil && structured != nil {
+		hasCanonicalStructuredResult = true
+	}
+	if summaryText := formatAgentSummaryOutput(rawOutput); summaryText != "" && !hasCanonicalStructuredResult && !strings.Contains(persisted, summaryText) {
+		if persisted == "" {
+			persisted = summaryText
+		} else {
+			persisted = strings.TrimSpace(summaryText + "\n\n" + persisted)
+		}
+	}
 	if persisted == "" {
 		persisted = strings.TrimSpace(runner.StripStructuredResultBlock(readableOutput))
+	}
+	if summaryText := formatAgentSummaryOutput(readableOutput); summaryText != "" && !hasCanonicalStructuredResult && !strings.Contains(persisted, summaryText) {
+		if persisted == "" {
+			persisted = summaryText
+		} else {
+			persisted = strings.TrimSpace(summaryText + "\n\n" + persisted)
+		}
 	}
 	if persisted == "" {
 		persisted = strings.TrimSpace(sanitizedRawOutput)
@@ -894,4 +930,56 @@ func buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline st
 		return failureHeadline
 	}
 	return failureHeadline + "\n\n" + persisted
+}
+
+func appendStructuredBlocks(primaryOutput, rawOutput string) string {
+	combined := strings.TrimSpace(primaryOutput)
+	appendBlock := func(block string) {
+		block = strings.TrimSpace(block)
+		if block == "" || strings.Contains(combined, block) {
+			return
+		}
+		if combined == "" {
+			combined = block
+		} else {
+			combined = strings.TrimSpace(combined + "\n\n" + block)
+		}
+	}
+	if summary, err := runner.ParseAgentSummary(rawOutput); err == nil && summary != nil {
+		appendBlock(runner.SerializeAgentSummaryV1(summary))
+	}
+	if structured, err := runner.ParseExecutionResultV1(rawOutput); err == nil && structured != nil {
+		appendBlock(runner.SerializeExecutionResultV1(structured.ToMap()))
+	}
+	return combined
+}
+
+func formatAgentSummaryOutput(raw string) string {
+	summary, err := runner.ParseAgentSummary(raw)
+	if err != nil || summary == nil {
+		return ""
+	}
+
+	var lines []string
+	if text := strings.TrimSpace(summary.Summary); text != "" {
+		lines = append(lines, text)
+	}
+	appendSection := func(title string, items []string) {
+		if len(items) == 0 {
+			return
+		}
+		lines = append(lines, title)
+		for _, item := range items {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			lines = append(lines, "- "+item)
+		}
+	}
+	appendSection("What changed:", summary.WhatChanged)
+	appendSection("Decisions:", summary.Decisions)
+	appendSection("Risks:", summary.Risks)
+	appendSection("Followups:", summary.Followups)
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

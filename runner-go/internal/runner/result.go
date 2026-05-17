@@ -14,6 +14,7 @@ type StructuredResultSource string
 const (
 	StructuredResultSourceModel     StructuredResultSource = "model"
 	StructuredResultSourceRepaired  StructuredResultSource = "repaired"
+	StructuredResultSourceSummary   StructuredResultSource = "summary"
 	StructuredResultSourceExtracted StructuredResultSource = "extracted"
 	StructuredResultSourceDerived   StructuredResultSource = "derived"
 )
@@ -31,6 +32,90 @@ type ExecutionResultDerivedContext struct {
 	WhatChanged  []string
 }
 
+type AgentSummaryV1 struct {
+	Version     string   `json:"version"`
+	Summary     string   `json:"summary"`
+	WhatChanged []string `json:"whatChanged"`
+	Decisions   []string `json:"decisions"`
+	Risks       []string `json:"risks"`
+	Followups   []string `json:"followups"`
+	Raw         string   `json:"raw,omitempty"`
+}
+
+func ParseAgentSummary(text string) (*AgentSummaryV1, error) {
+	summary, _, err := ParseAgentSummaryDetailed(text)
+	return summary, err
+}
+
+func ParseAgentSummaryDetailed(text string) (*AgentSummaryV1, ExecutionResultBuildMeta, error) {
+	block, span, ok := extractAgentSummaryBlock(text)
+	if !ok {
+		return nil, ExecutionResultBuildMeta{Source: StructuredResultSourceDerived}, fmt.Errorf("agent summary block not found")
+	}
+
+	summary := AgentSummaryV1{
+		Version:     "v1",
+		WhatChanged: []string{},
+		Decisions:   []string{},
+		Risks:       []string{},
+		Followups:   []string{},
+		Raw:         strings.TrimSpace(text[span.start:span.end]),
+	}
+
+	currentSection := ""
+	for _, rawLine := range strings.Split(block, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		if key, value, ok := parseAgentSummaryField(line); ok {
+			switch key {
+			case "version":
+				summary.Version = defaultStr(value, "v1")
+				currentSection = ""
+				continue
+			case "summary":
+				summary.Summary = appendSentence(summary.Summary, value)
+				currentSection = ""
+				continue
+			}
+		}
+
+		if section, ok := parseAgentSummarySection(line); ok {
+			currentSection = section
+			continue
+		}
+
+		item := stripSummaryBullet(line)
+		if currentSection != "" {
+			appendAgentSummaryItem(&summary, currentSection, item)
+			continue
+		}
+
+		summary.Summary = appendSentence(summary.Summary, item)
+	}
+
+	normalizeAgentSummary(&summary)
+	if !hasMeaningfulAgentSummary(&summary) {
+		err := fmt.Errorf("agent summary block missing meaningful content")
+		return nil, ExecutionResultBuildMeta{
+			Source:     StructuredResultSourceDerived,
+			HadMarkers: true,
+			ParseError: err.Error(),
+		}, err
+	}
+
+	return &summary, ExecutionResultBuildMeta{Source: StructuredResultSourceSummary, HadMarkers: true}, nil
+}
+
+func (s AgentSummaryV1) ToMap() map[string]interface{} {
+	data, _ := json.Marshal(s)
+	var out map[string]interface{}
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
 type executionResultParseMeta struct {
 	Source        StructuredResultSource
 	HadMarkers    bool
@@ -45,6 +130,39 @@ func SerializeExecutionResultV1(result map[string]interface{}) string {
 	}
 
 	return strings.TrimSpace(ResultStartMarker + "\n" + string(data) + "\n" + ResultEndMarker)
+}
+
+func SerializeAgentSummaryV1(summary *AgentSummaryV1) string {
+	if summary == nil {
+		return ""
+	}
+	normalized := *summary
+	normalizeAgentSummary(&normalized)
+
+	var b strings.Builder
+	b.WriteString(SummaryStartMarker)
+	b.WriteString("\n")
+	b.WriteString("Version: ")
+	b.WriteString(defaultStr(normalized.Version, "v1"))
+	b.WriteString("\n")
+	b.WriteString("Summary: ")
+	b.WriteString(normalized.Summary)
+	b.WriteString("\n")
+	appendSummarySection := func(title string, items []string) {
+		b.WriteString(title)
+		b.WriteString("\n")
+		for _, item := range items {
+			b.WriteString("- ")
+			b.WriteString(item)
+			b.WriteString("\n")
+		}
+	}
+	appendSummarySection("What changed:", normalized.WhatChanged)
+	appendSummarySection("Decisions:", normalized.Decisions)
+	appendSummarySection("Risks:", normalized.Risks)
+	appendSummarySection("Followups:", normalized.Followups)
+	b.WriteString(SummaryEndMarker)
+	return strings.TrimSpace(b.String())
 }
 
 type ExecutionResultCheck struct {
@@ -119,10 +237,71 @@ func BuildExecutionResultV1WithContextAndMeta(success bool, readableOutput strin
 			ParseError:    meta.ParseError,
 		}
 	} else if err != nil {
+		if success {
+			if summary, summaryMeta, summaryErr := ParseAgentSummaryDetailed(readableOutput); summaryErr == nil && summary != nil {
+				return buildSummaryExecutionResult(success, strippedOutput, exitCode, summary, summaryMeta, ctx)
+			}
+		}
 		return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, meta, ctx)
 	}
 
+	if success {
+		if summary, summaryMeta, summaryErr := ParseAgentSummaryDetailed(readableOutput); summaryErr == nil && summary != nil {
+			return buildSummaryExecutionResult(success, strippedOutput, exitCode, summary, summaryMeta, ctx)
+		}
+	}
+
 	return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, ExecutionResultBuildMeta{}, ctx)
+}
+
+func buildSummaryExecutionResult(success bool, strippedOutput string, exitCode int, summary *AgentSummaryV1, meta ExecutionResultBuildMeta, ctx ExecutionResultDerivedContext) (map[string]interface{}, ExecutionResultBuildMeta) {
+	filesTouched := dedupeAndSortStrings(ctx.FilesTouched)
+	checksRun := cloneExecutionChecks(ctx.ChecksRun)
+	whatChanged := dedupeStringsPreserveOrder(summary.WhatChanged)
+	if len(whatChanged) == 0 {
+		whatChanged = dedupeAndSortStrings(ctx.WhatChanged)
+	}
+	if len(whatChanged) == 0 && len(filesTouched) > 0 {
+		whatChanged = append(whatChanged, summarizeFilesTouched(filesTouched))
+	}
+	risks := dedupeStringsPreserveOrder(summary.Risks)
+	if !success && exitCode != 0 && !containsString(risks, fmt.Sprintf("Execution failed with exit code %d.", exitCode)) {
+		risks = append(risks, fmt.Sprintf("Execution failed with exit code %d.", exitCode))
+	}
+
+	result := ExecutionResultV1{
+		SchemaVersion: "v1",
+		Status:        executionStatusValue(success),
+		Summary:       strings.TrimSpace(summary.Summary),
+		WhatChanged:   whatChanged,
+		Decisions:     dedupeStringsPreserveOrder(summary.Decisions),
+		Risks:         risks,
+		ChecksRun:     checksRun,
+		FilesTouched:  filesTouched,
+		Git: ExecutionResultGit{
+			Mode:       "manual",
+			CommitShas: []string{},
+		},
+		Followups:        dedupeStringsPreserveOrder(summary.Followups),
+		MemoryCandidates: []string{},
+		SkillCandidates:  []ExecutionResultSkillCandidate{},
+	}
+	if result.Summary == "" {
+		switch {
+		case len(result.WhatChanged) > 0:
+			result.Summary = result.WhatChanged[0]
+		default:
+			result.Summary = defaultDerivedExecutionSummary(success, strippedOutput, exitCode, filesTouched)
+		}
+	}
+	if meta.Source == "" {
+		meta.Source = StructuredResultSourceSummary
+	}
+	if !meta.HadMarkers {
+		meta.HadMarkers = strings.Contains(strippedOutput, SummaryStartMarker) || strings.Contains(strippedOutput, SummaryEndMarker)
+	}
+	ensureExecutionResultDefaults(&result)
+	return result.toMap(), meta
 }
 
 func buildDerivedExecutionResult(success bool, strippedOutput, readableOutput string, exitCode int, meta ExecutionResultBuildMeta, ctx ExecutionResultDerivedContext) (map[string]interface{}, ExecutionResultBuildMeta) {
@@ -219,7 +398,8 @@ func ParseExecutionResultV1Detailed(text string) (*ExecutionResultV1, ExecutionR
 }
 
 func StripStructuredResultBlock(text string) string {
-	return stripAllStructuredResultBlocks(text)
+	text = stripAllStructuredResultBlocks(text)
+	return stripAllAgentSummaryBlocks(text)
 }
 
 func stripAllStructuredResultBlocks(text string) string {
@@ -246,7 +426,7 @@ func stripAllStructuredResultBlocks(text string) string {
 func StripLastStructuredResultBlock(text string) string {
 	span, ok := extractStructuredResultSpan(text)
 	if !ok {
-		return strings.TrimSpace(text)
+		return stripAllAgentSummaryBlocks(strings.TrimSpace(text))
 	}
 
 	before := strings.TrimSpace(text[:span.start])
@@ -257,7 +437,7 @@ func StripLastStructuredResultBlock(text string) string {
 	if after == "" {
 		return before
 	}
-	return strings.TrimSpace(before + "\n\n" + after)
+	return stripAllAgentSummaryBlocks(strings.TrimSpace(before + "\n\n" + after))
 }
 
 func ExecutionResultSummary(result map[string]interface{}) string {
@@ -265,6 +445,27 @@ func ExecutionResultSummary(result map[string]interface{}) string {
 		return strings.TrimSpace(summary)
 	}
 	return ""
+}
+
+func stripAllAgentSummaryBlocks(text string) string {
+	text = strings.TrimSpace(text)
+	for {
+		span, ok := extractAgentSummarySpan(text)
+		if !ok {
+			return strings.TrimSpace(text)
+		}
+
+		before := strings.TrimSpace(text[:span.start])
+		after := strings.TrimSpace(text[span.end:])
+		switch {
+		case before == "":
+			text = after
+		case after == "":
+			text = before
+		default:
+			text = strings.TrimSpace(before + "\n\n" + after)
+		}
+	}
 }
 
 func ensureExecutionResultDefaults(result *ExecutionResultV1) {
@@ -304,9 +505,179 @@ func (r ExecutionResultV1) toMap() map[string]interface{} {
 	return out
 }
 
+func (r ExecutionResultV1) ToMap() map[string]interface{} {
+	return r.toMap()
+}
+
+func normalizeAgentSummary(summary *AgentSummaryV1) {
+	if summary == nil {
+		return
+	}
+	summary.Version = defaultStr(strings.TrimSpace(summary.Version), "v1")
+	summary.Summary = strings.TrimSpace(summary.Summary)
+	summary.WhatChanged = dedupeStringsPreserveOrder(summary.WhatChanged)
+	summary.Decisions = dedupeStringsPreserveOrder(summary.Decisions)
+	summary.Risks = dedupeStringsPreserveOrder(summary.Risks)
+	summary.Followups = dedupeStringsPreserveOrder(summary.Followups)
+	summary.Raw = strings.TrimSpace(summary.Raw)
+	if summary.Summary == "" {
+		switch {
+		case len(summary.WhatChanged) > 0:
+			summary.Summary = summary.WhatChanged[0]
+		case len(summary.Decisions) > 0:
+			summary.Summary = summary.Decisions[0]
+		case len(summary.Risks) > 0:
+			summary.Summary = summary.Risks[0]
+		case len(summary.Followups) > 0:
+			summary.Summary = summary.Followups[0]
+		}
+	}
+}
+
+func hasMeaningfulAgentSummary(summary *AgentSummaryV1) bool {
+	if summary == nil {
+		return false
+	}
+	if strings.TrimSpace(summary.Summary) != "" {
+		return true
+	}
+	return len(summary.WhatChanged) > 0 || len(summary.Decisions) > 0 || len(summary.Risks) > 0 || len(summary.Followups) > 0
+}
+
 type structuredResultSpan struct {
 	start int
 	end   int
+}
+
+func extractAgentSummaryBlock(text string) (string, structuredResultSpan, bool) {
+	span, ok := extractAgentSummarySpan(text)
+	if !ok {
+		return "", structuredResultSpan{}, false
+	}
+
+	block := strings.TrimSpace(text[span.start+len(SummaryStartMarker) : span.end-len(SummaryEndMarker)])
+	if block == "" {
+		return "", structuredResultSpan{}, false
+	}
+	return block, span, true
+}
+
+func extractAgentSummarySpan(text string) (structuredResultSpan, bool) {
+	start := strings.LastIndex(text, SummaryStartMarker)
+	end := strings.LastIndex(text, SummaryEndMarker)
+	if start == -1 || end == -1 || end < start {
+		return structuredResultSpan{}, false
+	}
+	return structuredResultSpan{
+		start: start,
+		end:   end + len(SummaryEndMarker),
+	}, true
+}
+
+func parseAgentSummaryField(line string) (key string, value string, ok bool) {
+	idx := strings.Index(line, ":")
+	if idx <= 0 {
+		return "", "", false
+	}
+
+	key = strings.ToLower(strings.TrimSpace(line[:idx]))
+	value = strings.TrimSpace(line[idx+1:])
+	switch key {
+	case "version", "summary":
+		return key, value, true
+	default:
+		return "", "", false
+	}
+}
+
+func parseAgentSummarySection(line string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(line, ":")))
+	switch normalized {
+	case "what changed":
+		return "whatChanged", true
+	case "decisions":
+		return "decisions", true
+	case "risks":
+		return "risks", true
+	case "followups":
+		return "followups", true
+	default:
+		return "", false
+	}
+}
+
+func stripSummaryBullet(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "- ")
+	line = strings.TrimPrefix(line, "* ")
+	line = strings.TrimPrefix(line, "• ")
+	return strings.TrimSpace(line)
+}
+
+func appendAgentSummaryItem(summary *AgentSummaryV1, section, item string) {
+	if summary == nil || item == "" {
+		return
+	}
+	items := splitExecutionListString(item)
+	if len(items) == 0 {
+		items = []string{item}
+	}
+	for _, entry := range items {
+		switch section {
+		case "whatChanged":
+			summary.WhatChanged = append(summary.WhatChanged, entry)
+		case "decisions":
+			summary.Decisions = append(summary.Decisions, entry)
+		case "risks":
+			summary.Risks = append(summary.Risks, entry)
+		case "followups":
+			summary.Followups = append(summary.Followups, entry)
+		}
+	}
+}
+
+func appendSentence(existing, next string) string {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return strings.TrimSpace(existing)
+	}
+	if strings.TrimSpace(existing) == "" {
+		return next
+	}
+	return strings.TrimSpace(existing + " " + next)
+}
+
+func dedupeStringsPreserveOrder(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func extractStructuredResultJSON(text string) (string, executionResultParseMeta, bool) {

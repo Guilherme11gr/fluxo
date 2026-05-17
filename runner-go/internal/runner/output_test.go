@@ -722,6 +722,10 @@ func TestCompactJSONTruncation(t *testing.T) {
 func TestParseExecutionResultV1ExtractsStructuredBlock(t *testing.T) {
 	raw := strings.Join([]string{
 		"Implemented the requested changes.",
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Implemented the requested changes.",
+		SummaryEndMarker,
 		ResultStartMarker,
 		`{"schemaVersion":"v1","status":"success","summary":"Done","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
 		ResultEndMarker,
@@ -739,6 +743,56 @@ func TestParseExecutionResultV1ExtractsStructuredBlock(t *testing.T) {
 	stripped := StripStructuredResultBlock(raw)
 	if strings.Contains(stripped, ResultStartMarker) || strings.Contains(stripped, ResultEndMarker) {
 		t.Fatalf("expected structured block to be stripped, got %q", stripped)
+	}
+	if strings.Contains(stripped, SummaryStartMarker) || strings.Contains(stripped, SummaryEndMarker) {
+		t.Fatalf("expected summary block to be stripped, got %q", stripped)
+	}
+}
+
+func TestParseAgentSummaryDetailedExtractsSummaryBlock(t *testing.T) {
+	raw := strings.Join([]string{
+		"Human intro that should be ignored.",
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Implemented summary-first output.",
+		"What changed:",
+		"- Updated the worker to read agent summaries.",
+		"Decisions:",
+		"- Kept ExecutionResultV1 as the canonical persisted schema.",
+		"Risks:",
+		"- Checks are still partially derived.",
+		"Followups:",
+		"- Instrument usedSkills from tool events.",
+		SummaryEndMarker,
+	}, "\n")
+
+	summary, meta, err := ParseAgentSummaryDetailed(raw)
+	if err != nil {
+		t.Fatalf("expected agent summary parse to succeed, got %v", err)
+	}
+	if summary == nil {
+		t.Fatal("expected parsed agent summary")
+	}
+	if summary.Summary != "Implemented summary-first output." {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	if len(summary.WhatChanged) != 1 || summary.WhatChanged[0] != "Updated the worker to read agent summaries." {
+		t.Fatalf("unexpected whatChanged: %#v", summary.WhatChanged)
+	}
+	if len(summary.Decisions) != 1 || summary.Decisions[0] != "Kept ExecutionResultV1 as the canonical persisted schema." {
+		t.Fatalf("unexpected decisions: %#v", summary.Decisions)
+	}
+	if len(summary.Risks) != 1 || summary.Risks[0] != "Checks are still partially derived." {
+		t.Fatalf("unexpected risks: %#v", summary.Risks)
+	}
+	if len(summary.Followups) != 1 || summary.Followups[0] != "Instrument usedSkills from tool events." {
+		t.Fatalf("unexpected followups: %#v", summary.Followups)
+	}
+	if meta.Source != StructuredResultSourceSummary {
+		t.Fatalf("expected summary source, got %#v", meta)
+	}
+	if !meta.HadMarkers {
+		t.Fatalf("expected summary markers metadata, got %#v", meta)
 	}
 }
 
@@ -813,6 +867,45 @@ func TestBuildExecutionResultV1WithContextAndMetaUsesTouchedFilesForDerivedFallb
 	whatChanged, ok := result["whatChanged"].([]interface{})
 	if !ok || len(whatChanged) == 0 {
 		t.Fatalf("expected whatChanged fallback entry, got %#v", result["whatChanged"])
+	}
+}
+
+func TestBuildExecutionResultV1WithContextAndMetaUsesAgentSummaryWhenJSONMissing(t *testing.T) {
+	raw := strings.Join([]string{
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Implemented summary-first fallback.",
+		"What changed:",
+		"- Updated worker finalization to persist agentSummary metadata.",
+		"Decisions:",
+		"- Kept JSON output as a compatibility path during rollout.",
+		SummaryEndMarker,
+	}, "\n")
+
+	result, meta := BuildExecutionResultV1WithContextAndMeta(true, raw, 0, ExecutionResultDerivedContext{
+		FilesTouched: []string{"runner-go/internal/orchestrator/worker.go"},
+	})
+
+	if meta.Source != StructuredResultSourceSummary {
+		t.Fatalf("expected summary source, got %#v", meta)
+	}
+	if !meta.HadMarkers {
+		t.Fatalf("expected summary markers, got %#v", meta)
+	}
+	if summary, _ := result["summary"].(string); summary != "Implemented summary-first fallback." {
+		t.Fatalf("unexpected summary: %#v", result)
+	}
+	whatChanged, ok := result["whatChanged"].([]interface{})
+	if !ok || len(whatChanged) != 1 || whatChanged[0] != "Updated worker finalization to persist agentSummary metadata." {
+		t.Fatalf("unexpected whatChanged: %#v", result["whatChanged"])
+	}
+	decisions, ok := result["decisions"].([]interface{})
+	if !ok || len(decisions) != 1 || decisions[0] != "Kept JSON output as a compatibility path during rollout." {
+		t.Fatalf("unexpected decisions: %#v", result["decisions"])
+	}
+	filesTouched, ok := result["filesTouched"].([]interface{})
+	if !ok || len(filesTouched) != 1 || filesTouched[0] != "runner-go/internal/orchestrator/worker.go" {
+		t.Fatalf("expected filesTouched from runner context, got %#v", result["filesTouched"])
 	}
 }
 
@@ -1012,6 +1105,64 @@ func TestCommentUsesDetailsTag(t *testing.T) {
 	}
 	if !strings.Contains(comment, "Full Output") {
 		t.Fatalf("expected Full Output summary, got %s", comment)
+	}
+}
+
+func TestFormatExecutionCommentPrefersAgentSummarySummary(t *testing.T) {
+	raw := strings.Join([]string{
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Human summary from agent block.",
+		"What changed:",
+		"- Changed runner parsing.",
+		SummaryEndMarker,
+		`{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"x.ts"}}}}`,
+	}, "\n")
+
+	comment := FormatExecutionComment("dev", "opencode", true, 30, raw, 0)
+	if !strings.Contains(comment, "Human summary from agent block.") {
+		t.Fatalf("expected comment summary to use agent summary, got %s", comment)
+	}
+	if strings.Contains(comment, SummaryStartMarker) || strings.Contains(comment, SummaryEndMarker) {
+		t.Fatalf("expected raw summary markers to be stripped from comment, got %s", comment)
+	}
+}
+
+func TestFormatExecutionCommentPrefersStructuredResultOverAgentSummary(t *testing.T) {
+	raw := strings.Join([]string{
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Stale summary block.",
+		SummaryEndMarker,
+		ResultStartMarker,
+		`{"schemaVersion":"v1","status":"success","summary":"Canonical JSON summary.","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		ResultEndMarker,
+	}, "\n")
+
+	comment := FormatExecutionComment("dev", "opencode", true, 30, raw, 0)
+	if !strings.Contains(comment, "Canonical JSON summary.") {
+		t.Fatalf("expected canonical JSON summary in comment, got %s", comment)
+	}
+	if strings.Contains(comment, "Stale summary block.") {
+		t.Fatalf("expected summary block not to override structured result, got %s", comment)
+	}
+}
+
+func TestFormatExecutionCommentFailureIgnoresAgentSummaryBlock(t *testing.T) {
+	raw := strings.Join([]string{
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Stale success summary.",
+		SummaryEndMarker,
+		"Execution failed with exit code 1.",
+	}, "\n")
+
+	comment := FormatExecutionComment("dev", "opencode", false, 30, raw, 1)
+	if strings.Contains(comment, "Stale success summary.") {
+		t.Fatalf("expected failure comment to ignore agent summary block, got %s", comment)
+	}
+	if !strings.Contains(comment, "Execution failed with exit code 1.") {
+		t.Fatalf("expected failure comment to keep failure summary, got %s", comment)
 	}
 }
 

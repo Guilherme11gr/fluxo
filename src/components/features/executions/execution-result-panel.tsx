@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import {
   CheckCircle2,
   XCircle,
@@ -16,8 +15,6 @@ import {
   Sparkles,
   ArrowRight,
   FilePenLine,
-  FileText,
-  Terminal,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -26,8 +23,6 @@ import type { StructuredResultV1, StructuredResultCheck } from '@/shared/types';
 interface ExecutionResultPanelProps {
   result: StructuredResultV1;
 }
-
-type TabKey = 'resumo' | 'fulllog';
 
 function SectionTitle({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
@@ -73,97 +68,6 @@ const GIT_MODE_LABELS: Record<string, string> = {
   'branch-push': 'Branch Push',
   pr: 'Pull Request',
 };
-
-function StatusHeader({ result }: { result: StructuredResultV1 }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="flex-1">
-        <div className="text-sm text-foreground leading-relaxed">
-          {result.summary}
-        </div>
-      </div>
-      <Badge
-        variant="secondary"
-        className={`shrink-0 ${
-          result.status === 'success'
-            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-            : result.status === 'failed'
-              ? 'bg-red-500/15 text-red-600 dark:text-red-400'
-              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-        }`}
-      >
-        {result.status === 'success'
-          ? 'Sucesso'
-          : result.status === 'failed'
-            ? 'Falhou'
-            : 'Erro'}
-      </Badge>
-    </div>
-  );
-}
-
-function ChecksSummary({ result }: { result: StructuredResultV1 }) {
-  const passedChecks =
-    result.checksRun?.filter((c) => c.status === 'passed').length ?? 0;
-  const failedChecks =
-    result.checksRun?.filter((c) => c.status === 'failed').length ?? 0;
-  const skippedChecks =
-    result.checksRun?.filter((c) => c.status === 'skipped').length ?? 0;
-  const total = result.checksRun?.length ?? 0;
-
-  if (total === 0) return null;
-
-  const allPassed = failedChecks === 0 && skippedChecks === 0;
-
-  return (
-    <div>
-      <SectionTitle icon={ListChecks}>Checks</SectionTitle>
-      <div className={`rounded-md p-3 border ${
-        allPassed
-          ? 'bg-emerald-500/5 border-emerald-500/20'
-          : failedChecks > 0
-            ? 'bg-red-500/5 border-red-500/20'
-            : 'bg-muted/30 border-border/50'
-      }`}>
-        <div className="flex items-center gap-3 mb-1">
-          {passedChecks > 0 && (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-              {passedChecks} passed
-            </span>
-          )}
-          {failedChecks > 0 && (
-            <span className="text-xs text-red-600 dark:text-red-400 font-medium">
-              {failedChecks} failed
-            </span>
-          )}
-          {skippedChecks > 0 && (
-            <span className="text-xs text-muted-foreground font-medium">
-              {skippedChecks} skipped
-            </span>
-          )}
-          <span className="text-xs text-muted-foreground ml-auto">
-            {total} total
-          </span>
-        </div>
-        {failedChecks > 0 && (
-          <div className="mt-2 space-y-1">
-            {result.checksRun!
-              .filter((c) => c.status === 'failed')
-              .map((check, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs">
-                  <XCircle className="h-3 w-3 text-red-500 mt-0.5 shrink-0" />
-                  <span className="text-red-600 dark:text-red-400">{check.name}</span>
-                  {check.details && (
-                    <span className="text-muted-foreground">&mdash; {check.details}</span>
-                  )}
-                </div>
-              ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function FullLogView({ result }: { result: StructuredResultV1 }) {
   const hasWhatChanged = result.whatChanged && result.whatChanged.length > 0;
@@ -416,92 +320,5 @@ function FullLogView({ result }: { result: StructuredResultV1 }) {
 }
 
 export function ExecutionResultPanel({ result }: ExecutionResultPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>('resumo');
-
-  const hasRisks = result.risks && result.risks.length > 0;
-  const hasFollowups = result.followups && result.followups.length > 0;
-  const hasWhatChanged = result.whatChanged && result.whatChanged.length > 0;
-  const hasChecks = result.checksRun && result.checksRun.length > 0;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-1 border-b border-border">
-        <button
-          type="button"
-          onClick={() => setActiveTab('resumo')}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'resumo'
-              ? 'border-foreground text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <FileText className="h-3.5 w-3.5" />
-          Resumo
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('fulllog')}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'fulllog'
-              ? 'border-foreground text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Terminal className="h-3.5 w-3.5" />
-          Full log
-        </button>
-      </div>
-
-      {activeTab === 'resumo' && (
-        <div className="space-y-5">
-          <StatusHeader result={result} />
-
-          {hasChecks && (
-            <>
-              <Separator />
-              <ChecksSummary result={result} />
-            </>
-          )}
-
-          {hasWhatChanged && (
-            <>
-              <Separator />
-              <div>
-                <SectionTitle icon={ArrowRight}>Principais mudancas</SectionTitle>
-                <StringList items={result.whatChanged!} />
-              </div>
-            </>
-          )}
-
-          {hasRisks && (
-            <>
-              <Separator />
-              <div>
-                <SectionTitle icon={AlertTriangle}>Riscos</SectionTitle>
-                <StringList items={result.risks!} variant="warning" />
-              </div>
-            </>
-          )}
-
-          {hasFollowups && (
-            <>
-              <Separator />
-              <div>
-                <SectionTitle icon={ListChecks}>Proximos passos</SectionTitle>
-                <StringList items={result.followups!} />
-              </div>
-            </>
-          )}
-
-          {!hasWhatChanged && !hasRisks && !hasFollowups && (
-            <div className="text-xs text-muted-foreground text-center py-4">
-              Veja todos os detalhes tecnicos na aba Full log
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'fulllog' && <FullLogView result={result} />}
-    </div>
-  );
+  return <FullLogView result={result} />;
 }

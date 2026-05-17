@@ -64,6 +64,8 @@ type RetrievedProjectMemoryContext struct {
 }
 
 const (
+	SummaryStartMarker = "FLUXO_SUMMARY_START"
+	SummaryEndMarker   = "FLUXO_SUMMARY_END"
 	ResultStartMarker = "FLUXO_RESULT_JSON_START"
 	ResultEndMarker   = "FLUXO_RESULT_JSON_END"
 )
@@ -193,7 +195,13 @@ func BuildPromptWithExecutionContext(task Task, agent config.AgentConfig, previo
 	}
 
 	prompt.WriteString("\n## Output Contract\n")
-	prompt.WriteString("Return your final response with a concise summary and include a valid JSON object between these exact markers:\n")
+	prompt.WriteString("Return your final response with a concise summary block first, then include a valid JSON object between these exact markers:\n")
+	prompt.WriteString(SummaryStartMarker)
+	prompt.WriteString("\n")
+	prompt.WriteString(buildSummarySchemaExample(outputSchemaVersion))
+	prompt.WriteString("\n")
+	prompt.WriteString(SummaryEndMarker)
+	prompt.WriteString("\n\n")
 	prompt.WriteString(ResultStartMarker)
 	prompt.WriteString("\n")
 	prompt.WriteString(buildOutputSchemaExample(outputSchemaVersion))
@@ -206,6 +214,7 @@ func BuildPromptWithExecutionContext(task Task, agent config.AgentConfig, previo
 	prompt.WriteString("\n## Instructions\n")
 	prompt.WriteString("- Execute only the requested task.\n")
 	prompt.WriteString("- Keep changes minimal, testable, and explicit.\n")
+	prompt.WriteString("- Include the summary block before the final JSON block.\n")
 	prompt.WriteString("- End with the structured result block.\n")
 	prompt.WriteString("- ")
 	prompt.WriteString(outputContractStrictReminder)
@@ -315,4 +324,21 @@ func buildOutputSchemaExample(version string) string {
   "memoryCandidates": [],
   "skillCandidates": []
 }`, version)
+}
+
+func buildSummarySchemaExample(version string) string {
+	if version != "v1" {
+		version = "v1"
+	}
+
+	return fmt.Sprintf(`Version: %s
+Summary: Short human summary of the outcome.
+What changed:
+- Concrete change
+Decisions:
+- Technical decision
+Risks:
+- Explicit risk if any
+Followups:
+- Optional next step`, version)
 }

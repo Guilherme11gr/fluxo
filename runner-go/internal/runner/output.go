@@ -1026,6 +1026,7 @@ func FormatDuration(seconds float64) string {
 
 func FormatExecutionComment(agentName, tool string, success bool, elapsed float64, output string, exitCode int) string {
 	var b strings.Builder
+	sanitizedOutput := StripStructuredResultBlock(output)
 
 	if success {
 		b.WriteString("## Execution Complete\n\n")
@@ -1041,9 +1042,20 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 	}
 	b.WriteString("\n")
 
-	readable := StripStructuredResultBlock(ExtractReadableOutput(output))
+	readable := ExtractReadableOutput(sanitizedOutput)
 
-	summary := extractCommentSummary(readable)
+	summary := ""
+	if structured, err := ParseExecutionResultV1(output); err == nil && structured != nil {
+		summary = strings.TrimSpace(structured.Summary)
+	}
+	if success && summary == "" {
+		if agentSummary, err := ParseAgentSummary(output); err == nil && agentSummary != nil {
+			summary = strings.TrimSpace(agentSummary.Summary)
+		}
+	}
+	if summary == "" {
+		summary = extractCommentSummary(readable)
+	}
 	if summary != "" {
 		b.WriteString("### Summary\n\n")
 		if len(summary) > 800 {
@@ -1053,7 +1065,7 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 		b.WriteString("\n\n")
 	}
 
-	keyChanges := extractKeyChangesFromOutput(output)
+	keyChanges := extractKeyChangesFromOutput(sanitizedOutput)
 	if len(keyChanges) > 0 {
 		b.WriteString("### Key Changes\n\n")
 		for _, c := range keyChanges {
@@ -1062,7 +1074,7 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 		b.WriteString("\n")
 	}
 
-	tools := extractCommentTools(output)
+	tools := extractCommentTools(sanitizedOutput)
 	if len(tools) > 0 {
 		b.WriteString("### Tools Used\n\n")
 		for _, t := range tools {
@@ -1071,9 +1083,9 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 		b.WriteString("\n")
 	}
 
-	streamBody := FormatStreamReadable(output)
+	streamBody := FormatStreamReadable(sanitizedOutput)
 	if streamBody == "" {
-		streamBody = FormatStreamCompact(output)
+		streamBody = FormatStreamCompact(sanitizedOutput)
 	}
 	if streamBody != "" {
 		maxLen := 8000

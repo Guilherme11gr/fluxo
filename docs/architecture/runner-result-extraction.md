@@ -1,8 +1,13 @@
 # Runner Result Extraction
 
-Quando o agente principal (opencode, claude) termina a execucao com sucesso
-mas nao retorna o bloco `FLUXO_RESULT_JSON_START/END` valido, um modelo auxiliar
-barato reconstroi o `ExecutionResultV1` a partir do log raw da execucao.
+Quando o agente principal (opencode, claude) termina a execucao com sucesso,
+o runner agora prioriza um bloco `FLUXO_SUMMARY_START/END` leve para capturar
+o resumo humano e ainda aceita o bloco canonico `FLUXO_RESULT_JSON_START/END`.
+
+Se o JSON final faltar, o runner monta o `ExecutionResultV1` a partir do
+summary block combinado com fatos objetivos do proprio runner. Se ambos
+faltarem, um modelo auxiliar barato ainda pode reconstituir o resultado a
+partir do log raw da execucao.
 
 ## Motivação
 
@@ -37,6 +42,8 @@ BuildExecutionResultV1WithContextAndMeta()
         |
         ├─ source = model/repaired → segue normal
         |
+        ├─ source = summary → runner combina summary humano + facts objetivos
+        |
         └─ source = derived E result.Success = true
                 |
                 ├─ extractor desabilitado → mantem derived
@@ -53,6 +60,7 @@ BuildExecutionResultV1WithContextAndMeta()
 |------------|-------------|
 | `model`    | Agente produziu JSON valido com os marcadores |
 | `repaired` | JSON veio malformado, runner conseguiu reparar |
+| `summary`  | Agente nao trouxe JSON valido, mas trouxe `FLUXO_SUMMARY_*` suficiente |
 | `extracted` | Nao havia bloco; modelo auxiliar extraiu do log |
 | `derived`  | Nenhum bloco nem extracao possivel; resultado sintetico |
 
@@ -109,12 +117,48 @@ Formato esperado no `config` da API:
 Se o agent nao definir `result_extractor`, usa o global. Se nenhum dos dois
 definir, extractor fica desabilitado (noop).
 
+## Summary-First
+
+O prompt principal do runner agora pede dois blocos em ordem:
+
+1. `FLUXO_SUMMARY_START/END`
+2. `FLUXO_RESULT_JSON_START/END`
+
+Na fase atual do rollout, o JSON continua sendo o contrato canonico quando
+presente, mas o summary block ja e suficiente para o runner gerar o payload
+top-level `result` enviado no finalize e um `resultSummary` humano sem depender
+do extractor. O bloco original normalizado tambem e preservado em
+`metadata.agentSummary`.
+
+O summary block deve conter somente campos narrativos:
+
+- `Summary`
+- `What changed`
+- `Decisions`
+- `Risks`
+- `Followups`
+
+Fatos objetivos continuam vindo do runner:
+
+- `status`
+- `exitCode`
+- `duration`
+- `filesTouched`
+- `git`
+- `checksRun` quando houver deteccao confiavel
+
+O worker persiste o bloco normalizado em `metadata.agentSummary`.
+
 ## Prompt do Extrator
 
-O extractor recebe:
+O extractor ainda recebe:
 - `readableOutput`: saida formatada pelo runner (eventos JSONL convertidos)
 - `filesTouched`: arquivos detectados via git diff
 - Contexto minimo da task (title, description)
+
+Durante o rollout summary-first, o worker so chama o extractor quando o JSON
+e o summary block falham em produzir um resultado estruturado suficientemente
+bom.
 
 A resposta esperada e um JSON puro (sem marcadores `FLUXO_RESULT_JSON_*`) que
 passe pelo mesmo parser do `ExecutionResultV1` usado pelo runner.
@@ -168,8 +212,8 @@ da execucao:
 ## Relação com a Skill
 
 A skill `fluxo-runner-output-v1` continua sendo a camada primaria de prevencao.
-O extractor e fallback — nao substitui o contrato, apenas recupera quando o
-agente falha em cumpri-lo.
+O extractor segue como fallback — nao substitui o contrato, apenas recupera
+quando o agente falha em cumprir tanto o summary block quanto o JSON final.
 
 Quando o extractor e usado (`source = extracted`), isso e um sinal de que a
 skill pode precisar de reforco. No futuro, um background review (estilo Hermes)
