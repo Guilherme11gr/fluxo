@@ -308,6 +308,33 @@ func CollectNewCommitSHAs(workdir, baseSHA string) ([]string, error) {
 	return shas, nil
 }
 
+func CollectChangedFilesSince(workdir, baseSHA string) ([]string, error) {
+	if strings.TrimSpace(workdir) == "" || strings.TrimSpace(baseSHA) == "" {
+		return []string{}, nil
+	}
+
+	output, err := gitCommand(workdir, "diff", "--name-only", baseSHA+"..HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("collect changed files: git diff failed: %w", err)
+	}
+
+	files := []string{}
+	seen := map[string]struct{}{}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if _, ok := seen[line]; ok {
+			continue
+		}
+		seen[line] = struct{}{}
+		files = append(files, line)
+	}
+
+	return files, nil
+}
+
 func PushBranch(workdir, branch string) error {
 	if strings.TrimSpace(workdir) == "" || strings.TrimSpace(branch) == "" {
 		return nil

@@ -22,7 +22,7 @@ FLUXO_RESULT_JSON_START
 FLUXO_RESULT_JSON_END
 ```
 
-If the markers are missing or the JSON is malformed, the runner falls back to a weaker derived result.
+If the markers are missing or the JSON is malformed, the runner may try an internal extractor model as a recovery step before falling back to a weaker derived result. That extractor is only a fallback. The primary contract is still: the agent itself must emit the final block correctly.
 
 ## Required shape
 
@@ -119,3 +119,4 @@ FLUXO_RESULT_JSON_END
 - Do not use a different schema version.
 - Do not output prose that contradicts the JSON summary.
 - Do not fake checks, files, commits, or PRs.
+- Do not rely on the extractor fallback. It exists for resilience, not as a substitute for returning the required block.

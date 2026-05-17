@@ -145,3 +145,28 @@ func TestFormatGitPreparationError(t *testing.T) {
 		t.Fatalf("expected empty for nil error, got %q", msg2)
 	}
 }
+
+func TestCaptureWorktreeSnapshotAndDiffWorktreeFiles(t *testing.T) {
+	dir := initTestGitRepo(t)
+	defer os.RemoveAll(dir)
+
+	before := CaptureWorktreeSnapshot(dir)
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write feature file: %v", err)
+	}
+
+	after := CaptureWorktreeSnapshot(dir)
+	files := DiffWorktreeFiles(before, after)
+	if len(files) != 1 || files[0] != "feature.txt" {
+		t.Fatalf("expected feature.txt diff, got %#v", files)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# changed"), 0644); err != nil {
+		t.Fatalf("rewrite readme: %v", err)
+	}
+	after = CaptureWorktreeSnapshot(dir)
+	files = DiffWorktreeFiles(before, after)
+	if len(files) != 2 {
+		t.Fatalf("expected two changed files, got %#v", files)
+	}
+}

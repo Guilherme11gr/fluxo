@@ -30,8 +30,8 @@ const FALLBACK_MODELS = [
   'openrouter/anthropic/claude-3.5-sonnet',
   'openrouter/openai/gpt-4o',
   'openrouter/openai/gpt-4o-mini',
+  'openrouter/google/gemini-3.1-flash-lite',
   'openrouter/google/gemini-2.5-pro',
-  'openrouter/google/gemini-2.5-flash',
   'openrouter/qwen/qwen3.6-plus:free',
   'openrouter/deepseek/deepseek-chat',
   'anthropic/claude-sonnet-4',
@@ -39,8 +39,8 @@ const FALLBACK_MODELS = [
   'openai/gpt-4o',
   'openai/o3',
   'openai/o4-mini',
+  'google/gemini-3.1-flash-lite',
   'google/gemini-2.5-pro',
-  'google/gemini-2.5-flash',
 ] as const;
 
 function useAvailableModels() {

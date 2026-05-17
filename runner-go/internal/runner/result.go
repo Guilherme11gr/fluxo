@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -11,6 +12,7 @@ type StructuredResultSource string
 const (
 	StructuredResultSourceModel    StructuredResultSource = "model"
 	StructuredResultSourceRepaired StructuredResultSource = "repaired"
+	StructuredResultSourceExtracted StructuredResultSource = "extracted"
 	StructuredResultSourceDerived  StructuredResultSource = "derived"
 )
 
@@ -19,6 +21,12 @@ type ExecutionResultBuildMeta struct {
 	HadMarkers    bool
 	RepairApplied bool
 	ParseError    string
+}
+
+type ExecutionResultDerivedContext struct {
+	FilesTouched []string
+	ChecksRun    []ExecutionResultCheck
+	WhatChanged  []string
 }
 
 type executionResultParseMeta struct {
@@ -78,6 +86,15 @@ func BuildExecutionResultV1(success bool, readableOutput string, exitCode int) m
 }
 
 func BuildExecutionResultV1WithMeta(success bool, readableOutput string, exitCode int) (map[string]interface{}, ExecutionResultBuildMeta) {
+	return BuildExecutionResultV1WithContextAndMeta(success, readableOutput, exitCode, ExecutionResultDerivedContext{})
+}
+
+func BuildExecutionResultV1WithContext(success bool, readableOutput string, exitCode int, ctx ExecutionResultDerivedContext) map[string]interface{} {
+	result, _ := BuildExecutionResultV1WithContextAndMeta(success, readableOutput, exitCode, ctx)
+	return result
+}
+
+func BuildExecutionResultV1WithContextAndMeta(success bool, readableOutput string, exitCode int, ctx ExecutionResultDerivedContext) (map[string]interface{}, ExecutionResultBuildMeta) {
 	strippedOutput := strings.TrimSpace(StripStructuredResultBlock(readableOutput))
 	if parsed, meta, err := ParseExecutionResultV1Detailed(readableOutput); err == nil && parsed != nil {
 		if parsed.Summary == "" {
@@ -100,22 +117,30 @@ func BuildExecutionResultV1WithMeta(success bool, readableOutput string, exitCod
 			ParseError:    meta.ParseError,
 		}
 	} else if err != nil {
-		return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, meta)
+		return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, meta, ctx)
 	}
 
-	return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, ExecutionResultBuildMeta{})
+	return buildDerivedExecutionResult(success, strippedOutput, readableOutput, exitCode, ExecutionResultBuildMeta{}, ctx)
 }
 
-func buildDerivedExecutionResult(success bool, strippedOutput, readableOutput string, exitCode int, meta ExecutionResultBuildMeta) (map[string]interface{}, ExecutionResultBuildMeta) {
+
+func buildDerivedExecutionResult(success bool, strippedOutput, readableOutput string, exitCode int, meta ExecutionResultBuildMeta, ctx ExecutionResultDerivedContext) (map[string]interface{}, ExecutionResultBuildMeta) {
+	filesTouched := dedupeAndSortStrings(ctx.FilesTouched)
+	checksRun := cloneExecutionChecks(ctx.ChecksRun)
+	whatChanged := dedupeAndSortStrings(ctx.WhatChanged)
+	if len(whatChanged) == 0 && len(filesTouched) > 0 {
+		whatChanged = append(whatChanged, summarizeFilesTouched(filesTouched))
+	}
+
 	result := ExecutionResultV1{
 		SchemaVersion: "v1",
 		Status:        executionStatusValue(success),
-		Summary:       defaultExecutionSummary(success, strippedOutput, exitCode),
-		WhatChanged:   []string{},
+		Summary:       defaultDerivedExecutionSummary(success, strippedOutput, exitCode, filesTouched),
+		WhatChanged:   whatChanged,
 		Decisions:     []string{},
 		Risks:         []string{},
-		ChecksRun:     []ExecutionResultCheck{},
-		FilesTouched:  []string{},
+		ChecksRun:     checksRun,
+		FilesTouched:  filesTouched,
 		Git: ExecutionResultGit{
 			Mode:       "manual",
 			CommitShas: []string{},
@@ -137,6 +162,28 @@ func buildDerivedExecutionResult(success bool, strippedOutput, readableOutput st
 func ParseExecutionResultV1(text string) (*ExecutionResultV1, error) {
 	result, _, err := ParseExecutionResultV1Detailed(text)
 	return result, err
+}
+
+func ParseExecutionResultV1Map(data map[string]interface{}) (*ExecutionResultV1, error) {
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	var result ExecutionResultV1
+	if err := json.Unmarshal(bytes, &result); err != nil {
+		return nil, err
+	}
+	ensureExecutionResultDefaults(&result)
+	if result.SchemaVersion == "" {
+		result.SchemaVersion = "v1"
+	}
+	if result.Status == "" {
+		return nil, fmt.Errorf("status is required")
+	}
+	if result.Git.Mode == "" {
+		result.Git.Mode = "manual"
+	}
+	return &result, nil
 }
 
 func ParseExecutionResultV1Detailed(text string) (*ExecutionResultV1, ExecutionResultBuildMeta, error) {
@@ -359,4 +406,55 @@ func defaultExecutionSummary(success bool, readableOutput string, exitCode int) 
 		return fmt.Sprintf("Execution failed with exit code %d.", exitCode)
 	}
 	return "Execution failed."
+}
+
+func defaultDerivedExecutionSummary(success bool, readableOutput string, exitCode int, filesTouched []string) string {
+	summary := defaultExecutionSummary(success, readableOutput, exitCode)
+	if summary != "Task executed successfully." {
+		return summary
+	}
+	if len(filesTouched) == 0 {
+		return summary
+	}
+	return summarizeFilesTouched(filesTouched)
+}
+
+func summarizeFilesTouched(filesTouched []string) string {
+	if len(filesTouched) == 0 {
+		return "Task executed successfully."
+	}
+	if len(filesTouched) == 1 {
+		return fmt.Sprintf("Updated %s.", filesTouched[0])
+	}
+	return fmt.Sprintf("Updated %d files: %s.", len(filesTouched), strings.Join(filesTouched, ", "))
+}
+
+func dedupeAndSortStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	slices.Sort(result)
+	return result
+}
+
+func cloneExecutionChecks(checks []ExecutionResultCheck) []ExecutionResultCheck {
+	if len(checks) == 0 {
+		return []ExecutionResultCheck{}
+	}
+	cloned := make([]ExecutionResultCheck, len(checks))
+	copy(cloned, checks)
+	return cloned
 }

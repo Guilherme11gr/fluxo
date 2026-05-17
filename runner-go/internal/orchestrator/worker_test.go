@@ -3,8 +3,12 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,9 +16,45 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
+	"github.com/fluxo-app/fluxo-runner/internal/extractor"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
+
+type stubExtractor struct {
+	extractResult *extractor.ExtractResult
+	result        map[string]interface{}
+	err           error
+}
+
+func (s *stubExtractor) Name() string     { return "stub" }
+func (s *stubExtractor) Provider() string { return "stub" }
+func (s *stubExtractor) Model() string    { return "stub-model" }
+func (s *stubExtractor) Extract(_ context.Context, _ extractor.ExtractRequest) (*extractor.ExtractResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.extractResult != nil || s.result == nil {
+		return s.extractResult, nil
+	}
+	return &extractor.ExtractResult{Result: s.result, Source: extractor.SourceExtracted, Model: "stub-model", LatencyMs: 42, InputChars: 321}, nil
+}
+
+type stubExecutor struct {
+	result executor.Result
+	work   func(workdir string) error
+}
+
+func (s *stubExecutor) Name() string { return "stub-executor" }
+
+func (s *stubExecutor) Execute(_ context.Context, _ string, workdir string, _ time.Duration, _ executor.StreamFunc) executor.Result {
+	if s.work != nil {
+		if err := s.work(workdir); err != nil {
+			return executor.Result{Success: false, Output: err.Error(), ExitCode: 1}
+		}
+	}
+	return s.result
+}
 
 func TestBuildFailureExecutionDetailsTimeout(t *testing.T) {
 	structuredOutput, headline, errorMessage, blockReason := buildFailureExecutionDetails(
@@ -196,6 +236,388 @@ func TestBuildPersistedExecutionOutputCollapsesDuplicateStructuredBlocks(t *test
 	}
 }
 
+func TestValidateExtractedResultNormalizesSuccessPath(t *testing.T) {
+	normalized, err := validateExtractedResult(map[string]interface{}{
+		"schemaVersion": "broken",
+		"status":        "failed",
+		"summary":       "",
+		"whatChanged":   []string{},
+		"decisions":     []string{},
+		"risks":         []string{},
+		"checksRun":     []map[string]interface{}{},
+		"filesTouched":  []string{"wrong.txt"},
+		"git": map[string]interface{}{
+			"mode":       "",
+			"baseBranch": nil,
+			"branch":     nil,
+			"commitShas": []string{},
+			"prUrl":      nil,
+			"prNumber":   nil,
+		},
+		"followups":        []string{},
+		"memoryCandidates": []string{},
+		"skillCandidates":  []map[string]interface{}{},
+	}, extractedValidationContext{
+		ExecSuccess:     true,
+		FilesTouched:    []string{"runner-go/internal/orchestrator/worker.go"},
+		FallbackSummary: "Updated runner-go/internal/orchestrator/worker.go.",
+	})
+	if err != nil {
+		t.Fatalf("expected normalization success, got %v", err)
+	}
+	if normalized["schemaVersion"] != "v1" {
+		t.Fatalf("expected schemaVersion=v1, got %#v", normalized)
+	}
+	if normalized["status"] != "success" {
+		t.Fatalf("expected status forced to success, got %#v", normalized)
+	}
+	if normalized["summary"] != "Updated runner-go/internal/orchestrator/worker.go." {
+		t.Fatalf("expected fallback summary, got %#v", normalized)
+	}
+	if got := ifaceStrings(normalized["filesTouched"]); len(got) != 1 || got[0] != "runner-go/internal/orchestrator/worker.go" {
+		t.Fatalf("expected runner files to win, got %#v", normalized["filesTouched"])
+	}
+}
+
+func TestBuildPersistedExecutionOutputKeepsEnrichedDerivedResult(t *testing.T) {
+	structured := runner.BuildExecutionResultV1WithContext(true, "", 0, runner.ExecutionResultDerivedContext{
+		FilesTouched: []string{"src/app/page.tsx"},
+	})
+	persisted := buildPersistedExecutionOutput("", "", "", structured)
+
+	parsed, err := runner.ParseExecutionResultV1(persisted)
+	if err != nil {
+		t.Fatalf("expected persisted structured result to parse, got %v", err)
+	}
+	if len(parsed.FilesTouched) != 1 || parsed.FilesTouched[0] != "src/app/page.tsx" {
+		t.Fatalf("expected filesTouched in persisted output, got %#v", parsed.FilesTouched)
+	}
+	if !strings.Contains(parsed.Summary, "src/app/page.tsx") {
+		t.Fatalf("expected enriched summary, got %q", parsed.Summary)
+	}
+}
+
+func TestTryExtractStructuredResultUsesConfiguredExtractor(t *testing.T) {
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		if cfg.Provider != "gemini" {
+			return nil, fmt.Errorf("unexpected provider %q", cfg.Provider)
+		}
+		return &stubExtractor{result: map[string]interface{}{
+			"schemaVersion": "v1",
+			"status":        "success",
+			"summary":       "Implemented the requested change.",
+			"whatChanged":   []string{"Updated task output parsing."},
+			"decisions":     []string{},
+			"risks":         []string{},
+			"checksRun":     []map[string]interface{}{},
+			"filesTouched":  []string{"runner-go/internal/orchestrator/worker.go"},
+			"git": map[string]interface{}{
+				"mode":       "manual",
+				"baseBranch": nil,
+				"branch":     nil,
+				"commitShas": []string{},
+				"prUrl":      nil,
+				"prNumber":   nil,
+			},
+			"followups":        []string{},
+			"memoryCandidates": []string{},
+			"skillCandidates":  []map[string]interface{}{},
+		}}, nil
+	}
+
+	worker := NewAgentWorker("http://example.com", "key", "runner-1", config.AgentConfig{
+		Name: "builder",
+		Tool: "opencode",
+		Model: "glm-5.1",
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:   boolPtr(true),
+		Provider:  "gemini",
+		Model:     "gemini-3.1-flash-lite",
+		APIKey:    "test-key",
+		TimeoutSec: 10,
+	})
+
+	claimed := api.ClaimedTaskResponse{}
+	claimed.Task.ID = "task-1"
+	claimed.Task.Title = "Fix structured output"
+	claimed.Task.Description = "Ensure derived results can be extracted"
+
+	result, meta, err := worker.tryExtractStructuredResult(context.Background(), worker.agent, claimed, "raw", "readable", []string{"runner-go/internal/orchestrator/worker.go"}, executor.Result{Success: true})
+	if err != nil {
+		t.Fatalf("expected extractor success, got %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected extracted result")
+	}
+	if summary, _ := result["summary"].(string); summary != "Implemented the requested change." {
+		t.Fatalf("unexpected summary: %#v", result)
+	}
+	if meta["success"] != true {
+		t.Fatalf("expected extractor metadata success, got %#v", meta)
+	}
+}
+
+func TestRunOncePromotesDerivedResultToExtracted(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		if !cfg.Enabled {
+			t.Fatal("expected extractor to be enabled")
+		}
+		if cfg.Provider != "gemini" {
+			t.Fatalf("unexpected provider %q", cfg.Provider)
+		}
+		return &stubExtractor{result: map[string]interface{}{
+			"schemaVersion": "v1",
+			"status":        "failed",
+			"summary":       "",
+			"whatChanged":   []string{"Extractor inferred changes."},
+			"decisions":     []string{},
+			"risks":         []string{},
+			"checksRun":     []map[string]interface{}{},
+			"filesTouched":  []string{},
+			"git": map[string]interface{}{
+				"mode":       "",
+				"baseBranch": nil,
+				"branch":     nil,
+				"commitShas": []string{},
+				"prUrl":      nil,
+				"prNumber":   nil,
+			},
+			"followups":        []string{},
+			"memoryCandidates": []string{},
+			"skillCandidates":  []map[string]interface{}{},
+		}}, nil
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-1","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":12,"title":"Extract result","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-1","orgId":"org-1","taskId":"task-1","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-1","projectId":"project-1","executionId":"exec-1","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-1","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-1/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-1/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:   boolPtr(true),
+		Provider:  "gemini",
+		Model:     "gemini-3.1-flash-lite",
+		APIKey:    "test-key",
+		TimeoutSec: 10,
+	})
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "changed.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "SUCCESS" {
+		t.Fatalf("expected SUCCESS finalize status, got %#v", finalizeBody)
+	}
+	result, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result map, got %#v", finalizeBody["result"])
+	}
+	if result["status"] != "success" {
+		t.Fatalf("expected extracted result status=success, got %#v", result)
+	}
+	if got := ifaceStrings(result["filesTouched"]); len(got) != 1 || got[0] != "changed.txt" {
+		t.Fatalf("expected runner-detected filesTouched, got %#v", result["filesTouched"])
+	}
+	if summary, _ := result["summary"].(string); !strings.Contains(summary, "changed.txt") {
+		t.Fatalf("expected fallback summary to mention changed file, got %#v", result["summary"])
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	outputContract, ok := metadata["outputContract"].(map[string]interface{})
+	if !ok || outputContract["source"] != string(runner.StructuredResultSourceExtracted) {
+		t.Fatalf("expected extracted outputContract source, got %#v", metadata["outputContract"])
+	}
+	extractorMeta, ok := metadata["extractor"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected extractor metadata, got %#v", metadata["extractor"])
+	}
+	if extractorMeta["success"] != true {
+		t.Fatalf("expected extractor success metadata, got %#v", extractorMeta)
+	}
+	if extractorMeta["latencyMs"] != float64(42) && extractorMeta["latencyMs"] != int64(42) && extractorMeta["latencyMs"] != int(42) {
+		t.Fatalf("expected latencyMs metadata, got %#v", extractorMeta)
+	}
+	if extractorMeta["inputChars"] != float64(321) && extractorMeta["inputChars"] != int(321) {
+		t.Fatalf("expected inputChars metadata, got %#v", extractorMeta)
+	}
+}
+
+func TestRunOnceFallsBackToDerivedWhenExtractorReturnsNilResult(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		return &stubExtractor{}, nil
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-2","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":13,"title":"Fallback result","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-2","orgId":"org-1","taskId":"task-2","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-2","projectId":"project-1","executionId":"exec-2","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-2","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-2":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-2/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-2/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:   boolPtr(true),
+		Provider:  "gemini",
+		Model:     "gemini-3.1-flash-lite",
+		APIKey:    "test-key",
+		TimeoutSec: 10,
+	})
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "derived.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	outputContract, ok := metadata["outputContract"].(map[string]interface{})
+	if !ok || outputContract["source"] != string(runner.StructuredResultSourceDerived) {
+		t.Fatalf("expected derived outputContract source, got %#v", metadata["outputContract"])
+	}
+	extractorMeta, ok := metadata["extractor"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected extractor metadata, got %#v", metadata["extractor"])
+	}
+	if extractorMeta["success"] != false {
+		t.Fatalf("expected extractor success=false, got %#v", extractorMeta)
+	}
+	if !strings.Contains(fmt.Sprint(extractorMeta["error"]), "nil result") {
+		t.Fatalf("expected nil result error metadata, got %#v", extractorMeta)
+	}
+	result, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result map, got %#v", finalizeBody["result"])
+	}
+	if result["status"] != "success" {
+		t.Fatalf("expected derived success result, got %#v", result)
+	}
+	if got := ifaceStrings(result["filesTouched"]); len(got) != 1 || got[0] != "derived.txt" {
+		t.Fatalf("expected derived filesTouched, got %#v", result["filesTouched"])
+	}
+}
+
+func TestResolveResultExtractorConfigPrefersExplicitAgentDisable(t *testing.T) {
+	resolved := resolveResultExtractorConfig(&config.ResultExtractorConfig{
+		Enabled:   boolPtr(true),
+		Provider:  "gemini",
+		Model:     "gemini-3.1-flash-lite",
+		APIKeyEnv: "GEMINI_API_KEY",
+	}, &config.ResultExtractorConfig{
+		Enabled: boolPtr(false),
+	})
+	if resolved == nil {
+		t.Fatal("expected resolved config")
+	}
+	if resolved.IsEnabled() {
+		t.Fatalf("expected explicit agent disable to win, got %#v", resolved)
+	}
+}
+
 func TestGitWorkflowPolicyParsing(t *testing.T) {
 	if runner.ParseGitPolicy("branch_only") != runner.GitPolicyBranchOnly {
 		t.Fatal("expected branch_only policy")
@@ -326,7 +748,7 @@ func TestRunOnceFinalizesFailureWhenEffectiveWorkdirIsEmpty(t *testing.T) {
 		t.Fatal("expected agent registration to succeed")
 	}
 
-	worker := NewAgentWorker(server.URL, "test-key", "runner-1", agent, time.Second)
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", agent, time.Second, nil)
 	worker.runOnce(context.Background())
 
 	mu.Lock()
@@ -407,4 +829,50 @@ func TestHelperFunctions(t *testing.T) {
 	if truncate("short", 100) != "short" {
 		t.Fatal("expected no truncation for short strings")
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func ifaceStrings(value interface{}) []string {
+	items, ok := value.([]interface{})
+	if !ok {
+		if strings, ok := value.([]string); ok {
+			return strings
+		}
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if str, ok := item.(string); ok {
+			result = append(result, str)
+		}
+	}
+	return result
+}
+
+func initWorkerTestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "test@fluxo.dev")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "checkout", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit(t, dir, "add", "-A")
+	runGit(t, dir, "commit", "-m", "initial")
+	return dir
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output))
 }

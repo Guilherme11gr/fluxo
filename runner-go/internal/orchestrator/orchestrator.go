@@ -22,6 +22,7 @@ type RunnerManager struct {
 	heartbeat       time.Duration
 	availableModels []string
 	agentFlag       string
+	resultExtractor *config.ResultExtractorConfig
 
 	runnerID string
 
@@ -33,7 +34,7 @@ type RunnerManager struct {
 const staleExecutionGraceMultiplier = 3
 const minimumStaleExecutionWindow = 90 * time.Second
 
-func NewRunnerManager(apiURL, apiKey string, pollInterval, heartbeat time.Duration, availableModels []string, syncer *agentsync.AgentSyncer, agentFlag string) *RunnerManager {
+func NewRunnerManager(apiURL, apiKey string, pollInterval, heartbeat time.Duration, availableModels []string, syncer *agentsync.AgentSyncer, agentFlag string, resultExtractor *config.ResultExtractorConfig) *RunnerManager {
 	return &RunnerManager{
 		apiURL:          apiURL,
 		apiKey:          apiKey,
@@ -42,6 +43,7 @@ func NewRunnerManager(apiURL, apiKey string, pollInterval, heartbeat time.Durati
 		availableModels: availableModels,
 		syncer:          syncer,
 		agentFlag:       agentFlag,
+		resultExtractor: resultExtractor,
 		workers:         map[string]*AgentWorker{},
 	}
 }
@@ -116,7 +118,7 @@ func (m *RunnerManager) RunOnce(ctx context.Context, agents []config.AgentConfig
 			continue
 		}
 		agent.AvailableModels = m.availableModels
-		worker := NewAgentWorker(m.apiURL, m.apiKey, m.runnerID, agent, m.pollInterval)
+		worker := NewAgentWorker(m.apiURL, m.apiKey, m.runnerID, agent, m.pollInterval, m.resultExtractor)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -146,7 +148,7 @@ func (m *RunnerManager) reconcileAgents(ctx context.Context, agents []config.Age
 
 		worker, exists := m.workers[agent.ID]
 		if !exists {
-			worker = NewAgentWorker(m.apiURL, m.apiKey, m.runnerID, agent, m.pollInterval)
+			worker = NewAgentWorker(m.apiURL, m.apiKey, m.runnerID, agent, m.pollInterval, m.resultExtractor)
 			m.workers[agent.ID] = worker
 			go worker.Run(ctx)
 			continue

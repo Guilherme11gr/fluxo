@@ -62,6 +62,30 @@ func RegisterAgent(client *api.Client, agent config.AgentConfig, availableModels
 	if agent.Variant != "" {
 		configObj["variant"] = agent.Variant
 	}
+	if agent.ResultExtractor != nil {
+		extractorConfig := map[string]interface{}{}
+		if agent.ResultExtractor.Enabled != nil {
+			extractorConfig["enabled"] = *agent.ResultExtractor.Enabled
+		}
+		if agent.ResultExtractor.Provider != "" {
+			extractorConfig["provider"] = agent.ResultExtractor.Provider
+		}
+		if agent.ResultExtractor.Model != "" {
+			extractorConfig["model"] = agent.ResultExtractor.Model
+		}
+		if agent.ResultExtractor.APIKeyEnv != "" {
+			extractorConfig["api_key_env"] = agent.ResultExtractor.APIKeyEnv
+		}
+		if agent.ResultExtractor.TimeoutSec > 0 {
+			extractorConfig["timeout_sec"] = agent.ResultExtractor.TimeoutSec
+		}
+		if agent.ResultExtractor.MaxInputChars > 0 {
+			extractorConfig["max_input_chars"] = agent.ResultExtractor.MaxInputChars
+		}
+		if len(extractorConfig) > 0 {
+			configObj["result_extractor"] = extractorConfig
+		}
+	}
 	if len(configObj) > 0 {
 		body["config"] = configObj
 	}
@@ -92,6 +116,7 @@ func RegisterAgent(client *api.Client, agent config.AgentConfig, availableModels
 	agentMu.Unlock()
 	return id
 }
+
 
 // SendHeartbeat sends a heartbeat for an agent, optionally including available_models.
 func SendHeartbeat(client *api.Client, agent config.AgentConfig, status string) {

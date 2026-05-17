@@ -52,7 +52,7 @@ func TestSetAgentsOfflineSendsOfflineHeartbeat(t *testing.T) {
 		t.Fatal("expected agent registration to succeed")
 	}
 
-	manager := NewRunnerManager(server.URL, "test-key", 0, 0, nil, nil, "")
+	manager := NewRunnerManager(server.URL, "test-key", 0, 0, nil, nil, "", nil)
 	manager.setAgentsOffline([]config.AgentConfig{agent})
 
 	mu.Lock()

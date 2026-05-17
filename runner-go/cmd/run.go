@@ -181,7 +181,7 @@ Legacy mode (agents in config.yaml):
 
 		// Single run mode
 		if once {
-			manager := orchestrator.NewRunnerManager(apiURL, apiKey, pollInterval, time.Duration(cfg.Runner.HeartbeatSec)*time.Second, availableModels, nil, agentFlag)
+			manager := orchestrator.NewRunnerManager(apiURL, apiKey, pollInterval, time.Duration(cfg.Runner.HeartbeatSec)*time.Second, availableModels, nil, agentFlag, cfg.Runner.ResultExtractor)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 			if err := manager.RunOnce(ctx, agents); err != nil {
@@ -203,7 +203,7 @@ Legacy mode (agents in config.yaml):
 		defer stop()
 
 		fmt.Print("Running in continuous mode. Press Ctrl+C to stop.\n\n")
-		manager := orchestrator.NewRunnerManager(apiURL, apiKey, pollInterval, time.Duration(cfg.Runner.HeartbeatSec)*time.Second, availableModels, syncer, agentFlag)
+		manager := orchestrator.NewRunnerManager(apiURL, apiKey, pollInterval, time.Duration(cfg.Runner.HeartbeatSec)*time.Second, availableModels, syncer, agentFlag, cfg.Runner.ResultExtractor)
 		if err := manager.Start(ctx, agents); err != nil {
 			fmt.Print("\n\033[33m[runner] Shutdown signal received...\033[0m\n")
 			gracefulShutdown(agents, apiURL, apiKey)

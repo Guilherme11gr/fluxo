@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/fluxo-app/fluxo-runner/internal/api"
 	"github.com/fluxo-app/fluxo-runner/internal/config"
+	"github.com/fluxo-app/fluxo-runner/internal/extractor"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
 	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
@@ -20,18 +22,24 @@ type AgentWorker struct {
 	apiKey       string
 	runnerID     string
 	pollInterval time.Duration
+	resultExtractor *config.ResultExtractorConfig
+	executorFactory func(agent config.AgentConfig) executor.Executor
 
 	mu     sync.RWMutex
 	agent  config.AgentConfig
 	stopCh chan struct{}
 }
 
-func NewAgentWorker(apiURL, apiKey, runnerID string, agent config.AgentConfig, pollInterval time.Duration) *AgentWorker {
+var newStructuredResultExtractor = extractor.NewExtractor
+
+func NewAgentWorker(apiURL, apiKey, runnerID string, agent config.AgentConfig, pollInterval time.Duration, resultExtractor *config.ResultExtractorConfig) *AgentWorker {
 	return &AgentWorker{
 		apiURL:       apiURL,
 		apiKey:       apiKey,
 		runnerID:     runnerID,
 		pollInterval: pollInterval,
+		resultExtractor: resultExtractor,
+		executorFactory: newExecutor,
 		agent:        agent,
 		stopCh:       make(chan struct{}),
 	}
@@ -267,6 +275,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		return
 	}
 	logging.Debugf("worker[%s] preflight OK branch=%q dirty=%t protected=%t", agent.Name, preflight.CurrentBranch, preflight.IsDirty, preflight.IsProtected)
+	worktreeBefore := runner.CaptureWorktreeSnapshot(workdir)
 
 	runner.SendHeartbeat(client, agent, "BUSY")
 
@@ -337,12 +346,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	}, agent, previousExecution, retrievedMemory)
 
 	var exec executor.Executor
-	switch agent.Tool {
-	case "claude":
-		exec = &executor.ClaudeExecutor{Config: agent}
-	default:
-		exec = &executor.OpenCodeExecutor{Config: agent}
-	}
+	exec = w.executorFactory(agent)
 
 	timeout := time.Duration(agent.Timeout) * time.Second
 	if timeout <= 0 {
@@ -434,19 +438,17 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if !result.Success {
 		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, readableOutput, timeout)
 	}
-	structuredResult, resultMeta := runner.BuildExecutionResultV1WithMeta(result.Success, structuredOutput, result.ExitCode)
-	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
-	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 	commentOutput := rawOutput
 	if failureHeadline != "" {
 		commentOutput = strings.TrimSpace(failureHeadline + "\n\n" + commentOutput)
 	}
 	if commentOutput == "" {
-		commentOutput = persistedOutput
+		commentOutput = structuredOutput
 	}
 	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), commentOutput, result.ExitCode)
 
 	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
+	filesTouched := runner.DiffWorktreeFiles(worktreeBefore, runner.CaptureWorktreeSnapshot(workdir))
 
 	if result.Success && gitPolicy != runner.GitPolicyNoWrite && preparedGit.Branch != "" {
 		if commitSHA, err := runner.CommitChanges(workdir, preparedGit.Branch, claimed.Task.ID, claimed.Task.Title); err != nil {
@@ -454,6 +456,11 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		} else if commitSHA != "" {
 			logging.Debugf("worker[%s] committed changes sha=%s", agent.Name, commitSHA)
 			gitSnapshot = runner.CaptureGitSnapshot(workdir, preparedGit)
+			if len(preparedGit.CommitShas) > 0 {
+				if committedFiles, err := runner.CollectChangedFilesSince(workdir, preparedGit.CommitShas[0]); err == nil && len(committedFiles) > 0 {
+					filesTouched = committedFiles
+				}
+			}
 		}
 
 		if gitPolicy == runner.GitPolicyBranchCommitPR {
@@ -485,7 +492,32 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		}
 	}
 
+	structuredResult, resultMeta := runner.BuildExecutionResultV1WithContextAndMeta(result.Success, structuredOutput, result.ExitCode, runner.ExecutionResultDerivedContext{
+		FilesTouched: filesTouched,
+	})
+	extractorMeta := map[string]interface{}{
+		"attempted": false,
+		"provider":  nil,
+		"model":     nil,
+		"success":   false,
+		"error":     nil,
+	}
+	if result.Success && resultMeta.Source == runner.StructuredResultSourceDerived {
+		if extractedResult, meta, err := w.tryExtractStructuredResult(ctx, agent, *claimed, rawOutput, readableOutput, filesTouched, result); err == nil && extractedResult != nil {
+			structuredResult = extractedResult
+			resultMeta.Source = runner.StructuredResultSourceExtracted
+			extractorMeta = meta
+		} else if meta != nil {
+			extractorMeta = meta
+			if err != nil {
+				logging.Debugf("worker[%s] extractor failed: %v", agent.Name, err)
+			}
+		}
+	}
+
 	structuredResult = runner.MergeGitResult(structuredResult, gitSnapshot)
+	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
+	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
@@ -516,6 +548,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			"tool":  agent.Tool,
 			"model": agent.Model,
 			"git":   runner.GitMetadataMap(gitSnapshot),
+			"extractor": extractorMeta,
 			"execution": map[string]interface{}{
 				"timeoutSeconds": int(timeout.Seconds()),
 				"timedOut":       result.TimedOut,
@@ -600,6 +633,159 @@ func outputContractMetadata(meta runner.ExecutionResultBuildMeta) map[string]int
 		"repairApplied": meta.RepairApplied,
 		"parseError":    nullableString(meta.ParseError),
 	}
+}
+
+func newExecutor(agent config.AgentConfig) executor.Executor {
+	switch agent.Tool {
+	case "claude":
+		return &executor.ClaudeExecutor{Config: agent}
+	default:
+		return &executor.OpenCodeExecutor{Config: agent}
+	}
+}
+
+func (w *AgentWorker) tryExtractStructuredResult(ctx context.Context, agent config.AgentConfig, task api.ClaimedTaskResponse, rawOutput, readableOutput string, filesTouched []string, execResult executor.Result) (map[string]interface{}, map[string]interface{}, error) {
+	meta := map[string]interface{}{
+		"attempted": false,
+		"provider":  nil,
+		"model":     nil,
+		"success":   false,
+		"error":     nil,
+	}
+
+	extractorCfg := resolveResultExtractorConfig(w.resultExtractor, agent.ResultExtractor)
+	if extractorCfg == nil || !extractorCfg.IsEnabled() {
+		return nil, meta, nil
+	}
+
+	adapterCfg := extractor.Config{
+		Enabled:       extractorCfg.IsEnabled(),
+		Provider:      extractorCfg.Provider,
+		Model:         extractorCfg.EffectiveModel(),
+		APIKeyEnv:     extractorCfg.APIKeyEnv,
+		APIKey:        extractorCfg.APIKey,
+		TimeoutSec:    extractorCfg.EffectiveTimeoutSec(),
+		MaxInputChars: extractorCfg.EffectiveMaxInputChars(),
+	}
+
+	resultExtractor, err := newStructuredResultExtractor(adapterCfg)
+	meta["attempted"] = true
+	meta["provider"] = adapterCfg.Provider
+	meta["model"] = adapterCfg.Model
+	if err != nil {
+		meta["error"] = err.Error()
+		return nil, meta, err
+	}
+
+	if resultExtractor.Provider() == "noop" {
+		return nil, meta, nil
+	}
+
+	extracted, err := resultExtractor.Extract(ctx, extractor.ExtractRequest{
+		TaskID:          task.Task.ID,
+		TaskTitle:       task.Task.Title,
+		TaskDescription: task.Task.Description,
+		AgentName:       agent.Name,
+		Tool:            agent.Tool,
+		Model:           agent.Model,
+		RawOutput:       rawOutput,
+		ReadableOutput:  readableOutput,
+		FilesTouched:    filesTouched,
+		ExitCode:        execResult.ExitCode,
+		Success:         execResult.Success,
+	})
+	if err != nil {
+		meta["error"] = err.Error()
+		return nil, meta, err
+	}
+	if extracted == nil || extracted.Result == nil {
+		err := fmt.Errorf("extractor provider returned nil result")
+		meta["error"] = err.Error()
+		return nil, meta, err
+	}
+
+	validated, err := validateExtractedResult(extracted.Result, extractedValidationContext{
+		ExecSuccess:  execResult.Success,
+		FilesTouched: filesTouched,
+		FallbackSummary: runner.ExecutionResultSummary(runner.BuildExecutionResultV1WithContext(execResult.Success, readableOutput, execResult.ExitCode, runner.ExecutionResultDerivedContext{
+			FilesTouched: filesTouched,
+		})),
+	})
+	if err != nil {
+		meta["error"] = err.Error()
+		return nil, meta, err
+	}
+
+	meta["success"] = true
+	meta["latencyMs"] = extracted.LatencyMs
+	meta["inputChars"] = extracted.InputChars
+	return validated, meta, nil
+}
+
+func resolveResultExtractorConfig(globalCfg, agentCfg *config.ResultExtractorConfig) *config.ResultExtractorConfig {
+	return globalCfg.MergedWith(agentCfg)
+}
+
+type extractedValidationContext struct {
+	ExecSuccess     bool
+	FilesTouched    []string
+	FallbackSummary string
+}
+
+func validateExtractedResult(result map[string]interface{}, ctx extractedValidationContext) (map[string]interface{}, error) {
+	if result == nil {
+		return nil, fmt.Errorf("extracted result is nil")
+	}
+	parsed, err := runner.ParseExecutionResultV1Map(result)
+	if err != nil {
+		return nil, fmt.Errorf("parse extracted result: %w", err)
+	}
+	if parsed == nil {
+		return nil, fmt.Errorf("extracted result parsed to nil")
+	}
+	parsed.SchemaVersion = "v1"
+	if ctx.ExecSuccess {
+		parsed.Status = "success"
+	}
+	runnerFiles := dedupeStrings(ctx.FilesTouched)
+	if len(runnerFiles) > 0 {
+		parsed.FilesTouched = runnerFiles
+	}
+	if strings.TrimSpace(parsed.Git.Mode) == "" {
+		parsed.Git.Mode = "manual"
+	}
+	if strings.TrimSpace(parsed.Summary) == "" && strings.TrimSpace(ctx.FallbackSummary) != "" {
+		parsed.Summary = strings.TrimSpace(ctx.FallbackSummary)
+	}
+	data, err := json.Marshal(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("marshal validated extracted result: %w", err)
+	}
+	var normalized map[string]interface{}
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return nil, fmt.Errorf("normalize extracted result: %w", err)
+	}
+	return normalized, nil
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func buildFailureExecutionDetails(agentName, tool string, result executor.Result, readableOutput string, timeout time.Duration) (structuredOutput string, headline string, errorMessage string, blockReason string) {

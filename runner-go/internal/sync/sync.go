@@ -220,6 +220,7 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 	}
 	agent.Context = strVal(configMap, "context")
 	agent.Workdir = strVal(configMap, "workdir")
+	agent.ResultExtractor = resultExtractorConfigVal(configMap, "result_extractor", "resultExtractor")
 	if agent.Workdir == "" {
 		if w := strVal(obj, "workdir"); w != "" {
 			agent.Workdir = w
@@ -249,9 +250,74 @@ func convertAPIAgent(obj map[string]interface{}, d config.AgentDefaults) config.
 	return agent
 }
 
+func resultExtractorConfigVal(m map[string]interface{}, keys ...string) *config.ResultExtractorConfig {
+	var raw interface{}
+	found := false
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		raw = value
+		found = true
+		break
+	}
+	if !found {
+		return nil
+	}
+
+	extractorMap, ok := raw.(map[string]interface{})
+	if !ok || extractorMap == nil {
+		return nil
+	}
+
+	cfg := &config.ResultExtractorConfig{}
+	hasValue := false
+
+	if enabled, ok := boolPtrVal(extractorMap, "enabled"); ok {
+		cfg.Enabled = enabled
+		hasValue = true
+	}
+	if provider := firstStrVal(extractorMap, "provider"); provider != "" {
+		cfg.Provider = provider
+		hasValue = true
+	}
+	if model := firstStrVal(extractorMap, "model"); model != "" {
+		cfg.Model = model
+		hasValue = true
+	}
+	if apiKeyEnv := firstStrVal(extractorMap, "api_key_env", "apiKeyEnv"); apiKeyEnv != "" {
+		cfg.APIKeyEnv = apiKeyEnv
+		hasValue = true
+	}
+	if timeoutSec := firstIntVal(extractorMap, "timeout_sec", "timeoutSec"); timeoutSec > 0 {
+		cfg.TimeoutSec = timeoutSec
+		hasValue = true
+	}
+	if maxInputChars := firstIntVal(extractorMap, "max_input_chars", "maxInputChars"); maxInputChars > 0 {
+		cfg.MaxInputChars = maxInputChars
+		hasValue = true
+	}
+
+	if !hasValue {
+		return nil
+	}
+
+	return cfg
+}
+
 func strVal(m map[string]interface{}, key string) string {
 	v, _ := m[key].(string)
 	return v
+}
+
+func firstStrVal(m map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if v, ok := m[key].(string); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func intVal(m map[string]interface{}, key string) int {
@@ -266,6 +332,45 @@ func intVal(m map[string]interface{}, key string) int {
 		return n
 	}
 	return 0
+}
+
+func firstIntVal(m map[string]interface{}, keys ...string) int {
+	for _, key := range keys {
+		if value := intVal(m, key); value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func boolPtrVal(m map[string]interface{}, keys ...string) (*bool, bool) {
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case bool:
+			parsed := v
+			return &parsed, true
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "true", "1":
+				parsed := true
+				return &parsed, true
+			case "false", "0":
+				parsed := false
+				return &parsed, true
+			}
+		case float64:
+			parsed := v != 0
+			return &parsed, true
+		case int:
+			parsed := v != 0
+			return &parsed, true
+		}
+	}
+	return nil, false
 }
 
 func stringSliceVal(m map[string]interface{}, key string) []string {

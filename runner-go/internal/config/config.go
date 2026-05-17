@@ -6,13 +6,102 @@ type Config struct {
 	Agents []AgentConfig `yaml:"agents"`
 }
 
+// ResultExtractorConfig configures the LLM-based result extractor.
+type ResultExtractorConfig struct {
+	Enabled       *bool  `yaml:"enabled"`
+	Provider      string `yaml:"provider"`
+	Model         string `yaml:"model"`
+	APIKeyEnv     string `yaml:"api_key_env"`
+	APIKey        string `yaml:"api_key"`
+	TimeoutSec    int    `yaml:"timeout_sec"`
+	MaxInputChars int    `yaml:"max_input_chars"`
+}
+
+func (c *ResultExtractorConfig) Clone() *ResultExtractorConfig {
+	if c == nil {
+		return nil
+	}
+	cloned := *c
+	if c.Enabled != nil {
+		enabled := *c.Enabled
+		cloned.Enabled = &enabled
+	}
+	return &cloned
+}
+
+func (c *ResultExtractorConfig) IsEnabled() bool {
+	return c != nil && c.Enabled != nil && *c.Enabled
+}
+
+func (c *ResultExtractorConfig) EffectiveModel() string {
+	if c == nil {
+		return "gemini-3.1-flash-lite"
+	}
+	if c.Model != "" {
+		return c.Model
+	}
+	return "gemini-3.1-flash-lite"
+}
+
+func (c *ResultExtractorConfig) EffectiveTimeoutSec() int {
+	if c == nil || c.TimeoutSec <= 0 {
+		return 20
+	}
+	return c.TimeoutSec
+}
+
+func (c *ResultExtractorConfig) EffectiveMaxInputChars() int {
+	if c == nil || c.MaxInputChars <= 0 {
+		return 30000
+	}
+	return c.MaxInputChars
+}
+
+// MergedWith returns a merged copy where explicit override values win.
+func (c *ResultExtractorConfig) MergedWith(override *ResultExtractorConfig) *ResultExtractorConfig {
+	if c == nil && override == nil {
+		return nil
+	}
+	if override == nil {
+		return c.Clone()
+	}
+	if c == nil {
+		return override.Clone()
+	}
+	merged := *c.Clone()
+	if override.Enabled != nil {
+		enabled := *override.Enabled
+		merged.Enabled = &enabled
+	}
+	if override.Provider != "" {
+		merged.Provider = override.Provider
+	}
+	if override.Model != "" {
+		merged.Model = override.Model
+	}
+	if override.APIKeyEnv != "" {
+		merged.APIKeyEnv = override.APIKeyEnv
+	}
+	if override.APIKey != "" {
+		merged.APIKey = override.APIKey
+	}
+	if override.TimeoutSec > 0 {
+		merged.TimeoutSec = override.TimeoutSec
+	}
+	if override.MaxInputChars > 0 {
+		merged.MaxInputChars = override.MaxInputChars
+	}
+	return &merged
+}
+
 // RunnerConfig holds global runner settings.
 type RunnerConfig struct {
-	APIURL           string `yaml:"api_url"`
-	APIKeyEnv        string `yaml:"api_key_env"`
-	PollIntervalSec  int    `yaml:"poll_interval_sec"`
-	HeartbeatSec     int    `yaml:"heartbeat_interval_sec"`
-	SyncIntervalSec  int    `yaml:"sync_interval_sec"`
+	APIURL           string                 `yaml:"api_url"`
+	APIKeyEnv        string                 `yaml:"api_key_env"`
+	PollIntervalSec  int                    `yaml:"poll_interval_sec"`
+	HeartbeatSec     int                    `yaml:"heartbeat_interval_sec"`
+	SyncIntervalSec  int                    `yaml:"sync_interval_sec"`
+	ResultExtractor  *ResultExtractorConfig `yaml:"result_extractor"`
 }
 
 // AgentDefaults holds default values for fields not provided by the API.
@@ -71,6 +160,9 @@ type AgentConfig struct {
 
 	// GitAllowedPrefix restricts branch names to a given prefix.
 	GitAllowedPrefix string `yaml:"git_allowed_prefix"`
+
+	// ResultExtractor overrides the global result extractor config for this agent.
+	ResultExtractor *ResultExtractorConfig `yaml:"result_extractor"`
 }
 
 // IsDynamic returns true when no agents are defined in config,

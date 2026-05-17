@@ -794,6 +794,28 @@ func TestBuildExecutionResultV1WithMetaFallsBackToDerived(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionResultV1WithContextAndMetaUsesTouchedFilesForDerivedFallback(t *testing.T) {
+	result, meta := BuildExecutionResultV1WithContextAndMeta(true, "", 0, ExecutionResultDerivedContext{
+		FilesTouched: []string{"src/app/page.tsx", "src/components/card.tsx"},
+	})
+
+	if meta.Source != StructuredResultSourceDerived {
+		t.Fatalf("expected derived source, got %#v", meta)
+	}
+	files, ok := result["filesTouched"].([]interface{})
+	if !ok || len(files) != 2 {
+		t.Fatalf("expected filesTouched to be populated, got %#v", result["filesTouched"])
+	}
+	summary, _ := result["summary"].(string)
+	if !strings.Contains(summary, "Updated 2 files") {
+		t.Fatalf("expected touched-files summary, got %q", summary)
+	}
+	whatChanged, ok := result["whatChanged"].([]interface{})
+	if !ok || len(whatChanged) == 0 {
+		t.Fatalf("expected whatChanged fallback entry, got %#v", result["whatChanged"])
+	}
+}
+
 func TestBuildExecutionResultV1WithMetaPreservesParseErrorOnIrrecoverableJSON(t *testing.T) {
 	raw := strings.Join([]string{
 		"Implemented the requested changes.",

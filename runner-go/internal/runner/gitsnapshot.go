@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -14,6 +15,10 @@ type GitSnapshot struct {
 	PRNumber   *int     `json:"prNumber"`
 	Mode       string   `json:"mode"`
 	CapturedAt string   `json:"capturedAt"`
+}
+
+type WorktreeSnapshot struct {
+	Files map[string]string
 }
 
 func CaptureGitSnapshot(workdir string, prepared GitPreparation) GitSnapshot {
@@ -75,6 +80,57 @@ func GitMetadataMap(snapshot GitSnapshot) map[string]interface{} {
 		"prNumber":   snapshot.PRNumber,
 		"capturedAt": snapshot.CapturedAt,
 	}
+}
+
+func CaptureWorktreeSnapshot(workdir string) WorktreeSnapshot {
+	snapshot := WorktreeSnapshot{Files: map[string]string{}}
+	if strings.TrimSpace(workdir) == "" {
+		return snapshot
+	}
+
+	status, err := gitCommand(workdir, "status", "--porcelain")
+	if err != nil {
+		return snapshot
+	}
+
+	for _, line := range strings.Split(status, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 4 {
+			continue
+		}
+
+		path := strings.TrimSpace(line[3:])
+		if path == "" {
+			continue
+		}
+		if idx := strings.LastIndex(path, " -> "); idx >= 0 {
+			path = strings.TrimSpace(path[idx+4:])
+		}
+		if path == "" {
+			continue
+		}
+
+		snapshot.Files[path] = line[:2]
+	}
+
+	return snapshot
+}
+
+func DiffWorktreeFiles(before, after WorktreeSnapshot) []string {
+	if len(after.Files) == 0 {
+		return []string{}
+	}
+
+	files := make([]string, 0, len(after.Files))
+	for path, status := range after.Files {
+		if beforeStatus, exists := before.Files[path]; exists && beforeStatus == status {
+			continue
+		}
+		files = append(files, path)
+	}
+
+	sort.Strings(files)
+	return files
 }
 
 func defaultGitMode(mode string) string {

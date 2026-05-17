@@ -249,7 +249,7 @@ export function AgentChatRolesCard() {
                       <p className="font-medium">{role.name}</p>
                       {role.isDefault && (
                         <Badge variant="default" className="text-xs">
-                          Padrao
+                          Padrão
                         </Badge>
                       )}
                     </div>
@@ -268,7 +268,7 @@ export function AgentChatRolesCard() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8"
-                        title="Definir como padrao"
+                        title="Definir como padrão"
                         disabled={settingDefault === role.id}
                         onClick={() => void handleSetDefault(role)}
                       >
