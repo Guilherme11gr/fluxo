@@ -31,6 +31,8 @@ func TestBuildPromptUsesRoleContractWithoutLegacyContextOrCommitInstruction(t *t
 	assertContains(t, prompt, "Do not write to main.")
 	assertContains(t, prompt, ResultStartMarker)
 	assertContains(t, prompt, ResultEndMarker)
+	assertContains(t, prompt, "The canonical schema and markers above are mandatory for build and review executions.")
+	assertContains(t, prompt, "Your final response must end with exactly one valid JSON block between the exact markers above.")
 	assertNotContains(t, prompt, "legacy context should not appear")
 	assertNotContains(t, prompt, "If you modify code, commit your changes")
 }

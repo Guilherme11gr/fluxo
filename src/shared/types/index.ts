@@ -28,5 +28,8 @@ export * from './api.types';
 // AI types
 export * from './ai.types';
 
+// Execution types
+export * from './execution.types';
+
 // Note: domain.ts is legacy and duplicates project/task types - not exported to avoid conflicts
 

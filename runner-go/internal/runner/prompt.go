@@ -68,6 +68,8 @@ const (
 	ResultEndMarker   = "FLUXO_RESULT_JSON_END"
 )
 
+const outputContractStrictReminder = "Your final response must end with exactly one valid JSON block between the exact markers above. Do not omit the markers, do not emit a second block, and do not leave malformed JSON."
+
 // BuildPrompt constructs the full prompt sent to the coding agent.
 func BuildPrompt(task Task, agent config.AgentConfig) string {
 	return BuildPromptWithPreviousExecution(task, agent, nil)
@@ -199,11 +201,15 @@ func BuildPromptWithExecutionContext(task Task, agent config.AgentConfig, previo
 	prompt.WriteString(ResultEndMarker)
 	prompt.WriteString("\n")
 	prompt.WriteString("Use empty arrays when unknown and null for unavailable git fields.\n")
+	prompt.WriteString("The canonical schema and markers above are mandatory for build and review executions.\n")
 
 	prompt.WriteString("\n## Instructions\n")
 	prompt.WriteString("- Execute only the requested task.\n")
 	prompt.WriteString("- Keep changes minimal, testable, and explicit.\n")
 	prompt.WriteString("- End with the structured result block.\n")
+	prompt.WriteString("- ")
+	prompt.WriteString(outputContractStrictReminder)
+	prompt.WriteString("\n")
 
 	return prompt.String()
 }

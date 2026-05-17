@@ -44,6 +44,10 @@ export async function POST(request: Request) {
       const existingConfig = (existing.config as Record<string, unknown>) ?? {};
       const mergedConfig = { ...existingConfig, ...(data.config ?? {}) };
       const updated = await agentRepository.update(existing.id, {
+        type: data.type,
+        tool: data.tool,
+        workdir: data.workdir,
+        projectId: data.projectId,
         status: 'ONLINE',
         config: mergedConfig,
       });

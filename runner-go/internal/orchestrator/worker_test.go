@@ -99,7 +99,7 @@ func TestBuildPersistedExecutionOutputFormatsStreamAndPrefixesFailure(t *testing
 		`{"type":"tool_result","part":{"tool":"read","state":{"status":"completed","output":{"message":"File read successfully"}}}}`,
 	}, "\n")
 
-	persisted := buildPersistedExecutionOutput(rawOutput, "", "Execution timed out after 5m 0s.")
+	persisted := buildPersistedExecutionOutput(rawOutput, "", "Execution timed out after 5m 0s.", runner.BuildExecutionResultV1(false, "Execution timed out after 5m 0s.", 124))
 
 	if !strings.HasPrefix(persisted, "Execution timed out after 5m 0s.") {
 		t.Fatalf("expected timeout prefix, got %q", persisted)
@@ -112,6 +112,87 @@ func TestBuildPersistedExecutionOutputFormatsStreamAndPrefixesFailure(t *testing
 	}
 	if !strings.Contains(persisted, "✓ read  File read successfully") {
 		t.Fatalf("expected formatted tool result, got %q", persisted)
+	}
+	if !strings.Contains(persisted, runner.ResultStartMarker) {
+		t.Fatalf("expected structured result marker in persisted output, got %q", persisted)
+	}
+}
+
+func TestBuildPersistedExecutionOutputAppendsStructuredResultWhenMissing(t *testing.T) {
+	persisted := buildPersistedExecutionOutput(
+		"plain output without markers",
+		"plain output without markers",
+		"",
+		runner.BuildExecutionResultV1(true, "plain output without markers", 0),
+	)
+
+	if !strings.Contains(persisted, "plain output without markers") {
+		t.Fatalf("expected readable output to remain visible, got %q", persisted)
+	}
+	if !strings.Contains(persisted, runner.ResultStartMarker) || !strings.Contains(persisted, runner.ResultEndMarker) {
+		t.Fatalf("expected structured result markers in persisted output, got %q", persisted)
+	}
+	if _, err := runner.ParseExecutionResultV1(persisted); err != nil {
+		t.Fatalf("expected appended structured result to parse, got %v", err)
+	}
+}
+
+func TestBuildPersistedExecutionOutputReplacesInvalidStructuredBlock(t *testing.T) {
+	raw := strings.Join([]string{
+		"Execution completed.",
+		runner.ResultStartMarker,
+		`{"schemaVersion":"v1","status":"success"`,
+		runner.ResultEndMarker,
+	}, "\n")
+
+	persisted := buildPersistedExecutionOutput(
+		raw,
+		raw,
+		"",
+		runner.BuildExecutionResultV1(true, "Execution completed.", 0),
+	)
+
+	if strings.Count(persisted, runner.ResultStartMarker) != 1 {
+		t.Fatalf("expected exactly one structured result block, got %q", persisted)
+	}
+	parsed, err := runner.ParseExecutionResultV1(persisted)
+	if err != nil {
+		t.Fatalf("expected canonical structured result to parse, got %v", err)
+	}
+	if parsed.Summary != "Execution completed." {
+		t.Fatalf("expected canonical summary, got %#v", parsed)
+	}
+}
+
+func TestBuildPersistedExecutionOutputCollapsesDuplicateStructuredBlocks(t *testing.T) {
+	first := runner.SerializeExecutionResultV1(runner.BuildExecutionResultV1(true, "first", 0))
+	second := runner.SerializeExecutionResultV1(runner.BuildExecutionResultV1(true, "second", 0))
+	raw := strings.Join([]string{
+		"Execution completed.",
+		first,
+		"extra text",
+		second,
+	}, "\n\n")
+
+	persisted := buildPersistedExecutionOutput(
+		raw,
+		raw,
+		"",
+		runner.BuildExecutionResultV1(true, "Execution completed.", 0),
+	)
+
+	if strings.Count(persisted, runner.ResultStartMarker) != 1 {
+		t.Fatalf("expected exactly one structured result block, got %q", persisted)
+	}
+	if strings.Contains(persisted, "\"summary\": \"first\"") || strings.Contains(persisted, "\"summary\": \"second\"") {
+		t.Fatalf("expected previous blocks to be removed, got %q", persisted)
+	}
+	parsed, err := runner.ParseExecutionResultV1(persisted)
+	if err != nil {
+		t.Fatalf("expected canonical structured result to parse, got %v", err)
+	}
+	if parsed.Summary != "Execution completed." {
+		t.Fatalf("expected canonical summary, got %#v", parsed)
 	}
 }
 
@@ -272,6 +353,20 @@ func TestRunOnceFinalizesFailureWhenEffectiveWorkdirIsEmpty(t *testing.T) {
 	}
 	if len(heartbeats) < 2 || heartbeats[0] != "ONLINE" || heartbeats[len(heartbeats)-1] != "ONLINE" {
 		t.Fatalf("expected ONLINE heartbeats around failure, got %#v", heartbeats)
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	contract, ok := metadata["outputContract"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected outputContract metadata, got %#v", metadata["outputContract"])
+	}
+	if contract["source"] != string(runner.StructuredResultSourceDerived) {
+		t.Fatalf("expected derived source for missing workdir path, got %#v", contract)
+	}
+	if contract["repairApplied"] != false {
+		t.Fatalf("expected repairApplied=false, got %#v", contract)
 	}
 }
 

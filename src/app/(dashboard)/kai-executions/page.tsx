@@ -2,11 +2,31 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useExecutionEvents, useExecutions, useLiveExecution, useKillExecution } from '@/lib/query/hooks/use-executions';
+import { useExecutionTask } from '@/lib/query/hooks/use-execution-task';
 import { useAgents } from '@/lib/query/hooks/use-agents';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Clock, CheckCircle2, XCircle, AlertTriangle, Play, X, StopCircle } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import {
+  Loader2,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Play,
+  X,
+  StopCircle,
+  FileText,
+  ClipboardList,
+  FolderOpen,
+  GitBranch,
+  MonitorSmartphone,
+} from 'lucide-react';
+import { ExecutionResultPanel } from '@/components/features/executions/execution-result-panel';
+import { ExecutionContextCard } from '@/components/features/executions/execution-context-card';
+import type { ExecutionRecord } from '@/shared/types';
+import { extractStructuredResult } from '@/shared/types';
 
 const STATUS_COLORS: Record<string, string> = {
   CLAIMED: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
@@ -26,20 +46,6 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   CANCELLED: <X className="h-3.5 w-3.5" />,
 };
 
-type ExecutionRecord = {
-  id: string;
-  agentId?: string;
-  tool?: string | null;
-  model?: string | null;
-  output?: string | null;
-  resultSummary?: string | null;
-  errorMessage?: string | null;
-  startedAt?: string;
-  duration?: number | null;
-  exitCode?: number | null;
-  status: string;
-};
-
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '—';
   if (seconds < 60) return `${seconds}s`;
@@ -57,6 +63,12 @@ function formatTimeAgo(date: Date): string {
   return `${Math.floor(diff / 86400)}d atrás`;
 }
 
+const WORKSPACE_MODE_LABELS: Record<string, string> = {
+  no_write: 'Somente leitura',
+  branch: 'Branch',
+  direct: 'Direto',
+};
+
 export default function ExecutionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const effectiveFilter = statusFilter && statusFilter !== 'ALL' ? { status: statusFilter } : undefined;
@@ -67,6 +79,12 @@ export default function ExecutionsPage() {
   const { data: selectedExecution } = useLiveExecution(selectedExecutionId ?? '', !!selectedExecutionId);
   const { data: executionEvents } = useExecutionEvents(selectedExecutionId ?? '', undefined, !!selectedExecutionId);
 
+  const exec = selectedExecution as ExecutionRecord | undefined;
+  const taskId = exec?.taskId ?? null;
+  const { data: linkedTask, isLoading: isLoadingTask } = useExecutionTask(taskId, !!taskId);
+
+  const structuredResult = exec?.metadata ? extractStructuredResult(exec.metadata) : null;
+
   const agentsMap = new Map((agents ?? []).map((a: any) => [a.id, a.name]));
   const liveOutput = useMemo(() => {
     const eventLines = (executionEvents?.items ?? [])
@@ -75,14 +93,15 @@ export default function ExecutionsPage() {
     if (eventLines.length > 0) {
       return eventLines.join('\n');
     }
-    return String(selectedExecution?.output ?? '');
-  }, [executionEvents?.items, selectedExecution?.output]);
+    return String(exec?.output ?? '');
+  }, [executionEvents?.items, exec?.output]);
   const showExecutionError =
-    selectedExecution?.status !== 'SUCCESS' && Boolean((selectedExecution as ExecutionRecord | undefined)?.errorMessage);
+    exec?.status !== 'SUCCESS' && Boolean(exec?.errorMessage);
+  const hasWorkspace = exec?.workspaceMode || exec?.workspaceRef || exec?.workspacePath;
 
   useEffect(() => {
     if (!selectedExecutionId || !data?.items?.length) return;
-    if (!data.items.some((exec: any) => exec.id === selectedExecutionId)) {
+    if (!data.items.some((e: any) => e.id === selectedExecutionId)) {
       setSelectedExecutionId(null);
     }
   }, [data?.items, selectedExecutionId]);
@@ -134,29 +153,29 @@ export default function ExecutionsPage() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((exec: any) => (
+              {data.items.map((execItem: any) => (
                 <tr
-                  key={exec.id}
-                  className="border-b border-border hover:bg-muted/30 cursor-pointer transition-colors"
-                  onClick={() => setSelectedExecutionId(selectedExecutionId === exec.id ? null : exec.id)}
+                  key={execItem.id}
+                  className={`border-b border-border hover:bg-muted/30 cursor-pointer transition-colors ${selectedExecutionId === execItem.id ? 'bg-muted/40' : ''}`}
+                  onClick={() => setSelectedExecutionId(selectedExecutionId === execItem.id ? null : execItem.id)}
                 >
                   <td className="px-4 py-3">
-                    <Badge variant="secondary" className={STATUS_COLORS[exec.status] ?? ''}>
-                      {STATUS_ICONS[exec.status]}
-                      <span className="ml-1">{exec.status}</span>
+                    <Badge variant="secondary" className={STATUS_COLORS[execItem.status] ?? ''}>
+                      {STATUS_ICONS[execItem.status]}
+                      <span className="ml-1">{execItem.status}</span>
                     </Badge>
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    {agentsMap.get(exec.agentId) ?? exec.agentId?.slice(0, 8)}
+                    {agentsMap.get(execItem.agentId) ?? execItem.agentId?.slice(0, 8)}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {exec.tool ?? '—'}
+                    {execItem.tool ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {formatDuration(exec.duration)}
+                    {formatDuration(execItem.duration)}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {formatTimeAgo(new Date(exec.startedAt))}
+                    {formatTimeAgo(new Date(execItem.startedAt))}
                   </td>
                 </tr>
               ))}
@@ -165,13 +184,12 @@ export default function ExecutionsPage() {
         </div>
       )}
 
-      {/* Execution detail panel */}
-      {selectedExecution && (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      {exec && (
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm">Detalhes da Execução</h3>
             <div className="flex items-center gap-2">
-              {(String((selectedExecution as ExecutionRecord).status) === 'CLAIMED' || String((selectedExecution as ExecutionRecord).status) === 'RUNNING') && (
+              {(exec.status === 'CLAIMED' || exec.status === 'RUNNING') && (
                 <>
                   <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 animate-pulse">
                     Live
@@ -197,51 +215,126 @@ export default function ExecutionsPage() {
               </Button>
             </div>
           </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
               <span className="text-muted-foreground">Status</span>
               <div className="mt-0.5">
-                <Badge variant="secondary" className={STATUS_COLORS[String((selectedExecution as ExecutionRecord).status)] ?? ''}>
-                  {String((selectedExecution as ExecutionRecord).status)}
+                <Badge variant="secondary" className={STATUS_COLORS[exec.status] ?? ''}>
+                  {exec.status}
                 </Badge>
               </div>
             </div>
             <div>
               <span className="text-muted-foreground">Tool</span>
-              <div className="mt-0.5 font-medium">{(selectedExecution as ExecutionRecord).tool ?? '—'}</div>
+              <div className="mt-0.5 font-medium">{exec.tool ?? '—'}</div>
             </div>
             <div>
               <span className="text-muted-foreground">Model</span>
-              <div className="mt-0.5 font-medium">{(selectedExecution as ExecutionRecord).model ?? '—'}</div>
+              <div className="mt-0.5 font-medium">{exec.model ?? '—'}</div>
             </div>
             <div>
               <span className="text-muted-foreground">Exit Code</span>
-              <div className="mt-0.5 font-mono">{(selectedExecution as ExecutionRecord).exitCode ?? '—'}</div>
+              <div className="mt-0.5 font-mono">{exec.exitCode ?? '—'}</div>
             </div>
           </div>
+
           {showExecutionError && (
             <div>
               <span className="text-xs text-muted-foreground">Error</span>
               <pre className="mt-1 text-xs bg-destructive/10 text-destructive rounded p-3 overflow-x-auto max-h-48">
-                {(selectedExecution as ExecutionRecord).errorMessage}
+                {exec.errorMessage}
               </pre>
             </div>
           )}
-          {(selectedExecution as ExecutionRecord).resultSummary && (
-            <div>
-              <span className="text-xs text-muted-foreground">Result Summary</span>
-              <pre className="mt-1 text-xs bg-muted rounded p-3 overflow-x-auto max-h-48">
-                {(selectedExecution as ExecutionRecord).resultSummary}
-              </pre>
-            </div>
+
+          {hasWorkspace && (
+            <>
+              <Separator />
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  <MonitorSmartphone className="h-3.5 w-3.5" />
+                  Workspace
+                </div>
+                <div className="space-y-1 text-xs">
+                  {exec.workspaceMode && (
+                    <div className="flex items-center gap-1.5">
+                      <FolderOpen className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-muted-foreground">Modo:</span>
+                      <Badge variant="outline" className="text-xs">
+                        {WORKSPACE_MODE_LABELS[exec.workspaceMode] ?? exec.workspaceMode}
+                      </Badge>
+                    </div>
+                  )}
+                  {exec.workspaceRef && (
+                    <div className="flex items-center gap-1.5">
+                      <GitBranch className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-muted-foreground">Ref:</span>
+                      <span className="font-mono">{exec.workspaceRef}</span>
+                    </div>
+                  )}
+                  {exec.workspacePath && (
+                    <div className="pl-4 text-muted-foreground font-mono break-all">
+                      {exec.workspacePath}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
           )}
+
+          {taskId && (
+            <>
+              <Separator />
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  Task vinculada
+                </div>
+                <ExecutionContextCard taskId={taskId} task={linkedTask} isLoading={isLoadingTask} />
+              </div>
+            </>
+          )}
+
+          {structuredResult ? (
+            <>
+              <Separator />
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  <FileText className="h-3.5 w-3.5" />
+                  Resultado estruturado
+                </div>
+                <ExecutionResultPanel result={structuredResult} />
+              </div>
+            </>
+          ) : exec.resultSummary ? (
+            <>
+              <Separator />
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  <FileText className="h-3.5 w-3.5" />
+                  Resumo
+                </div>
+                <div className="text-sm text-foreground bg-muted/50 rounded-md p-3 border border-border/50">
+                  {exec.resultSummary}
+                </div>
+              </div>
+            </>
+          ) : null}
+
           {liveOutput && (
-            <div>
-              <span className="text-xs text-muted-foreground">Full Output</span>
-              <pre className="mt-1 text-xs bg-muted rounded p-3 overflow-x-auto max-h-96 whitespace-pre-wrap">
-                {liveOutput}
-              </pre>
-            </div>
+            <>
+              <Separator />
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  <FileText className="h-3.5 w-3.5" />
+                  Output
+                </div>
+                <pre className="mt-1 text-xs bg-muted rounded p-3 overflow-x-auto max-h-96 whitespace-pre-wrap">
+                  {liveOutput}
+                </pre>
+              </div>
+            </>
           )}
         </div>
       )}

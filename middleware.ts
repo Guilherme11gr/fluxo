@@ -8,6 +8,7 @@ const PUBLIC_PATHS = [
   '/reset-password',
   '/shared',
   '/invite',
+  '/experiment',
   '/api/auth',
   '/api/subscriptions/status',
 ];

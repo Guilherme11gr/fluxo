@@ -129,10 +129,11 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			errorMessage += " No project runtime binding matched this runner instance."
 		}
 
-		structuredResult := runner.BuildExecutionResultV1(false, errorMessage, 1)
+		structuredResult, resultMeta := runner.BuildExecutionResultV1WithMeta(false, errorMessage, 1)
+		persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 			Status:        "FAILED",
-			Output:        errorMessage,
+			Output:        persistedOutput,
 			ResultSummary: truncate(errorMessage, 500),
 			Result:        structuredResult,
 			ErrorMessage:  truncate(errorMessage, 2000),
@@ -145,6 +146,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"tool":  agent.Tool,
 				"model": agent.Model,
 				"git":   runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
+				"outputContract": outputContractMetadata(resultMeta),
 				"runtimeBinding": map[string]interface{}{
 					"id":                  claimed.RuntimeBinding.ID,
 					"projectId":           claimed.RuntimeBinding.ProjectID,
@@ -176,13 +178,15 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			CapturedAt: time.Now().UTC().Format(time.RFC3339),
 		}
 		errorMessage := runner.StripStructuredResultBlock(runner.ExtractReadableOutput(runner.FormatGitPreparationError(err, failedGitSnapshot)))
+		baseResult, resultMeta := runner.BuildExecutionResultV1WithMeta(false, errorMessage, 1)
 		structuredResult := runner.MergeGitResult(
-			runner.BuildExecutionResultV1(false, errorMessage, 1),
+			baseResult,
 			failedGitSnapshot,
 		)
+		persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 			Status:        "FAILED",
-			Output:        errorMessage,
+			Output:        persistedOutput,
 			ResultSummary: truncate(errorMessage, 500),
 			Result:        structuredResult,
 			ErrorMessage:  truncate(errorMessage, 2000),
@@ -195,6 +199,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"tool":  agent.Tool,
 				"model": agent.Model,
 				"git":   runner.GitMetadataMap(failedGitSnapshot),
+				"outputContract": outputContractMetadata(resultMeta),
 				"runtimeBinding": map[string]interface{}{
 					"id":                  claimed.RuntimeBinding.ID,
 					"projectId":           claimed.RuntimeBinding.ProjectID,
@@ -227,13 +232,15 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			CapturedAt: time.Now().UTC().Format(time.RFC3339),
 		}
 		errorMessage := preflight.ErrorMessage
+		baseResult, resultMeta := runner.BuildExecutionResultV1WithMeta(false, errorMessage, 1)
 		structuredResult := runner.MergeGitResult(
-			runner.BuildExecutionResultV1(false, errorMessage, 1),
+			baseResult,
 			failedGitSnapshot,
 		)
+		persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 			Status:        "FAILED",
-			Output:        errorMessage,
+			Output:        persistedOutput,
 			ResultSummary: truncate(errorMessage, 500),
 			Result:        structuredResult,
 			ErrorMessage:  truncate(errorMessage, 2000),
@@ -246,6 +253,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"tool":  agent.Tool,
 				"model": agent.Model,
 				"git":   runner.GitMetadataMap(failedGitSnapshot),
+				"outputContract": outputContractMetadata(resultMeta),
 				"preflight": map[string]interface{}{
 					"ok":          preflight.OK,
 					"branch":      preflight.CurrentBranch,
@@ -410,6 +418,13 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 
 	duration := int(time.Since(start).Seconds())
 	rawOutput := strings.Join(fullOutput, "\n")
+	if strings.TrimSpace(result.Output) != "" {
+		if strings.TrimSpace(rawOutput) == "" {
+			rawOutput = result.Output
+		} else if !strings.Contains(rawOutput, strings.TrimSpace(result.Output)) {
+			rawOutput = strings.TrimSpace(rawOutput + "\n" + result.Output)
+		}
+	}
 	readableOutput := runner.ExtractReadableOutput(rawOutput)
 	strippedOutput := runner.StripStructuredResultBlock(readableOutput)
 	failureHeadline := ""
@@ -419,8 +434,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if !result.Success {
 		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, readableOutput, timeout)
 	}
-	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline)
-	structuredResult := runner.BuildExecutionResultV1(result.Success, structuredOutput, result.ExitCode)
+	structuredResult, resultMeta := runner.BuildExecutionResultV1WithMeta(result.Success, structuredOutput, result.ExitCode)
+	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
 	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 	commentOutput := rawOutput
 	if failureHeadline != "" {
@@ -506,6 +521,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"timedOut":       result.TimedOut,
 				"canceled":       result.Canceled,
 			},
+			"outputContract": outputContractMetadata(resultMeta),
 			"runtimeBinding": map[string]interface{}{
 				"id":                  claimed.RuntimeBinding.ID,
 				"projectId":           claimed.RuntimeBinding.ProjectID,
@@ -577,6 +593,15 @@ func nullableString(val string) *string {
 	return &val
 }
 
+func outputContractMetadata(meta runner.ExecutionResultBuildMeta) map[string]interface{} {
+	return map[string]interface{}{
+		"source":        string(meta.Source),
+		"hadMarkers":    meta.HadMarkers,
+		"repairApplied": meta.RepairApplied,
+		"parseError":    nullableString(meta.ParseError),
+	}
+}
+
 func buildFailureExecutionDetails(agentName, tool string, result executor.Result, readableOutput string, timeout time.Duration) (structuredOutput string, headline string, errorMessage string, blockReason string) {
 	headline = executionFailureHeadline(result, timeout)
 	structuredOutput = headline
@@ -616,13 +641,22 @@ func executionFailureHeadline(result executor.Result, timeout time.Duration) str
 	}
 }
 
-func buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline string) string {
-	persisted := strings.TrimSpace(runner.FormatStreamForDisplay(rawOutput))
+func buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline string, structuredResult map[string]interface{}) string {
+	sanitizedRawOutput := runner.StripStructuredResultBlock(rawOutput)
+	persisted := strings.TrimSpace(runner.FormatStreamForDisplay(sanitizedRawOutput))
 	if persisted == "" {
 		persisted = strings.TrimSpace(runner.StripStructuredResultBlock(readableOutput))
 	}
 	if persisted == "" {
-		persisted = strings.TrimSpace(rawOutput)
+		persisted = strings.TrimSpace(sanitizedRawOutput)
+	}
+	persisted = strings.TrimSpace(runner.StripStructuredResultBlock(persisted))
+	if serialized := runner.SerializeExecutionResultV1(structuredResult); serialized != "" {
+		if persisted == "" {
+			persisted = serialized
+		} else {
+			persisted = strings.TrimSpace(persisted + "\n\n" + serialized)
+		}
 	}
 	if failureHeadline == "" || strings.HasPrefix(persisted, failureHeadline) {
 		return persisted

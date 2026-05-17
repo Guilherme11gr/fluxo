@@ -742,6 +742,81 @@ func TestParseExecutionResultV1ExtractsStructuredBlock(t *testing.T) {
 	}
 }
 
+func TestSerializeExecutionResultV1WrapsMarkers(t *testing.T) {
+	serialized := SerializeExecutionResultV1(BuildExecutionResultV1(true, "Done", 0))
+	if !strings.Contains(serialized, ResultStartMarker) || !strings.Contains(serialized, ResultEndMarker) {
+		t.Fatalf("expected serialized structured result markers, got %q", serialized)
+	}
+	parsed, err := ParseExecutionResultV1(serialized)
+	if err != nil {
+		t.Fatalf("expected serialized structured result to parse, got %v", err)
+	}
+	if parsed.Status != "success" {
+		t.Fatalf("expected success status, got %#v", parsed)
+	}
+}
+
+func TestParseExecutionResultV1DetailedRepairsTrimmedJSONBlock(t *testing.T) {
+	raw := strings.Join([]string{
+		"Implemented the requested changes.",
+		ResultStartMarker,
+		"```json",
+		`{"schemaVersion":"v1","status":"success","summary":"Done","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		"``` trailing text that should be ignored",
+		ResultEndMarker,
+	}, "\n")
+
+	result, meta, err := ParseExecutionResultV1Detailed(raw)
+	if err != nil {
+		t.Fatalf("expected parse to succeed after repair, got %v", err)
+	}
+	if result == nil || result.Summary != "Done" {
+		t.Fatalf("expected parsed summary, got %#v", result)
+	}
+	if meta.Source != StructuredResultSourceRepaired {
+		t.Fatalf("expected repaired source, got %#v", meta)
+	}
+	if !meta.RepairApplied {
+		t.Fatalf("expected repairApplied=true, got %#v", meta)
+	}
+}
+
+func TestBuildExecutionResultV1WithMetaFallsBackToDerived(t *testing.T) {
+	result, meta := BuildExecutionResultV1WithMeta(true, "plain output without markers", 0)
+	if summary, _ := result["summary"].(string); summary != "plain output without markers" {
+		t.Fatalf("expected derived summary, got %#v", result)
+	}
+	if meta.Source != StructuredResultSourceDerived {
+		t.Fatalf("expected derived source, got %#v", meta)
+	}
+	if meta.HadMarkers {
+		t.Fatalf("expected hadMarkers=false, got %#v", meta)
+	}
+}
+
+func TestBuildExecutionResultV1WithMetaPreservesParseErrorOnIrrecoverableJSON(t *testing.T) {
+	raw := strings.Join([]string{
+		"Implemented the requested changes.",
+		ResultStartMarker,
+		`{"schemaVersion":`,
+		ResultEndMarker,
+	}, "\n")
+
+	result, meta := BuildExecutionResultV1WithMeta(false, raw, 1)
+	if meta.Source != StructuredResultSourceDerived {
+		t.Fatalf("expected derived source, got %#v", meta)
+	}
+	if !meta.HadMarkers {
+		t.Fatalf("expected hadMarkers=true, got %#v", meta)
+	}
+	if meta.ParseError == "" {
+		t.Fatalf("expected parseError to be preserved, got %#v", meta)
+	}
+	if summary, _ := result["summary"].(string); summary == "" {
+		t.Fatalf("expected fallback summary, got %#v", result)
+	}
+}
+
 func TestFormatExecutionEventFormatsJSONLToolUse(t *testing.T) {
 	raw := `{"type":"tool_use","part":{"tool":"read","state":{"input":{"file":"src/app.ts"}}}}`
 	formatted := FormatExecutionEvent("stdout", raw)
