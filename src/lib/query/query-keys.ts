@@ -138,7 +138,7 @@ export const queryKeys = {
   // ============ AGENTS ============
   agents: {
     all: (orgId: string) => [...orgKey(orgId), 'agents'] as const,
-    list: (orgId: string) => [...queryKeys.agents.all(orgId), 'list'] as const,
+    list: (orgId: string, projectId?: string | null) => [...queryKeys.agents.all(orgId), 'list', projectId ?? 'all'] as const,
     detail: (orgId: string, id: string) => [...queryKeys.agents.all(orgId), 'detail', id] as const,
   },
 

@@ -27,7 +27,7 @@ vi.mock('@/infra/adapters/prisma', () => ({
   },
 }));
 
-import { POST } from './route';
+import { GET, POST } from './route';
 
 describe('POST /api/agent/agents', () => {
   beforeEach(() => {
@@ -100,5 +100,14 @@ describe('POST /api/agent/agents', () => {
         model: 'ollama-cloud/glm-5.1',
       },
     });
+  });
+
+  it('filters GET by projectId when provided', async () => {
+    mockFindByOrgId.mockResolvedValue([]);
+
+    const response = await GET(new Request('http://localhost/api/agent/agents?projectId=11111111-1111-4111-8111-111111111111'));
+
+    expect(response.status).toBe(200);
+    expect(mockFindByOrgId).toHaveBeenCalledWith('org-1', '11111111-1111-4111-8111-111111111111');
   });
 });

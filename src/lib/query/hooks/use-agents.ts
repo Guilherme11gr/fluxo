@@ -15,6 +15,7 @@ export interface Agent {
   status: string;
   tool: string | null;
   workdir: string | null;
+  projectId: string | null;
   config: Record<string, unknown>;
   lastHeartbeat: string | null;
   createdBy: string;
@@ -26,6 +27,7 @@ interface CreateAgentInput {
   name: string;
   type?: 'RUNNER' | 'REVIEWER' | 'CUSTOM';
   tool?: string;
+  projectId?: string | null;
   workdir?: string;
   config?: Record<string, unknown>;
 }
@@ -37,8 +39,13 @@ interface UpdateAgentInput {
 
 // ============ Fetch Functions ============
 
-async function fetchAgents(): Promise<Agent[]> {
-  const res = await fetch('/api/agents');
+async function fetchAgents(projectId?: string | null): Promise<Agent[]> {
+  const params = new URLSearchParams();
+  if (projectId) {
+    params.set('projectId', projectId);
+  }
+  const query = params.toString();
+  const res = await fetch(query ? `/api/agents?${query}` : '/api/agents');
   if (!res.ok) throw new Error('Erro ao carregar agents');
   const json = await res.json();
   return json.data || [];
@@ -83,12 +90,12 @@ async function deleteAgent(id: string): Promise<void> {
 
 // ============ Hooks ============
 
-export function useAgents() {
+export function useAgents(projectId?: string | null) {
   const orgId = useCurrentOrgId();
 
   return useQuery({
-    queryKey: queryKeys.agents.list(orgId),
-    queryFn: fetchAgents,
+    queryKey: queryKeys.agents.list(orgId, projectId),
+    queryFn: () => fetchAgents(projectId),
     enabled: isOrgIdValid(orgId),
     ...CACHE_TIMES.STANDARD,
   });
@@ -120,7 +127,16 @@ export function useCreateAgent() {
         return [...old, newAgent];
       });
 
+      queryClient.setQueryData<Agent[]>(queryKeys.agents.list(orgId, newAgent.projectId), (old) => {
+        if (!old) return [newAgent];
+        if (old.some((a) => a.id === newAgent.id)) return old;
+        return [...old, newAgent];
+      });
+
       smartInvalidateImmediate(queryClient, queryKeys.agents.list(orgId));
+      if (newAgent.projectId) {
+        smartInvalidateImmediate(queryClient, queryKeys.agents.list(orgId, newAgent.projectId));
+      }
       toast.success('Agent criado');
     },
     onError: () => {
@@ -146,7 +162,19 @@ export function useUpdateAgent() {
         return old.map((a) => (a.id === variables.id ? { ...a, ...updatedAgent } : a));
       });
 
+      queryClient.setQueryData<Agent[]>(queryKeys.agents.list(orgId, updatedAgent.projectId), (old) => {
+        if (!old) return [updatedAgent];
+        const existingIndex = old.findIndex((a) => a.id === variables.id);
+        if (existingIndex === -1) {
+          return [...old, updatedAgent];
+        }
+        return old.map((a) => (a.id === variables.id ? { ...a, ...updatedAgent } : a));
+      });
+
       smartInvalidate(queryClient, queryKeys.agents.list(orgId));
+      if (updatedAgent.projectId) {
+        smartInvalidate(queryClient, queryKeys.agents.list(orgId, updatedAgent.projectId));
+      }
       smartInvalidate(queryClient, queryKeys.agents.detail(orgId, variables.id));
       toast.success('Agent atualizado');
     },

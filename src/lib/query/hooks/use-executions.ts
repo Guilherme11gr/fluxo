@@ -31,12 +31,38 @@ interface ExecutionEventsResult {
   hasMore: boolean;
 }
 
-async function fetchExecutions(orgId: string, filters?: Record<string, string>): Promise<ExecutionListResult> {
-  const params = new URLSearchParams(filters);
+interface UseExecutionsOptions {
+  filters?: Record<string, string>;
+  page?: number;
+  limit?: number;
+}
+
+async function fetchExecutions(
+  orgId: string,
+  options?: UseExecutionsOptions,
+): Promise<ExecutionListResult> {
+  const params = new URLSearchParams(options?.filters);
+  if (options?.page) params.set('page', String(options.page));
+  if (options?.limit) params.set('limit', String(options.limit));
   const res = await fetch(`/api/executions?${params}`);
   if (!res.ok) throw new Error('Failed to fetch executions');
   const json = await res.json();
   return json.data;
+}
+
+export function useExecutions(options?: UseExecutionsOptions) {
+  const orgId = useCurrentOrgId();
+
+  return useQuery({
+    queryKey: queryKeys.executions.list(orgId, {
+      ...options?.filters,
+      page: String(options?.page ?? 1),
+      limit: String(options?.limit ?? 20),
+    }),
+    queryFn: () => fetchExecutions(orgId, options),
+    enabled: isOrgIdValid(orgId),
+    ...CACHE_TIMES.FRESH,
+  });
 }
 
 async function fetchExecution(id: string): Promise<Record<string, unknown>> {
@@ -53,17 +79,6 @@ async function fetchExecutionEvents(id: string, afterSeq?: number): Promise<Exec
   if (!res.ok) throw new Error('Failed to fetch execution events');
   const json = await res.json();
   return json.data;
-}
-
-export function useExecutions(filters?: Record<string, string>) {
-  const orgId = useCurrentOrgId();
-
-  return useQuery({
-    queryKey: queryKeys.executions.list(orgId, filters),
-    queryFn: () => fetchExecutions(orgId, filters),
-    enabled: isOrgIdValid(orgId),
-    ...CACHE_TIMES.FRESH,
-  });
 }
 
 export function useExecution(id: string) {

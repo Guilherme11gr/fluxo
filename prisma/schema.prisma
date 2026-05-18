@@ -267,6 +267,8 @@ model ProjectRuntimeBinding {
   gitProvider         String?      @map("git_provider") @db.VarChar(50)
   prPolicy            String       @default("disabled") @map("pr_policy") @db.VarChar(20)
   gitPolicy           String       @default("no_write") @map("git_policy") @db.VarChar(30)
+  provisionCommand    String?      @map("provision_command")
+  provisionCacheKey   String?      @map("provision_cache_key")
   metadata            Json         @default("{}")
   createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

@@ -1226,6 +1226,548 @@ func TestGitWorkflowNoWriteSkipsEverything(t *testing.T) {
 	}
 }
 
+func TestProvisionExecutionWorkspaceUsesExternalCacheRootAndSkipsCachedCommand(t *testing.T) {
+	originalRunShellCommand := runShellCommand
+	defer func() { runShellCommand = originalRunShellCommand }()
+
+	workdir := t.TempDir()
+	cacheRoot := filepath.Join(t.TempDir(), "provision-cache")
+	commandRuns := 0
+	runShellCommand = func(ctx context.Context, gotWorkdir, hostOS, command string) error {
+		commandRuns++
+		if gotWorkdir != workdir {
+			t.Fatalf("expected workdir %q, got %q", workdir, gotWorkdir)
+		}
+		if hostOS != "windows" {
+			t.Fatalf("expected hostOS windows, got %q", hostOS)
+		}
+		if command != "npm ci" {
+			t.Fatalf("expected command npm ci, got %q", command)
+		}
+		return nil
+	}
+
+	if err := provisionExecutionWorkspace(context.Background(), workdir, cacheRoot, "windows", "npm ci", "cache-key-1"); err != nil {
+		t.Fatalf("provisionExecutionWorkspace failed: %v", err)
+	}
+	if commandRuns != 1 {
+		t.Fatalf("expected one command run, got %d", commandRuns)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, ".fluxo-runner-cache")); !os.IsNotExist(err) {
+		t.Fatalf("expected no cache marker inside workdir, stat err=%v", err)
+	}
+	entries, err := os.ReadDir(cacheRoot)
+	if err != nil {
+		t.Fatalf("read cache root: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one cache marker, got %d", len(entries))
+	}
+	markerContent, err := os.ReadFile(filepath.Join(cacheRoot, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("read provision marker: %v", err)
+	}
+	if string(markerContent) != "npm ci\n" {
+		t.Fatalf("expected provision marker to record command, got %q", string(markerContent))
+	}
+
+	if err := provisionExecutionWorkspace(context.Background(), workdir, cacheRoot, "windows", "npm ci", "cache-key-1"); err != nil {
+		t.Fatalf("second provisionExecutionWorkspace failed: %v", err)
+	}
+	if commandRuns != 1 {
+		t.Fatalf("expected cached provision to skip rerun, got %d command runs", commandRuns)
+	}
+}
+
+func TestRunOnceBranchOnlyPushesAndCleansExecutionWorktree(t *testing.T) {
+	repo, _ := initWorkerTestGitRepoWithRemote(t)
+	stateRoot := filepath.Dir(runner.WorktreesRootForRepo(repo))
+	t.Cleanup(func() { _ = os.RemoveAll(stateRoot) })
+
+	claim := buildWorkerClaimedTaskResponse(
+		"3044ff8c-73b9-40ae-b7fb-a9c6837baf1f",
+		"exec-branch-only",
+		"Branch only worker test",
+		repo,
+		"branch_only",
+		"",
+		"",
+		"",
+	)
+	expectedBranch := runner.BuildBranchName(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix)
+	worktreePath := filepath.Join(runner.WorktreesRootForRepo(repo), claim.Execution.ID)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": claim})
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/"+claim.Execution.ID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/"+claim.Task.ID+"/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/"+claim.Execution.ID+"/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "worker-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "SUCCESS" {
+		t.Fatalf("expected SUCCESS finalize status, got %#v", finalizeBody["status"])
+	}
+	if _, err := os.Stat(filepath.Join(repo, "worker-change.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected base repo worktree to stay unchanged, stat err=%v", err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("expected execution worktree to be removed, stat err=%v", err)
+	}
+
+	result, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result map, got %#v", finalizeBody["result"])
+	}
+	gitResult, ok := result["git"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected git result map, got %#v", result["git"])
+	}
+	if gitResult["mode"] != "branch_only" {
+		t.Fatalf("expected branch_only mode, got %#v", gitResult["mode"])
+	}
+	if gitResult["baseBranch"] != "main" {
+		t.Fatalf("expected baseBranch main, got %#v", gitResult["baseBranch"])
+	}
+	if gitResult["branch"] != expectedBranch {
+		t.Fatalf("expected branch %q, got %#v", expectedBranch, gitResult["branch"])
+	}
+	commitShas := ifaceStrings(gitResult["commitShas"])
+	if len(commitShas) == 0 {
+		t.Fatalf("expected pushed commit SHAs, got %#v", gitResult["commitShas"])
+	}
+
+	remoteBranch := runGit(t, repo, "ls-remote", "origin", "refs/heads/"+expectedBranch)
+	remoteFields := strings.Fields(remoteBranch)
+	if len(remoteFields) == 0 {
+		t.Fatalf("expected remote branch %q to exist, got %q", expectedBranch, remoteBranch)
+	}
+	if remoteFields[0] != commitShas[0] {
+		t.Fatalf("expected remote SHA %q to match committed SHA %q", remoteFields[0], commitShas[0])
+	}
+
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	gitMetadata, ok := metadata["git"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata.git map, got %#v", metadata["git"])
+	}
+	if gitMetadata["branch"] != expectedBranch {
+		t.Fatalf("expected metadata.git.branch %q, got %#v", expectedBranch, gitMetadata["branch"])
+	}
+	if _, err := os.Stat(runner.ProvisionCacheRootForRepo(repo)); !os.IsNotExist(err) {
+		t.Fatalf("expected no external provision cache root for ephemeral worktree runs, stat err=%v", err)
+	}
+}
+
+func TestRunOnceProvisionFailureCleansExecutionWorktree(t *testing.T) {
+	repo, _ := initWorkerTestGitRepoWithRemote(t)
+	stateRoot := filepath.Dir(runner.WorktreesRootForRepo(repo))
+	t.Cleanup(func() { _ = os.RemoveAll(stateRoot) })
+
+	originalRunShellCommand := runShellCommand
+	defer func() { runShellCommand = originalRunShellCommand }()
+	runShellCommand = func(ctx context.Context, workdir, hostOS, command string) error {
+		return fmt.Errorf("provision exploded")
+	}
+
+	claim := buildWorkerClaimedTaskResponse(
+		"5223add6-34fb-4088-aa3f-329d81fad580",
+		"exec-provision-failure",
+		"Provision failure cleanup",
+		repo,
+		"branch_only",
+		"",
+		"install deps",
+		"cache-key-failure",
+	)
+	expectedBranch := runner.BuildBranchName(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix)
+	worktreePath := filepath.Join(runner.WorktreesRootForRepo(repo), claim.Execution.ID)
+	executorRan := false
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": claim})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/"+claim.Execution.ID+"/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				executorRan = true
+				return nil
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "FAILED" {
+		t.Fatalf("expected FAILED finalize status, got %#v", finalizeBody["status"])
+	}
+	if executorRan {
+		t.Fatal("expected executor not to run after provision failure")
+	}
+	errorMessage, _ := finalizeBody["errorMessage"].(string)
+	if !strings.Contains(errorMessage, "Provision command failed") || !strings.Contains(errorMessage, "provision exploded") {
+		t.Fatalf("expected provision failure error message, got %q", errorMessage)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("expected execution worktree to be removed after setup failure, stat err=%v", err)
+	}
+	remoteBranch := runGit(t, repo, "ls-remote", "origin", "refs/heads/"+expectedBranch)
+	if strings.TrimSpace(remoteBranch) != "" {
+		t.Fatalf("expected no remote branch for failed provision, got %q", remoteBranch)
+	}
+}
+
+func TestRunOnceBranchOnlyPushFailureFinalizesExecutionAsFailed(t *testing.T) {
+	repo, remote := initWorkerTestGitRepoWithRemote(t)
+	stateRoot := filepath.Dir(runner.WorktreesRootForRepo(repo))
+	t.Cleanup(func() { _ = os.RemoveAll(stateRoot) })
+
+	claim := buildWorkerClaimedTaskResponse(
+		"f0f0f0f0-34fb-4088-aa3f-329d81fad580",
+		"exec-push-failure",
+		"Branch only push failure",
+		repo,
+		"branch_only",
+		"",
+		"",
+		"",
+	)
+	expectedBranch := runner.BuildBranchName(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix)
+	worktreePath := filepath.Join(runner.WorktreesRootForRepo(repo), claim.Execution.ID)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": claim})
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/"+claim.Execution.ID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/"+claim.Task.ID+"/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/"+claim.Execution.ID+"/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				if err := os.RemoveAll(remote); err != nil {
+					return fmt.Errorf("remove remote to force push failure: %w", err)
+				}
+				return os.WriteFile(filepath.Join(workdir, "push-failure.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "FAILED" {
+		t.Fatalf("expected FAILED finalize status, got %#v", finalizeBody["status"])
+	}
+	if finalizeBody["nextStatus"] != "DOING" {
+		t.Fatalf("expected nextStatus to remain claim status on push failure, got %#v", finalizeBody["nextStatus"])
+	}
+	errorMessage, _ := finalizeBody["errorMessage"].(string)
+	if !strings.Contains(errorMessage, "Required branch push failed") {
+		t.Fatalf("expected push failure error message, got %q", errorMessage)
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if !strings.Contains(comment, "Required branch push failed") {
+		t.Fatalf("expected failure comment to include push failure, got %q", comment)
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("expected execution worktree to remain for recovery after push failure, stat err=%v", err)
+	}
+	if currentBranch := runGit(t, worktreePath, "rev-parse", "--abbrev-ref", "HEAD"); currentBranch != expectedBranch {
+		t.Fatalf("expected failed worktree to stay on branch %q, got %q", expectedBranch, currentBranch)
+	}
+	result, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result map, got %#v", finalizeBody["result"])
+	}
+	gitResult, ok := result["git"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected git result map, got %#v", result["git"])
+	}
+	if gitResult["branch"] != expectedBranch {
+		t.Fatalf("expected branch %q in failed result, got %#v", expectedBranch, gitResult["branch"])
+	}
+}
+
+func TestRunOnceBranchOnlyProvisionRunsForEachFreshWorktree(t *testing.T) {
+	repo, _ := initWorkerTestGitRepoWithRemote(t)
+	stateRoot := filepath.Dir(runner.WorktreesRootForRepo(repo))
+	t.Cleanup(func() { _ = os.RemoveAll(stateRoot) })
+
+	originalRunShellCommand := runShellCommand
+	defer func() { runShellCommand = originalRunShellCommand }()
+	commandRuns := 0
+	seenWorkdirs := map[string]bool{}
+	runShellCommand = func(ctx context.Context, workdir, hostOS, command string) error {
+		commandRuns++
+		seenWorkdirs[workdir] = true
+		return nil
+	}
+
+	for index, executionID := range []string{"exec-branch-cache-1", "exec-branch-cache-2"} {
+		claim := buildWorkerClaimedTaskResponse(
+			"bbbb2222-34fb-4088-aa3f-329d81fad580",
+			executionID,
+			fmt.Sprintf("Branch cache test %d", index+1),
+			repo,
+			"branch_only",
+			"",
+			"npm ci",
+			"same-cache-key",
+		)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+
+			switch {
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": claim})
+			case r.Method == http.MethodPatch && r.URL.Path == "/executions/"+claim.Execution.ID:
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			case r.Method == http.MethodPost && r.URL.Path == "/tasks/"+claim.Task.ID+"/comments":
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			case r.Method == http.MethodPost && r.URL.Path == "/executions/"+claim.Execution.ID+"/finalize":
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			default:
+				t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+
+		worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+			ID:          "agent-1",
+			Name:        "builder",
+			Tool:        "opencode",
+			Model:       "glm-5.1",
+			ClaimStatus: "DOING",
+			DoneStatus:  "DONE",
+			Timeout:     30,
+		}, time.Second, nil)
+		worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+			return &stubExecutor{result: executor.Result{Success: true}}
+		}
+		worker.runOnce(context.Background())
+		server.Close()
+	}
+
+	if commandRuns != 2 {
+		t.Fatalf("expected provision command to run for each fresh worktree, got %d", commandRuns)
+	}
+	if len(seenWorkdirs) != 2 {
+		t.Fatalf("expected two distinct workdirs across executions, got %#v", seenWorkdirs)
+	}
+	if _, err := os.Stat(runner.ProvisionCacheRootForRepo(repo)); !os.IsNotExist(err) {
+		t.Fatalf("expected no shared provision cache markers for ephemeral worktrees, stat err=%v", err)
+	}
+}
+
+func TestRunOnceNoWriteProvisionCacheSkipsRepeatedCommand(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+	cacheRoot := runner.ProvisionCacheRootForRepo(repo)
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(cacheRoot)) })
+
+	originalRunShellCommand := runShellCommand
+	defer func() { runShellCommand = originalRunShellCommand }()
+	commandRuns := 0
+	runShellCommand = func(ctx context.Context, workdir, hostOS, command string) error {
+		commandRuns++
+		if workdir != repo {
+			t.Fatalf("expected stable repo workdir %q, got %q", repo, workdir)
+		}
+		return nil
+	}
+
+	for _, executionID := range []string{"exec-cache-1", "exec-cache-2"} {
+		claim := buildWorkerClaimedTaskResponse(
+			"aaaa1111-34fb-4088-aa3f-329d81fad580",
+			executionID,
+			"No-write provision cache",
+			repo,
+			"no_write",
+			"",
+			"npm ci",
+			"stable-cache-key",
+		)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+
+			switch {
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": claim})
+			case r.Method == http.MethodPatch && r.URL.Path == "/executions/"+claim.Execution.ID:
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			case r.Method == http.MethodPost && r.URL.Path == "/tasks/"+claim.Task.ID+"/comments":
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			case r.Method == http.MethodPost && r.URL.Path == "/executions/"+claim.Execution.ID+"/finalize":
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+			default:
+				t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+
+		worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+			ID:          "agent-1",
+			Name:        "builder",
+			Tool:        "opencode",
+			Model:       "glm-5.1",
+			ClaimStatus: "DOING",
+			DoneStatus:  "DONE",
+			Timeout:     30,
+		}, time.Second, nil)
+		worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+			return &stubExecutor{result: executor.Result{Success: true}}
+		}
+		worker.runOnce(context.Background())
+		server.Close()
+	}
+
+	if commandRuns != 1 {
+		t.Fatalf("expected stable repo provision cache to skip second command run, got %d", commandRuns)
+	}
+	entries, err := os.ReadDir(cacheRoot)
+	if err != nil {
+		t.Fatalf("read provision cache root: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one provision cache marker, got %d", len(entries))
+	}
+}
+
 func TestRunOnceFinalizesFailureWhenEffectiveWorkdirIsEmpty(t *testing.T) {
 	var (
 		mu           sync.Mutex
@@ -1748,9 +2290,9 @@ func TestFlushEventsBatchesCommonEvents(t *testing.T) {
 	repo := initWorkerTestGitRepo(t)
 
 	var (
-		mu            sync.Mutex
-		eventBatches  [][]api.ExecutionEvent
-		flushCounter  int
+		mu           sync.Mutex
+		eventBatches [][]api.ExecutionEvent
+		flushCounter int
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2279,6 +2821,54 @@ func mapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+func buildWorkerClaimedTaskResponse(taskID, executionID, title, repoPath, gitPolicy, allowedBranchPrefix, provisionCommand, provisionCacheKey string) api.ClaimedTaskResponse {
+	claim := api.ClaimedTaskResponse{}
+	claim.Task.ID = taskID
+	claim.Task.OrgID = "org-1"
+	claim.Task.ProjectID = "project-1"
+	claim.Task.FeatureID = "feature-1"
+	claim.Task.LocalID = 12
+	claim.Task.Title = title
+	claim.Task.Description = "desc"
+	claim.Task.Status = "DOING"
+	claim.Task.Type = "TASK"
+	claim.Task.Priority = "HIGH"
+
+	claim.Execution.ID = executionID
+	claim.Execution.OrgID = "org-1"
+	claim.Execution.TaskID = taskID
+	claim.Execution.ProjectID = "project-1"
+	claim.Execution.AgentID = "agent-1"
+	claim.Execution.RunnerInstanceID = "runner-1"
+	claim.Execution.Status = "CLAIMED"
+	claim.Execution.Tool = "opencode"
+	claim.Execution.Model = "glm-5.1"
+	claim.Execution.Metadata = map[string]interface{}{}
+	claim.Execution.StartedAt = "2026-05-16T00:00:00Z"
+
+	claim.Lease.ID = "lease-" + executionID
+	claim.Lease.ProjectID = "project-1"
+	claim.Lease.ExecutionID = executionID
+	claim.Lease.ExpiresAt = "2026-05-16T00:01:00Z"
+
+	claim.RuntimeBinding.ID = "binding-" + executionID
+	claim.RuntimeBinding.ProjectID = "project-1"
+	claim.RuntimeBinding.RunnerProfile = "local"
+	claim.RuntimeBinding.HostOS = "windows"
+	claim.RuntimeBinding.RepoPath = repoPath
+	claim.RuntimeBinding.DefaultBaseBranch = "main"
+	claim.RuntimeBinding.AllowedBranchPrefix = allowedBranchPrefix
+	claim.RuntimeBinding.ExecutionMode = "local"
+	claim.RuntimeBinding.GitProvider = "github"
+	claim.RuntimeBinding.PRPolicy = "draft"
+	claim.RuntimeBinding.GitPolicy = gitPolicy
+	claim.RuntimeBinding.ProvisionCommand = provisionCommand
+	claim.RuntimeBinding.ProvisionCacheKey = provisionCacheKey
+	claim.RuntimeBinding.Metadata = map[string]interface{}{}
+
+	return claim
+}
+
 func TestValidateExtractedResultPreservesRejectedStatus(t *testing.T) {
 	ctx := extractedValidationContext{
 		ExecSuccess:     true,
@@ -2505,6 +3095,17 @@ func initWorkerTestGitRepo(t *testing.T) string {
 	runGit(t, dir, "add", "-A")
 	runGit(t, dir, "commit", "-m", "initial")
 	return dir
+}
+
+func initWorkerTestGitRepoWithRemote(t *testing.T) (string, string) {
+	t.Helper()
+	remoteDir := t.TempDir()
+	runGit(t, remoteDir, "init", "--bare")
+
+	repoDir := initWorkerTestGitRepo(t)
+	runGit(t, repoDir, "remote", "add", "origin", remoteDir)
+	runGit(t, repoDir, "push", "-u", "origin", "main")
+	return repoDir, remoteDir
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {

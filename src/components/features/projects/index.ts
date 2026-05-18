@@ -9,3 +9,4 @@ export { ConvertNoteModal } from './convert-note-modal';
 
 // GitHub integration
 export { GitHubIntegrationCard } from './github-integration-card';
+export { ProjectAgentsPanel } from './project-agents-panel';

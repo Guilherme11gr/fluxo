@@ -103,6 +103,8 @@ interface AgentFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   agent?: Agent | null;
+  projectId?: string;
+  embedded?: boolean;
   onSubmit: (data: {
     name: string;
     type: string;
@@ -117,6 +119,8 @@ export function AgentFormDialog({
   open,
   onOpenChange,
   agent,
+  projectId: fixedProjectId,
+  embedded = false,
   onSubmit,
   isSubmitting = false,
 }: AgentFormDialogProps) {
@@ -143,7 +147,8 @@ export function AgentFormDialog({
   const [model, setModel] = useState((config.model as string) ?? '');
 
   // Execution fields — projectId from column first, then config fallback
-  const [projectId, setProjectId] = useState((agent as any)?.projectId ?? (config.project_id as string) ?? 'all');
+  const resolvedProjectId = fixedProjectId ?? ((agent as any)?.projectId as string) ?? (config.project_id as string) ?? 'all';
+  const [projectId, setProjectId] = useState(resolvedProjectId);
   const [agentType, setAgentType] = useState((config.agent_type as string) ?? 'build');
   const [role, setRole] = useState((config.role as string) ?? 'builder');
   const [rolePrompt, setRolePrompt] = useState((config.role_prompt as string) ?? '');
@@ -183,7 +188,7 @@ export function AgentFormDialog({
     setType(agent?.type ?? 'RUNNER');
     setTool(agent?.tool ?? '');
     setModel((config.model as string) ?? '');
-    setProjectId(((agent as any)?.projectId as string) ?? (config.project_id as string) ?? 'all');
+    setProjectId(fixedProjectId ?? ((agent as any)?.projectId as string) ?? (config.project_id as string) ?? 'all');
     setAgentType((config.agent_type as string) ?? 'build');
     setRole((config.role as string) ?? 'builder');
     setRolePrompt((config.role_prompt as string) ?? '');
@@ -375,20 +380,28 @@ export function AgentFormDialog({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Projeto</Label>
-                <Select value={projectId} onValueChange={setProjectId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Todos os projetos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os projetos</SelectItem>
-                    {projects?.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Deixe vazio para pegar tarefas de qualquer projeto.</p>
+                {embedded && fixedProjectId ? (
+                  <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground">
+                    {projects?.find((project) => project.id === fixedProjectId)?.name ?? 'Projeto atual'}
+                  </div>
+                ) : (
+                  <>
+                    <Select value={projectId} onValueChange={setProjectId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Todos os projetos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os projetos</SelectItem>
+                        {projects?.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Deixe vazio para pegar tarefas de qualquer projeto.</p>
+                  </>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="agent-timeout">Timeout (s)</Label>

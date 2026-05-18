@@ -21,10 +21,12 @@ const createSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const auth = await extractAgentAuth();
-    const agents = await agentRepository.findByOrgId(auth.orgId);
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('projectId');
+    const agents = await agentRepository.findByOrgId(auth.orgId, projectId ?? undefined);
     return agentList(agents);
   } catch (error) {
     return handleAgentError(error);

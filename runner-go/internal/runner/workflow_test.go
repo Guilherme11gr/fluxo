@@ -107,8 +107,8 @@ func TestPolicyRequiresPush(t *testing.T) {
 	if PolicyRequiresPush(GitPolicyNoWrite) {
 		t.Fatal("no_write should not require push")
 	}
-	if PolicyRequiresPush(GitPolicyBranchOnly) {
-		t.Fatal("branch_only should not require push")
+	if !PolicyRequiresPush(GitPolicyBranchOnly) {
+		t.Fatal("branch_only should require push")
 	}
 	if !PolicyRequiresPush(GitPolicyBranchCommitPR) {
 		t.Fatal("branch_commit_pr should require push")
@@ -222,7 +222,7 @@ func TestFinalizeGitWorkflowNoCommit(t *testing.T) {
 }
 
 func TestFinalizeGitWorkflowBranchOnlyCommit(t *testing.T) {
-	dir := initTestGitRepo(t)
+	dir := initTestGitRepoWithRemote(t)
 	defer os.RemoveAll(dir)
 
 	prepResult := ExecuteGitWorkflow(GitWorkflowConfig{
@@ -268,7 +268,7 @@ func TestFinalizeGitWorkflowBranchOnlyCommit(t *testing.T) {
 }
 
 func TestFinalizeGitWorkflowNoChanges(t *testing.T) {
-	dir := initTestGitRepo(t)
+	dir := initTestGitRepoWithRemote(t)
 	defer os.RemoveAll(dir)
 
 	prepResult := ExecuteGitWorkflow(GitWorkflowConfig{
@@ -304,7 +304,7 @@ func TestFinalizeGitWorkflowNoChanges(t *testing.T) {
 }
 
 func TestGitWorkflowResultSnapshotPersistence(t *testing.T) {
-	dir := initTestGitRepo(t)
+	dir := initTestGitRepoWithRemote(t)
 	defer os.RemoveAll(dir)
 
 	prepResult := ExecuteGitWorkflow(GitWorkflowConfig{

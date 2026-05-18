@@ -41,9 +41,12 @@ export class AgentRepository {
     return this.prisma as PrismaClient & { agent: any };
   }
 
-  async findByOrgId(orgId: string): Promise<AgentRecord[]> {
+  async findByOrgId(orgId: string, projectId?: string | null): Promise<AgentRecord[]> {
     const records = await this.client.agent.findMany({
-      where: { orgId },
+      where: {
+        orgId,
+        ...(projectId === undefined ? {} : { projectId }),
+      },
       orderBy: { createdAt: 'desc' },
     });
     return records.map(mapRecord);

@@ -1,8 +1,12 @@
 package runner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -147,6 +151,120 @@ func PrepareGitBranch(workdir string, policy GitPolicy, desiredBranch, baseBranc
 	prep.Branch = currentBranch
 
 	return prep, nil
+}
+
+func runnerStateRootForRepo(baseRepoPath string) string {
+	trimmed := strings.TrimSpace(baseRepoPath)
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(cacheDir) == "" {
+		cacheDir = os.TempDir()
+	}
+	hash := sha256.Sum256([]byte(trimmed))
+	return filepath.Join(cacheDir, "fluxo-runner", hex.EncodeToString(hash[:8]))
+}
+
+func WorktreesRootForRepo(baseRepoPath string) string {
+	return filepath.Join(runnerStateRootForRepo(baseRepoPath), "worktrees")
+}
+
+func ProvisionCacheRootForRepo(baseRepoPath string) string {
+	return filepath.Join(runnerStateRootForRepo(baseRepoPath), "provision")
+}
+
+func CreateExecutionWorktree(baseRepoPath, worktreesRoot, executionID, baseBranch string) (string, error) {
+	baseRepoPath = strings.TrimSpace(baseRepoPath)
+	worktreesRoot = strings.TrimSpace(worktreesRoot)
+	executionID = strings.TrimSpace(executionID)
+	baseBranch = normalizeBaseBranch(baseBranch)
+
+	if baseRepoPath == "" {
+		return "", fmt.Errorf("create worktree: base repo path is required")
+	}
+	if worktreesRoot == "" {
+		return "", fmt.Errorf("create worktree: worktrees root is required")
+	}
+	if executionID == "" {
+		return "", fmt.Errorf("create worktree: execution ID is required")
+	}
+	if err := os.MkdirAll(worktreesRoot, 0o755); err != nil {
+		return "", fmt.Errorf("create worktree root: %w", err)
+	}
+
+	worktreePath := filepath.Join(worktreesRoot, executionID)
+	_ = os.RemoveAll(worktreePath)
+	if _, err := gitCommand(baseRepoPath, "worktree", "add", "--detach", worktreePath, baseBranch); err != nil {
+		return "", fmt.Errorf("create worktree %q from %q: %w", worktreePath, baseBranch, err)
+	}
+
+	return worktreePath, nil
+}
+
+func SwitchToTaskBranch(worktreePath, branch, baseBranch, allowedPrefix string) error {
+	if strings.TrimSpace(worktreePath) == "" {
+		return fmt.Errorf("switch branch: worktree path is required")
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("switch branch: branch is required")
+	}
+	if err := validatePreparedBranch(GitPolicyBranchOnly, branch, baseBranch, allowedPrefix); err != nil {
+		return err
+	}
+
+	baseBranch = normalizeBaseBranch(baseBranch)
+	if _, err := gitCommand(worktreePath, "fetch", "origin", baseBranch); err != nil {
+		return fmt.Errorf("fetch base branch %q: %w", baseBranch, err)
+	}
+	if _, err := gitCommand(worktreePath, "checkout", "-B", branch, "origin/"+baseBranch); err != nil {
+		return fmt.Errorf("checkout branch %q from origin/%s: %w", branch, baseBranch, err)
+	}
+
+	return nil
+}
+
+func RemoveExecutionWorktree(baseRepoPath, worktreePath, branch string) error {
+	baseRepoPath = strings.TrimSpace(baseRepoPath)
+	worktreePath = strings.TrimSpace(worktreePath)
+	branch = strings.TrimSpace(branch)
+
+	if baseRepoPath == "" || worktreePath == "" {
+		return nil
+	}
+
+	status, err := gitCommand(worktreePath, "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("remove worktree: status check failed: %w", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return fmt.Errorf("remove worktree: worktree %q is dirty", worktreePath)
+	}
+
+	if branch != "" {
+		localSHA, err := gitCommand(worktreePath, "rev-parse", "HEAD")
+		if err != nil {
+			return fmt.Errorf("remove worktree: read local HEAD failed: %w", err)
+		}
+		remoteOutput, err := gitCommand(baseRepoPath, "ls-remote", "origin", "refs/heads/"+branch)
+		if err != nil {
+			return fmt.Errorf("remove worktree: ls-remote failed: %w", err)
+		}
+		remoteFields := strings.Fields(remoteOutput)
+		if len(remoteFields) == 0 {
+			return fmt.Errorf("remove worktree: remote branch %q not found", branch)
+		}
+		if strings.TrimSpace(localSHA) != strings.TrimSpace(remoteFields[0]) {
+			return fmt.Errorf("remove worktree: local SHA %q does not match remote SHA %q", localSHA, remoteFields[0])
+		}
+	}
+
+	if _, err := gitCommand(baseRepoPath, "worktree", "remove", worktreePath); err != nil {
+		return fmt.Errorf("remove worktree: %w", err)
+	}
+	if _, err := gitCommand(baseRepoPath, "worktree", "prune"); err != nil {
+		return fmt.Errorf("prune worktrees: %w", err)
+	}
+
+	return nil
 }
 
 func normalizeBaseBranch(baseBranch string) string {
@@ -484,7 +602,7 @@ func PolicyRequiresCommit(policy GitPolicy) bool {
 }
 
 func PolicyRequiresPush(policy GitPolicy) bool {
-	return policy == GitPolicyBranchCommitPR
+	return policy == GitPolicyBranchOnly || policy == GitPolicyBranchCommitPR
 }
 
 func PolicyRequiresPR(policy GitPolicy) bool {

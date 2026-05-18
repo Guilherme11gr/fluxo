@@ -14,6 +14,8 @@ export interface ProjectRuntimeBindingRecord {
   gitProvider: string | null;
   prPolicy: string;
   gitPolicy: string;
+  provisionCommand: string | null;
+  provisionCacheKey: string | null;
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
@@ -33,6 +35,8 @@ function mapRecord(record: any): ProjectRuntimeBindingRecord {
     gitProvider: record.gitProvider ?? null,
     prPolicy: record.prPolicy,
     gitPolicy: record.gitPolicy,
+    provisionCommand: record.provisionCommand ?? null,
+    provisionCacheKey: record.provisionCacheKey ?? null,
     metadata: record.metadata ?? {},
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -58,6 +62,8 @@ export class ProjectRuntimeBindingRepository {
     gitProvider?: string | null;
     prPolicy?: string;
     gitPolicy?: string;
+    provisionCommand?: string | null;
+    provisionCacheKey?: string | null;
     metadata?: Record<string, unknown>;
   }): Promise<ProjectRuntimeBindingRecord> {
     const record = await this.client.projectRuntimeBinding.create({
@@ -73,6 +79,8 @@ export class ProjectRuntimeBindingRepository {
         gitProvider: data.gitProvider ?? null,
         prPolicy: data.prPolicy ?? 'disabled',
         gitPolicy: data.gitPolicy ?? 'no_write',
+        provisionCommand: data.provisionCommand ?? null,
+        provisionCacheKey: data.provisionCacheKey ?? null,
         metadata: data.metadata ?? {},
       },
     });

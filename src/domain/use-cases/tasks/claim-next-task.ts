@@ -282,6 +282,10 @@ export async function claimNextTask(input: ClaimNextTaskInput): Promise<ClaimedT
             prUrl: null,
             prNumber: null,
           },
+          provision: {
+            command: runtimeBinding.provisionCommand,
+            cacheKey: runtimeBinding.provisionCacheKey,
+          },
         }
       : {};
 

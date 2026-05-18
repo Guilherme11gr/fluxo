@@ -16,6 +16,8 @@ describe('resolveProjectRuntimeBinding', () => {
       gitProvider: 'github',
       prPolicy: 'draft',
       gitPolicy: 'branch_commit_pr',
+      provisionCommand: 'npm ci',
+      provisionCacheKey: 'package-lock.json',
       metadata: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -33,6 +35,8 @@ describe('resolveProjectRuntimeBinding', () => {
       gitProvider: null,
       prPolicy: 'disabled',
       gitPolicy: 'no_write',
+      provisionCommand: null,
+      provisionCacheKey: null,
       metadata: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -47,6 +51,8 @@ describe('resolveProjectRuntimeBinding', () => {
 
     expect(resolved?.id).toBe('binding-1');
     expect(resolved?.repoPath).toBe('D:\\code\\fluxo');
+    expect(resolved?.provisionCommand).toBe('npm ci');
+    expect(resolved?.provisionCacheKey).toBe('package-lock.json');
   });
 
   it('returns null when there is no meaningful match', () => {

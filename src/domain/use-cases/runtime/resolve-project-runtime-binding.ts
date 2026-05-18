@@ -17,6 +17,8 @@ export interface ResolvedProjectRuntimeBinding {
   gitProvider: string | null;
   prPolicy: string;
   gitPolicy: string;
+  provisionCommand: string | null;
+  provisionCacheKey: string | null;
   metadata: Record<string, unknown>;
 }
 
@@ -37,6 +39,8 @@ function toResolved(binding: ProjectRuntimeBindingRecord): ResolvedProjectRuntim
     gitProvider: binding.gitProvider,
     prPolicy: binding.prPolicy,
     gitPolicy: binding.gitPolicy,
+    provisionCommand: binding.provisionCommand,
+    provisionCacheKey: binding.provisionCacheKey,
     metadata: binding.metadata,
   };
 }

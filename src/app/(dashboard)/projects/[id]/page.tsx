@@ -15,8 +15,8 @@ import Link from "next/link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useProject, useEpics } from "@/lib/query";
 import { useCreateEpic, useUpdateEpic, useDeleteEpic } from "@/lib/query/hooks/use-epics";
-import { ProjectDocsList, ProjectNotesList, GitHubIntegrationCard } from "@/components/features/projects";
-import { FileText, Github } from "lucide-react";
+import { ProjectDocsList, ProjectNotesList, GitHubIntegrationCard, ProjectAgentsPanel } from "@/components/features/projects";
+import { Bot, FileText, Github } from "lucide-react";
 import { PageHeaderSkeleton, CardsSkeleton } from '@/components/layout/page-skeleton';
 import { useTabQuery } from "@/hooks/use-tab-query";
 import { toast } from "sonner";
@@ -64,7 +64,7 @@ export default function ProjectDetailPage({
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
 
   // Tab State
-  const { activeTab, setActiveTab } = useTabQuery("epics", ["epics", "docs", "ideas", "github"]);
+  const { activeTab, setActiveTab } = useTabQuery("epics", ["epics", "docs", "ideas", "github", "agents"]);
   const [epicsView, setEpicsView] = useState<ViewMode>("table");
   const [epicSearch, setEpicSearch] = useState("");
   const [epicStatusFilter, setEpicStatusFilter] = useState<"all" | "OPEN" | "CLOSED">("all");
@@ -400,6 +400,17 @@ export default function ProjectDetailPage({
         >
           <Lightbulb className="w-4 h-4 inline mr-2" />
           Ideias
+        </button>
+
+        <button
+          onClick={() => setActiveTab("agents")}
+          className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === "agents"
+            ? "text-primary border-b-2 border-primary"
+            : "text-muted-foreground hover:text-foreground"
+            }`}
+        >
+          <Bot className="w-4 h-4 inline mr-2" />
+          Agentes
         </button>
 
         <button
@@ -851,6 +862,10 @@ export default function ProjectDetailPage({
       {/* Ideas Tab */}
       {activeTab === "ideas" && (
         <ProjectNotesList projectId={resolvedParams.id} />
+      )}
+
+      {activeTab === "agents" && (
+        <ProjectAgentsPanel projectId={resolvedParams.id} />
       )}
 
       {/* GitHub Tab */}

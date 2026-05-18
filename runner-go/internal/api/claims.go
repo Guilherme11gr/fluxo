@@ -59,6 +59,8 @@ type ClaimedTaskResponse struct {
 		GitProvider         string                 `json:"gitProvider"`
 		PRPolicy            string                 `json:"prPolicy"`
 		GitPolicy           string                 `json:"gitPolicy"`
+		ProvisionCommand    string                 `json:"provisionCommand"`
+		ProvisionCacheKey   string                 `json:"provisionCacheKey"`
 		Metadata            map[string]interface{} `json:"metadata"`
 	} `json:"runtimeBinding"`
 	PreviousExecution *struct {
@@ -184,6 +186,8 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 		result.RuntimeBinding.GitProvider, _ = runtimeBindingData["gitProvider"].(string)
 		result.RuntimeBinding.PRPolicy, _ = runtimeBindingData["prPolicy"].(string)
 		result.RuntimeBinding.GitPolicy, _ = runtimeBindingData["gitPolicy"].(string)
+		result.RuntimeBinding.ProvisionCommand, _ = runtimeBindingData["provisionCommand"].(string)
+		result.RuntimeBinding.ProvisionCacheKey, _ = runtimeBindingData["provisionCacheKey"].(string)
 		if metadata, ok := runtimeBindingData["metadata"].(map[string]interface{}); ok {
 			result.RuntimeBinding.Metadata = metadata
 		}

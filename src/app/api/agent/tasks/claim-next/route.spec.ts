@@ -84,6 +84,8 @@ describe('POST /api/agent/tasks/claim-next', () => {
         gitProvider: 'github',
         prPolicy: 'draft',
         gitPolicy: 'branch_commit_pr',
+        provisionCommand: 'npm ci',
+        provisionCacheKey: 'package-lock.json',
         metadata: {},
       },
       previousExecution: {
@@ -152,6 +154,8 @@ describe('POST /api/agent/tasks/claim-next', () => {
         repoPath: 'D:/code/fluxo',
         executionMode: 'branch_per_task',
         gitPolicy: 'branch_commit_pr',
+        provisionCommand: 'npm ci',
+        provisionCacheKey: 'package-lock.json',
       })
     );
     expect(json.data.previousExecution).toEqual(

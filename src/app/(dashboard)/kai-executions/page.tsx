@@ -26,6 +26,8 @@ import {
   MonitorSmartphone,
   Eye,
   FolderKanban,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { ExecutionResultPanel } from '@/components/features/executions/execution-result-panel';
 import { ExecutionContextCard } from '@/components/features/executions/execution-context-card';
@@ -78,6 +80,8 @@ export default function ExecutionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [projectFilter, setProjectFilter] = useState<string>('');
   const [taskFilter, setTaskFilter] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { data: projects } = useProjects();
   const projectsMap = new Map((projects ?? []).map((p) => [p.id, p]));
 
@@ -86,7 +90,11 @@ export default function ExecutionsPage() {
   if (projectFilter && projectFilter !== '__all__') apiFilters.projectId = projectFilter;
   if (taskFilter && taskFilter !== '__all__') apiFilters.taskId = taskFilter;
 
-  const { data, isLoading } = useExecutions(Object.keys(apiFilters).length > 0 ? apiFilters : undefined);
+  const { data, isLoading } = useExecutions({
+    filters: Object.keys(apiFilters).length > 0 ? apiFilters : undefined,
+    page,
+    limit: pageSize,
+  });
   const { data: agents } = useAgents();
   const killExecutionMutation = useKillExecution();
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
@@ -175,6 +183,22 @@ export default function ExecutionsPage() {
   const handleProjectChange = (value: string) => {
     setProjectFilter(value);
     setTaskFilter('');
+    setPage(1);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
+
+  const handleTaskChange = (value: string) => {
+    setTaskFilter(value);
+    setPage(1);
+  };
+
+  const handlePageSizeChange = (value: string) => {
+    setPageSize(Number(value));
+    setPage(1);
   };
 
   const secondsSinceLastUpdate = lastEventTime ? Math.floor((now.getTime() - lastEventTime.getTime()) / 1000) : null;
@@ -182,13 +206,6 @@ export default function ExecutionsPage() {
   const showExecutionError =
     exec?.status !== 'SUCCESS' && Boolean(exec?.errorMessage);
   const hasWorkspace = exec?.workspaceMode || exec?.workspaceRef || exec?.workspacePath;
-
-  useEffect(() => {
-    if (!selectedExecutionId || !data?.items?.length) return;
-    if (!data.items.some((e: any) => e.id === selectedExecutionId)) {
-      setSelectedExecutionId(null);
-    }
-  }, [data?.items, selectedExecutionId]);
 
   return (
     <div className="space-y-6">
@@ -211,7 +228,7 @@ export default function ExecutionsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={taskFilter} onValueChange={setTaskFilter}>
+          <Select value={taskFilter} onValueChange={handleTaskChange}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Task" />
             </SelectTrigger>
@@ -224,7 +241,7 @@ export default function ExecutionsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={handleStatusChange}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -319,6 +336,67 @@ export default function ExecutionsPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {data && data.total > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>
+              Mostrando{' '}
+              <span className="font-medium text-foreground">
+                {(page - 1) * pageSize + 1}
+              </span>{' '}
+              a{' '}
+              <span className="font-medium text-foreground">
+                {Math.min(page * pageSize, data.total)}
+              </span>{' '}
+              de{' '}
+              <span className="font-medium text-foreground">{data.total}</span> execuções
+            </span>
+          </div>
+
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Linhas por página:</span>
+              <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                <SelectTrigger className="h-8 w-[70px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                Página {page} de {Math.ceil(data.total / pageSize)}
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setPage((p) => Math.min(Math.ceil(data.total / pageSize), p + 1))}
+                  disabled={page >= Math.ceil(data.total / pageSize)}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

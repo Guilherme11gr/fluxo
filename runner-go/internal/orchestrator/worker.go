@@ -2,9 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +36,110 @@ type AgentWorker struct {
 }
 
 var newStructuredResultExtractor = extractor.NewExtractor
+
+var runShellCommand = func(ctx context.Context, workdir, hostOS, command string) error {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+
+	var cmd *exec.Cmd
+	if strings.EqualFold(hostOS, "windows") || runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "bash", "-c", command)
+	}
+	cmd.Dir = workdir
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("run command %q: %s", command, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func runtimeBindingMetadataMap(binding api.ClaimedTaskResponse) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                  binding.RuntimeBinding.ID,
+		"projectId":           binding.RuntimeBinding.ProjectID,
+		"runnerProfile":       binding.RuntimeBinding.RunnerProfile,
+		"hostOs":              binding.RuntimeBinding.HostOS,
+		"repoPath":            binding.RuntimeBinding.RepoPath,
+		"defaultBaseBranch":   binding.RuntimeBinding.DefaultBaseBranch,
+		"allowedBranchPrefix": binding.RuntimeBinding.AllowedBranchPrefix,
+		"executionMode":       binding.RuntimeBinding.ExecutionMode,
+		"gitProvider":         binding.RuntimeBinding.GitProvider,
+		"prPolicy":            binding.RuntimeBinding.PRPolicy,
+		"gitPolicy":           binding.RuntimeBinding.GitPolicy,
+		"provisionCommand":    binding.RuntimeBinding.ProvisionCommand,
+		"provisionCacheKey":   binding.RuntimeBinding.ProvisionCacheKey,
+		"metadata":            binding.RuntimeBinding.Metadata,
+	}
+}
+
+func finalizeSetupFailure(client *api.Client, executionID string, agent config.AgentConfig, gitPolicy runner.GitPolicy, gitSnapshot runner.GitSnapshot, binding api.ClaimedTaskResponse, errorMessage string) {
+	structuredResult, resultMeta := runner.BuildExecutionResultV1WithMeta(false, errorMessage, 1)
+	persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
+	_, _ = api.FinalizeExecution(client, executionID, api.FinalizeExecutionParams{
+		Status:        "FAILED",
+		Output:        persistedOutput,
+		ResultSummary: truncate(errorMessage, 500),
+		Result:        structuredResult,
+		ErrorMessage:  truncate(errorMessage, 2000),
+		ExitCode:      1,
+		Duration:      0,
+		NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
+		BlockReason:   nullableString(errorMessage),
+		Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+		Metadata: map[string]interface{}{
+			"tool":                 agent.Tool,
+			"model":                agent.Model,
+			"git":                  runner.GitMetadataMap(gitSnapshot),
+			"outputContract":       outputContractMetadata(resultMeta),
+			"finalSummarySource":   string(resultMeta.Source),
+			"commentSummarySource": "raw",
+			"runtimeBinding":       runtimeBindingMetadataMap(binding),
+		},
+	})
+	runner.SendHeartbeat(client, agent, "ONLINE")
+}
+
+func provisionExecutionWorkspace(ctx context.Context, workdir, cacheRoot, hostOS, command, cacheKey string) error {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+
+	markerPath := ""
+	if trimmedCacheKey := strings.TrimSpace(cacheKey); trimmedCacheKey != "" && strings.TrimSpace(cacheRoot) != "" {
+		if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
+			return fmt.Errorf("create provision cache root: %w", err)
+		}
+		hash := sha256.Sum256([]byte(trimmedCacheKey))
+		markerPath = filepath.Join(cacheRoot, hex.EncodeToString(hash[:])+".provisioned")
+		if _, err := os.Stat(markerPath); err == nil {
+			return nil
+		}
+	}
+
+	if err := runShellCommand(ctx, workdir, hostOS, command); err != nil {
+		return err
+	}
+
+	if markerPath != "" {
+		if err := os.WriteFile(markerPath, []byte(command+"\n"), 0o644); err != nil {
+			return fmt.Errorf("write provision marker: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func cleanupExecutionWorktree(baseRepoPath, worktreePath, branch string, agent config.AgentConfig) {
+	if err := runner.RemoveExecutionWorktree(baseRepoPath, worktreePath, branch); err != nil {
+		fmt.Printf("[%s] cleanup worktree error: %v\n", agent.Name, err)
+	}
+}
 
 func NewAgentWorker(apiURL, apiKey, runnerID string, agent config.AgentConfig, pollInterval time.Duration, resultExtractor *config.ResultExtractorConfig) *AgentWorker {
 	return &AgentWorker{
@@ -120,11 +229,35 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if gitBaseBranch == "" {
 		gitBaseBranch = "main"
 	}
+	baseRepoPath := strings.TrimSpace(claimed.RuntimeBinding.RepoPath)
 	workdir := agent.Workdir
 	if claimed.RuntimeBinding.RepoPath != "" {
 		workdir = claimed.RuntimeBinding.RepoPath
 	}
 	workdir = strings.TrimSpace(workdir)
+	cleanupWorktree := false
+	cleanupBranch := ""
+	retainWorktreeForRecovery := false
+	if gitPolicy != runner.GitPolicyNoWrite && baseRepoPath != "" {
+		worktreesRoot := runner.WorktreesRootForRepo(baseRepoPath)
+		worktreePath, err := runner.CreateExecutionWorktree(baseRepoPath, worktreesRoot, claimed.Execution.ID, gitBaseBranch)
+		if err != nil {
+			finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Failed to create execution worktree: %v", err))
+			return
+		}
+		workdir = worktreePath
+		cleanupWorktree = true
+		cleanupBranch = gitBranch
+		if err := runner.SwitchToTaskBranch(workdir, gitBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix); err != nil {
+			finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Failed to switch execution branch: %v", err))
+			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+			return
+		}
+	}
+	provisionCacheRoot := ""
+	if baseRepoPath != "" && !cleanupWorktree {
+		provisionCacheRoot = runner.ProvisionCacheRootForRepo(baseRepoPath)
+	}
 	if workdir == "" {
 		errorMessage := fmt.Sprintf(
 			"Execution cannot start without a resolved workdir. agent.workdir and runtimeBinding.repoPath are both empty for agent %s.",
@@ -157,23 +290,20 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"outputContract":       outputContractMetadata(resultMeta),
 				"finalSummarySource":   string(resultMeta.Source),
 				"commentSummarySource": "raw",
-				"runtimeBinding": map[string]interface{}{
-					"id":                  claimed.RuntimeBinding.ID,
-					"projectId":           claimed.RuntimeBinding.ProjectID,
-					"runnerProfile":       claimed.RuntimeBinding.RunnerProfile,
-					"hostOs":              claimed.RuntimeBinding.HostOS,
-					"repoPath":            claimed.RuntimeBinding.RepoPath,
-					"defaultBaseBranch":   claimed.RuntimeBinding.DefaultBaseBranch,
-					"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
-					"executionMode":       claimed.RuntimeBinding.ExecutionMode,
-					"gitProvider":         claimed.RuntimeBinding.GitProvider,
-					"prPolicy":            claimed.RuntimeBinding.PRPolicy,
-					"gitPolicy":           claimed.RuntimeBinding.GitPolicy,
-					"metadata":            claimed.RuntimeBinding.Metadata,
-				},
+				"runtimeBinding":       runtimeBindingMetadataMap(*claimed),
 			},
 		})
 		runner.SendHeartbeat(client, agent, "ONLINE")
+		if cleanupWorktree {
+			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
+		return
+	}
+	if err := provisionExecutionWorkspace(ctx, workdir, provisionCacheRoot, claimed.RuntimeBinding.HostOS, claimed.RuntimeBinding.ProvisionCommand, claimed.RuntimeBinding.ProvisionCacheKey); err != nil {
+		finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Provision command failed: %v", err))
+		if cleanupWorktree {
+			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
 		return
 	}
 	logging.Debugf("worker[%s] preparing git policy=%s branch=%s base=%s workdir=%q", agent.Name, gitPolicy, gitBranch, gitBaseBranch, workdir)
@@ -212,23 +342,13 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"outputContract":       outputContractMetadata(resultMeta),
 				"finalSummarySource":   string(resultMeta.Source),
 				"commentSummarySource": "raw",
-				"runtimeBinding": map[string]interface{}{
-					"id":                  claimed.RuntimeBinding.ID,
-					"projectId":           claimed.RuntimeBinding.ProjectID,
-					"runnerProfile":       claimed.RuntimeBinding.RunnerProfile,
-					"hostOs":              claimed.RuntimeBinding.HostOS,
-					"repoPath":            claimed.RuntimeBinding.RepoPath,
-					"defaultBaseBranch":   claimed.RuntimeBinding.DefaultBaseBranch,
-					"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
-					"executionMode":       claimed.RuntimeBinding.ExecutionMode,
-					"gitProvider":         claimed.RuntimeBinding.GitProvider,
-					"prPolicy":            claimed.RuntimeBinding.PRPolicy,
-					"gitPolicy":           claimed.RuntimeBinding.GitPolicy,
-					"metadata":            claimed.RuntimeBinding.Metadata,
-				},
+				"runtimeBinding":       runtimeBindingMetadataMap(*claimed),
 			},
 		})
 		runner.SendHeartbeat(client, agent, "ONLINE")
+		if cleanupWorktree {
+			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
 		return
 	}
 	logging.Debugf("worker[%s] git prepared branch=%q base=%q commits=%d", agent.Name, preparedGit.Branch, preparedGit.BaseBranch, len(preparedGit.CommitShas))
@@ -278,6 +398,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			},
 		})
 		runner.SendHeartbeat(client, agent, "ONLINE")
+		if cleanupWorktree {
+			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
 		return
 	}
 	logging.Debugf("worker[%s] preflight OK branch=%q dirty=%t protected=%t", agent.Name, preflight.CurrentBranch, preflight.IsDirty, preflight.IsProtected)
@@ -451,6 +574,22 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if !result.Success {
 		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, blockAwareOutput, timeout)
 	}
+	failExecutionWithGitError := func(message string) {
+		retainWorktreeForRecovery = true
+		result.Success = false
+		if result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+		if strings.TrimSpace(rawOutput) == "" {
+			rawOutput = message
+		} else if !strings.Contains(rawOutput, message) {
+			rawOutput = strings.TrimSpace(rawOutput + "\n" + message)
+		}
+		readableOutput = runner.ExtractReadableOutput(rawOutput)
+		blockAwareOutput = appendStructuredBlocks(readableOutput, rawOutput)
+		strippedOutput = runner.StripStructuredResultBlock(blockAwareOutput)
+		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, blockAwareOutput, timeout)
+	}
 
 	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
 	filesTouched := runner.DiffWorktreeFiles(worktreeBefore, runner.CaptureWorktreeSnapshot(workdir))
@@ -458,6 +597,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if result.Success && gitPolicy != runner.GitPolicyNoWrite && preparedGit.Branch != "" {
 		if commitSHA, err := runner.CommitChanges(workdir, preparedGit.Branch, claimed.Task.ID, claimed.Task.Title); err != nil {
 			fmt.Printf("[%s] post-exec commit error: %v\n", agent.Name, err)
+			failExecutionWithGitError(fmt.Sprintf("Required git commit failed: %v", err))
 		} else if commitSHA != "" {
 			logging.Debugf("worker[%s] committed changes sha=%s", agent.Name, commitSHA)
 			gitSnapshot = runner.CaptureGitSnapshot(workdir, preparedGit)
@@ -468,11 +608,17 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			}
 		}
 
-		if gitPolicy == runner.GitPolicyBranchCommitPR {
+		if result.Success && runner.PolicyRequiresPush(gitPolicy) {
 			if err := runner.PushBranch(workdir, preparedGit.Branch); err != nil {
 				fmt.Printf("[%s] push error: %v\n", agent.Name, err)
+				failExecutionWithGitError(fmt.Sprintf("Required branch push failed: %v", err))
 			} else {
 				logging.Debugf("worker[%s] pushed branch %s", agent.Name, preparedGit.Branch)
+			}
+		}
+
+		if result.Success && gitPolicy == runner.GitPolicyBranchCommitPR {
+			if gitSnapshot.PRUrl == nil {
 				isDraftPR := strings.EqualFold(claimed.RuntimeBinding.PRPolicy, "draft")
 				prTitle := fmt.Sprintf("[%s] %s", claimed.Task.Type, claimed.Task.Title)
 				if len(prTitle) > 72 {
@@ -593,12 +739,12 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		BlockReason:         nullableString(blockReason),
 		Comment:             comment,
 		Metadata: map[string]interface{}{
-			"tool":               agent.Tool,
-			"model":              agent.Model,
-			"git":                runner.GitMetadataMap(gitSnapshot),
-			"agentSummary":       agentSummaryValue(agentSummary),
-			"extractor":          extractorMeta,
-			"finalSummarySource": finalSummarySource,
+			"tool":                 agent.Tool,
+			"model":                agent.Model,
+			"git":                  runner.GitMetadataMap(gitSnapshot),
+			"agentSummary":         agentSummaryValue(agentSummary),
+			"extractor":            extractorMeta,
+			"finalSummarySource":   finalSummarySource,
 			"commentSummarySource": commentSummarySource,
 			"execution": map[string]interface{}{
 				"timeoutSeconds": int(timeout.Seconds()),
@@ -606,20 +752,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				"canceled":       result.Canceled,
 			},
 			"outputContract": outputContractMetadata(resultMeta),
-			"runtimeBinding": map[string]interface{}{
-				"id":                  claimed.RuntimeBinding.ID,
-				"projectId":           claimed.RuntimeBinding.ProjectID,
-				"runnerProfile":       claimed.RuntimeBinding.RunnerProfile,
-				"hostOs":              claimed.RuntimeBinding.HostOS,
-				"repoPath":            claimed.RuntimeBinding.RepoPath,
-				"defaultBaseBranch":   claimed.RuntimeBinding.DefaultBaseBranch,
-				"allowedBranchPrefix": claimed.RuntimeBinding.AllowedBranchPrefix,
-				"executionMode":       claimed.RuntimeBinding.ExecutionMode,
-				"gitProvider":         claimed.RuntimeBinding.GitProvider,
-				"prPolicy":            claimed.RuntimeBinding.PRPolicy,
-				"gitPolicy":           claimed.RuntimeBinding.GitPolicy,
-				"metadata":            claimed.RuntimeBinding.Metadata,
-			},
+			"runtimeBinding": runtimeBindingMetadataMap(*claimed),
 		},
 	}
 	logging.Debugf("worker[%s] finalizing execution=%s status=%s nextStatus=%s duration=%ds", agent.Name, claimed.Execution.ID, status, nextStatus, duration)
@@ -627,6 +760,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	_, err = api.FinalizeExecution(client, claimed.Execution.ID, finalizeParams)
 	if err != nil {
 		fmt.Printf("[%s] finalize error: %v\n", agent.Name, err)
+	}
+	if cleanupWorktree && !retainWorktreeForRecovery {
+		cleanupExecutionWorktree(baseRepoPath, workdir, cleanupBranch, agent)
 	}
 
 	if result.Success && gitSnapshot.PRUrl != nil && *gitSnapshot.PRUrl != "" {

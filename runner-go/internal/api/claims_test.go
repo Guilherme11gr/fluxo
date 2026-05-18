@@ -54,6 +54,8 @@ func TestClaimNextTaskParsesRuntimeBinding(t *testing.T) {
 					"gitProvider": "github",
 					"prPolicy": "draft",
 					"gitPolicy": "branch_commit_pr",
+					"provisionCommand": "npm ci",
+					"provisionCacheKey": "package-lock.json",
 					"metadata": {"workspaceRef": "repo"}
 				}
 			}
@@ -77,6 +79,12 @@ func TestClaimNextTaskParsesRuntimeBinding(t *testing.T) {
 	}
 	if claimed.RuntimeBinding.GitPolicy != "branch_commit_pr" {
 		t.Fatalf("expected git policy to be parsed, got %q", claimed.RuntimeBinding.GitPolicy)
+	}
+	if claimed.RuntimeBinding.ProvisionCommand != "npm ci" {
+		t.Fatalf("expected provision command to be parsed, got %q", claimed.RuntimeBinding.ProvisionCommand)
+	}
+	if claimed.RuntimeBinding.ProvisionCacheKey != "package-lock.json" {
+		t.Fatalf("expected provision cache key to be parsed, got %q", claimed.RuntimeBinding.ProvisionCacheKey)
 	}
 }
 

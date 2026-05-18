@@ -24,11 +24,13 @@ const createSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const { tenantId } = await extractAuthenticatedTenant(supabase);
-    const agents = await agentRepository.findByOrgId(tenantId);
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('projectId');
+    const agents = await agentRepository.findByOrgId(tenantId, projectId ?? undefined);
     return jsonSuccess(agents);
   } catch (error) {
     const { status, body } = handleError(error);

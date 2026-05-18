@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --port 3005",
+    "dev:prd": "bash scripts/dev-prd.sh",
     "dev:turbo": "next dev",
     "build": "prisma generate && node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "build:docker": "prisma generate && next build --webpack",

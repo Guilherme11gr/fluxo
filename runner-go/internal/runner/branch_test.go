@@ -3,6 +3,7 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -306,6 +307,102 @@ func TestPushBranchRefusesProtected(t *testing.T) {
 	}
 }
 
+func TestCreateExecutionWorktreeAndSwitchToTaskBranch(t *testing.T) {
+	baseRepo := initTestGitRepoWithRemote(t)
+	worktreesRoot := filepath.Join(t.TempDir(), "worktrees")
+	worktreePath, err := CreateExecutionWorktree(baseRepo, worktreesRoot, "exec-123", "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree failed: %v", err)
+	}
+
+	branch := "agent/task-123"
+	if err := SwitchToTaskBranch(worktreePath, branch, "main", "agent/"); err != nil {
+		t.Fatalf("SwitchToTaskBranch failed: %v", err)
+	}
+
+	currentBranch, err := gitCommand(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatalf("read current branch: %v", err)
+	}
+	if currentBranch != branch {
+		t.Fatalf("expected branch %q, got %q", branch, currentBranch)
+	}
+}
+
+func TestRemoveExecutionWorktreeRejectsDirtyTree(t *testing.T) {
+	baseRepo := initTestGitRepoWithRemote(t)
+	worktreesRoot := filepath.Join(t.TempDir(), "worktrees")
+	worktreePath, err := CreateExecutionWorktree(baseRepo, worktreesRoot, "exec-dirty", "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree failed: %v", err)
+	}
+	branch := "agent/task-dirty"
+	if err := SwitchToTaskBranch(worktreePath, branch, "main", "agent/"); err != nil {
+		t.Fatalf("SwitchToTaskBranch failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	err = RemoveExecutionWorktree(baseRepo, worktreePath, branch)
+	if err == nil || !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("expected dirty worktree error, got %v", err)
+	}
+}
+
+func TestRemoveExecutionWorktreeRejectsWhenRemoteIsBehind(t *testing.T) {
+	baseRepo := initTestGitRepoWithRemote(t)
+	worktreesRoot := filepath.Join(t.TempDir(), "worktrees")
+	worktreePath, err := CreateExecutionWorktree(baseRepo, worktreesRoot, "exec-unpushed", "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree failed: %v", err)
+	}
+	branch := "agent/task-unpushed"
+	if err := SwitchToTaskBranch(worktreePath, branch, "main", "agent/"); err != nil {
+		t.Fatalf("SwitchToTaskBranch failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "commit.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if _, err := CommitChanges(worktreePath, branch, "task-unpushed", "unpushed"); err != nil {
+		t.Fatalf("CommitChanges failed: %v", err)
+	}
+
+	err = RemoveExecutionWorktree(baseRepo, worktreePath, branch)
+	if err == nil || !strings.Contains(err.Error(), "remote branch") {
+		t.Fatalf("expected remote mismatch error, got %v", err)
+	}
+}
+
+func TestRemoveExecutionWorktreeRemovesCleanPushedWorktree(t *testing.T) {
+	baseRepo := initTestGitRepoWithRemote(t)
+	worktreesRoot := filepath.Join(t.TempDir(), "worktrees")
+	worktreePath, err := CreateExecutionWorktree(baseRepo, worktreesRoot, "exec-clean", "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree failed: %v", err)
+	}
+	branch := "agent/task-clean"
+	if err := SwitchToTaskBranch(worktreePath, branch, "main", "agent/"); err != nil {
+		t.Fatalf("SwitchToTaskBranch failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "commit.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if _, err := CommitChanges(worktreePath, branch, "task-clean", "clean"); err != nil {
+		t.Fatalf("CommitChanges failed: %v", err)
+	}
+	if err := PushBranch(worktreePath, branch); err != nil {
+		t.Fatalf("PushBranch failed: %v", err)
+	}
+
+	if err := RemoveExecutionWorktree(baseRepo, worktreePath, branch); err != nil {
+		t.Fatalf("RemoveExecutionWorktree failed: %v", err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("expected worktree to be removed, stat err=%v", err)
+	}
+}
+
 func TestParseGHPROutput(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -386,4 +483,24 @@ func initTestGitRepo(t *testing.T) string {
 	gitCommand(dir, "add", "-A")
 	gitCommand(dir, "commit", "-m", "initial")
 	return dir
+}
+
+func initTestGitRepoWithRemote(t *testing.T) string {
+	t.Helper()
+	remoteDir, err := os.MkdirTemp("", "fluxo-runner-remote-")
+	if err != nil {
+		t.Fatalf("create remote dir: %v", err)
+	}
+	if _, err := gitCommand(remoteDir, "init", "--bare"); err != nil {
+		t.Fatalf("init bare remote: %v", err)
+	}
+
+	repoDir := initTestGitRepo(t)
+	if _, err := gitCommand(repoDir, "remote", "add", "origin", remoteDir); err != nil {
+		t.Fatalf("add origin: %v", err)
+	}
+	if _, err := gitCommand(repoDir, "push", "-u", "origin", "main"); err != nil {
+		t.Fatalf("push main: %v", err)
+	}
+	return repoDir
 }
