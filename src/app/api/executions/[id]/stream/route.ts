@@ -6,11 +6,11 @@ import { agentExecutionEventRepository, agentExecutionRepository } from '@/infra
 
 export const dynamic = 'force-dynamic';
 
-export const TERMINAL_STATUSES = new Set(['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED']);
-export const POLL_INTERVAL_MS = 1000;
-export const HEARTBEAT_INTERVAL_MS = 15000;
-export const MAX_STREAM_DURATION_MS = 5 * 60 * 1000;
-export const MAX_CONSECUTIVE_ERRORS = 10;
+const TERMINAL_STATUSES = new Set(['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED']);
+const POLL_INTERVAL_MS = 1000;
+const HEARTBEAT_INTERVAL_MS = 15000;
+const MAX_STREAM_DURATION_MS = 5 * 60 * 1000;
+const MAX_CONSECUTIVE_ERRORS = 10;
 
 function formatSSE(event: string, data: string): string {
   return `event: ${event}\ndata: ${data}\n\n`;
