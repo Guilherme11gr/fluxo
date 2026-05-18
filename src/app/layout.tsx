@@ -3,7 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { QueryProvider } from "@/lib/query";
+import { QueryProvider } from "@/lib/query/query-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { UserCacheProvider } from "@/providers/user-cache-provider";
 import { PermissionsProvider } from "@/providers/permissions-provider";
