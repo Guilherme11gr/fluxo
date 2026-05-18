@@ -56,6 +56,22 @@ func (s *stubExecutor) Execute(_ context.Context, _ string, workdir string, _ ti
 	return s.result
 }
 
+type streamingStubExecutor struct {
+	result executor.Result
+	events []executor.StreamEvent
+}
+
+func (s *streamingStubExecutor) Name() string { return "streaming-stub-executor" }
+
+func (s *streamingStubExecutor) Execute(_ context.Context, _ string, workdir string, _ time.Duration, stream executor.StreamFunc) executor.Result {
+	for _, event := range s.events {
+		if stream != nil {
+			stream(event)
+		}
+	}
+	return s.result
+}
+
 func TestBuildFailureExecutionDetailsTimeout(t *testing.T) {
 	structuredOutput, headline, errorMessage, blockReason := buildFailureExecutionDetails(
 		"fluxo-runner-go",
@@ -425,6 +441,177 @@ func TestTryExtractStructuredResultUsesConfiguredExtractor(t *testing.T) {
 	}
 	if meta["success"] != true {
 		t.Fatalf("expected extractor metadata success, got %#v", meta)
+	}
+}
+
+func TestRunOnceCommentReflectsExtractedSummary(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		return &stubExtractor{result: map[string]interface{}{
+			"schemaVersion": "v1",
+			"status":        "success",
+			"summary":       "Extractor produced the final summary.",
+			"whatChanged":   []string{"Changed by extractor."},
+			"decisions":     []string{},
+			"risks":         []string{},
+			"checksRun":     []map[string]interface{}{},
+			"filesTouched":  []string{},
+			"git": map[string]interface{}{
+				"mode":       "manual",
+				"baseBranch": nil,
+				"branch":     nil,
+				"commitShas": []string{},
+				"prUrl":      nil,
+				"prNumber":   nil,
+			},
+			"followups":        []string{},
+			"memoryCandidates": []string{},
+			"skillCandidates":  []map[string]interface{}{},
+		}}, nil
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-comment-extract","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":20,"title":"Comment uses extracted","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-comment-extract","orgId":"org-1","taskId":"task-comment-extract","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-comment-extract","projectId":"project-1","executionId":"exec-comment-extract","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-comment-extract","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-comment-extract":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-comment-extract/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-comment-extract/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
+		TimeoutSec: 10,
+	})
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "changed.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if comment == "" {
+		t.Fatal("expected comment to be present in finalize payload")
+	}
+	if !strings.Contains(comment, "Extractor produced the final summary.") {
+		t.Fatalf("expected comment to contain extracted summary, got %q", comment)
+	}
+}
+
+func TestRunOnceCommentReflectsDerivedSummaryWhenNoExtractor(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-comment-derived","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":21,"title":"Comment uses derived","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-comment-derived","orgId":"org-1","taskId":"task-comment-derived","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-comment-derived","projectId":"project-1","executionId":"exec-comment-derived","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-comment-derived","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-comment-derived":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-comment-derived/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-comment-derived/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "derived-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if comment == "" {
+		t.Fatal("expected comment to be present in finalize payload")
+	}
+	if !strings.Contains(comment, "derived-change.txt") {
+		t.Fatalf("expected comment to reflect derived summary with changed file, got %q", comment)
 	}
 }
 
@@ -1192,6 +1379,340 @@ func TestGitSnapshotMergeReflectsPRInResult(t *testing.T) {
 	}
 }
 
+func TestRunOncePersistFinalSummarySourceAndCommentSummarySourceWithExtractor(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		return &stubExtractor{result: map[string]interface{}{
+			"schemaVersion": "v1",
+			"status":        "success",
+			"summary":       "Extractor produced the final summary.",
+			"whatChanged":   []string{"Changed by extractor."},
+			"decisions":     []string{},
+			"risks":         []string{},
+			"checksRun":     []map[string]interface{}{},
+			"filesTouched":  []string{},
+			"git": map[string]interface{}{
+				"mode":       "manual",
+				"baseBranch": nil,
+				"branch":     nil,
+				"commitShas": []string{},
+				"prUrl":      nil,
+				"prNumber":   nil,
+			},
+			"followups":        []string{},
+			"memoryCandidates": []string{},
+			"skillCandidates":  []map[string]interface{}{},
+		}}, nil
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-src-extract","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":30,"title":"Summary source extract","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-src-extract","orgId":"org-1","taskId":"task-src-extract","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-src-extract","projectId":"project-1","executionId":"exec-src-extract","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-src-extract","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-src-extract":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-src-extract/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-src-extract/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
+		TimeoutSec: 10,
+	})
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "changed.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	if metadata["finalSummarySource"] != "extracted" {
+		t.Fatalf("expected finalSummarySource=extracted, got %#v", metadata["finalSummarySource"])
+	}
+	if metadata["commentSummarySource"] != "extracted" {
+		t.Fatalf("expected commentSummarySource=extracted, got %#v", metadata["commentSummarySource"])
+	}
+}
+
+func TestRunOncePersistFinalSummarySourceAndCommentSummarySourceDerived(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-src-derived","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":31,"title":"Summary source derived","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-src-derived","orgId":"org-1","taskId":"task-src-derived","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-src-derived","projectId":"project-1","executionId":"exec-src-derived","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-src-derived","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-src-derived":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-src-derived/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-src-derived/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "derived-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	if metadata["finalSummarySource"] != "derived" {
+		t.Fatalf("expected finalSummarySource=derived, got %#v", metadata["finalSummarySource"])
+	}
+	if metadata["commentSummarySource"] != "derived" {
+		t.Fatalf("expected commentSummarySource=derived, got %#v", metadata["commentSummarySource"])
+	}
+}
+
+func TestRunOnceCommentSummarySourceIsRawWhenStructuredResultAlreadyInOutput(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	agentOutput := strings.Join([]string{
+		"Agent did the work.",
+		runner.ResultStartMarker,
+		`{"schemaVersion":"v1","status":"success","summary":"Model produced summary.","whatChanged":["Updated file."],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		runner.ResultEndMarker,
+	}, "\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-src-raw","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":32,"title":"Summary source raw","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-src-raw","orgId":"org-1","taskId":"task-src-raw","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-src-raw","projectId":"project-1","executionId":"exec-src-raw","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-src-raw","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-src-raw":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-src-raw/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-src-raw/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true, Output: agentOutput},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "model-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	if metadata["finalSummarySource"] != "model" {
+		t.Fatalf("expected finalSummarySource=model, got %#v", metadata["finalSummarySource"])
+	}
+	if metadata["commentSummarySource"] != "model" {
+		t.Fatalf("expected commentSummarySource=model (structured result already in output), got %#v", metadata["commentSummarySource"])
+	}
+}
+
+func TestRunOnceSummarySourceFieldsDoNotRemoveExistingMetadata(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-src-meta","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":33,"title":"Summary source meta","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-src-meta","orgId":"org-1","taskId":"task-src-meta","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-src-meta","projectId":"project-1","executionId":"exec-src-meta","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-src-meta","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-src-meta":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-src-meta/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-src-meta/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "meta-test.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	metadata, ok := finalizeBody["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", finalizeBody["metadata"])
+	}
+	existingFields := []string{"tool", "model", "git", "outputContract", "execution", "runtimeBinding"}
+	for _, field := range existingFields {
+		if _, ok := metadata[field]; !ok {
+			t.Fatalf("expected existing metadata field %q to be preserved, got keys: %#v", field, mapKeys(metadata))
+		}
+	}
+	if _, ok := metadata["finalSummarySource"]; !ok {
+		t.Fatal("expected finalSummarySource field to be present")
+	}
+	if _, ok := metadata["commentSummarySource"]; !ok {
+		t.Fatal("expected commentSummarySource field to be present")
+	}
+}
+
 func TestHelperFunctions(t *testing.T) {
 	if defaultStr("", "fallback") != "fallback" {
 		t.Fatal("expected fallback for empty string")
@@ -1204,6 +1725,528 @@ func TestHelperFunctions(t *testing.T) {
 	}
 	if truncate("short", 100) != "short" {
 		t.Fatal("expected no truncation for short strings")
+	}
+}
+
+func TestIsHighPriorityEventKind(t *testing.T) {
+	highPriorityKinds := []string{"step_start", "step_end", "result", "error"}
+	for _, kind := range highPriorityKinds {
+		if !isHighPriorityEventKind(kind) {
+			t.Fatalf("expected %q to be high priority", kind)
+		}
+	}
+
+	lowPriorityKinds := []string{"stdout", "stderr", "tool_use", "tool_result", "text", "init", "session", "status", "unknown"}
+	for _, kind := range lowPriorityKinds {
+		if isHighPriorityEventKind(kind) {
+			t.Fatalf("expected %q to NOT be high priority", kind)
+		}
+	}
+}
+
+func TestFlushEventsBatchesCommonEvents(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu            sync.Mutex
+		eventBatches  [][]api.ExecutionEvent
+		flushCounter  int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-flush-batch","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":40,"title":"Flush batch test","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-flush-batch","orgId":"org-1","taskId":"task-flush-batch","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-flush-batch","projectId":"project-1","executionId":"exec-flush-batch","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-flush-batch","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/events"):
+			var body struct {
+				Events []api.ExecutionEvent `json:"events"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode events body: %v", err)
+			}
+			mu.Lock()
+			eventBatches = append(eventBatches, body.Events)
+			flushCounter++
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"created": len(body.Events)}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-flush-batch":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-flush-batch/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-flush-batch/finalize":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &streamingStubExecutor{
+			result: executor.Result{Success: true},
+			events: []executor.StreamEvent{
+				{Seq: 1, Kind: "stdout", Content: "line 1"},
+				{Seq: 2, Kind: "stdout", Content: "line 2"},
+				{Seq: 3, Kind: "stdout", Content: "line 3"},
+				{Seq: 4, Kind: "stdout", Content: "line 4"},
+				{Seq: 5, Kind: "stdout", Content: "line 5"},
+				{Seq: 6, Kind: "stdout", Content: "line 6"},
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if flushCounter < 1 {
+		t.Fatal("expected at least one flush (force at end)")
+	}
+
+	totalEvents := 0
+	for _, batch := range eventBatches {
+		totalEvents += len(batch)
+	}
+	if totalEvents != 6 {
+		t.Fatalf("expected 6 total events flushed, got %d", totalEvents)
+	}
+}
+
+func TestFlushEventsImmediateForHighPriorityKinds(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		eventBatches [][]api.ExecutionEvent
+		flushCounter int
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-flush-priority","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":41,"title":"Flush priority test","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-flush-priority","orgId":"org-1","taskId":"task-flush-priority","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-flush-priority","projectId":"project-1","executionId":"exec-flush-priority","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-flush-priority","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/events"):
+			var body struct {
+				Events []api.ExecutionEvent `json:"events"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode events body: %v", err)
+			}
+			mu.Lock()
+			eventBatches = append(eventBatches, body.Events)
+			flushCounter++
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"created": len(body.Events)}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-flush-priority":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-flush-priority/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-flush-priority/finalize":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &streamingStubExecutor{
+			result: executor.Result{Success: true},
+			events: []executor.StreamEvent{
+				{Seq: 1, Kind: "stdout", Content: "working..."},
+				{Seq: 2, Kind: "step_start", Content: "── step ──"},
+				{Seq: 3, Kind: "stdout", Content: "doing work"},
+				{Seq: 4, Kind: "step_end", Content: "── step ✓ ──"},
+				{Seq: 5, Kind: "result", Content: "done"},
+				{Seq: 6, Kind: "error", Content: "something went wrong"},
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if flushCounter < 4 {
+		t.Fatalf("expected at least 4 flushes (step_start, step_end, result, error each trigger immediate flush + final force), got %d", flushCounter)
+	}
+
+	totalEvents := 0
+	for _, batch := range eventBatches {
+		totalEvents += len(batch)
+	}
+	if totalEvents != 6 {
+		t.Fatalf("expected 6 total events flushed, got %d", totalEvents)
+	}
+}
+
+func TestFlushEventsOrderingPreserved(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu        sync.Mutex
+		allEvents []api.ExecutionEvent
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-flush-order","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":42,"title":"Flush order test","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-flush-order","orgId":"org-1","taskId":"task-flush-order","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-flush-order","projectId":"project-1","executionId":"exec-flush-order","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-flush-order","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/events"):
+			var body struct {
+				Events []api.ExecutionEvent `json:"events"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode events body: %v", err)
+			}
+			mu.Lock()
+			allEvents = append(allEvents, body.Events...)
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"created": len(body.Events)}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-flush-order":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-flush-order/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-flush-order/finalize":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &streamingStubExecutor{
+			result: executor.Result{Success: true},
+			events: []executor.StreamEvent{
+				{Seq: 1, Kind: "stdout", Content: "line 1"},
+				{Seq: 2, Kind: "stdout", Content: "line 2"},
+				{Seq: 3, Kind: "step_start", Content: "step"},
+				{Seq: 4, Kind: "stdout", Content: "line 3"},
+				{Seq: 5, Kind: "step_end", Content: "step end"},
+				{Seq: 6, Kind: "result", Content: "result"},
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(allEvents) != 6 {
+		t.Fatalf("expected 6 events, got %d", len(allEvents))
+	}
+
+	for i := 1; i < len(allEvents); i++ {
+		if allEvents[i].Seq <= allEvents[i-1].Seq {
+			t.Fatalf("expected seq ordering: event[%d].Seq=%d > event[%d].Seq=%d", i, allEvents[i].Seq, i-1, allEvents[i-1].Seq)
+		}
+	}
+}
+
+func TestRunOnceCommentUsesFinalSummaryOverAgentSummary(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-final-summary","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":50,"title":"Final summary priority","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-final-summary","orgId":"org-1","taskId":"task-final-summary","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-final-summary","projectId":"project-1","executionId":"exec-final-summary","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-final-summary","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-final-summary":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-final-summary/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-final-summary/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{
+				Success: true,
+				Output: strings.Join([]string{
+					runner.SummaryStartMarker,
+					"Version: v1",
+					"Summary: Agent summary that should not win.",
+					runner.SummaryEndMarker,
+					runner.ResultStartMarker,
+					`{"schemaVersion":"v1","status":"success","summary":"Canonical structured result summary wins.","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+					runner.ResultEndMarker,
+				}, "\n"),
+			},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "priority-test.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if comment == "" {
+		t.Fatal("expected comment to be present in finalize payload")
+	}
+	if !strings.Contains(comment, "Canonical structured result summary wins.") {
+		t.Fatalf("expected comment to use structured result summary, got %q", comment)
+	}
+	if strings.Contains(comment, "Agent summary that should not win.") {
+		t.Fatalf("expected comment NOT to contain stale agent summary, got %q", comment)
+	}
+	if finalizeBody["resultSummary"] != "Canonical structured result summary wins." {
+		t.Fatalf("expected resultSummary to match comment summary, got %#v", finalizeBody["resultSummary"])
+	}
+}
+
+func TestRunOnceCommentMatchesResultSummaryAfterExtractor(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	originalFactory := newStructuredResultExtractor
+	defer func() { newStructuredResultExtractor = originalFactory }()
+
+	newStructuredResultExtractor = func(cfg extractor.Config) (extractor.StructuredResultExtractor, error) {
+		return &stubExtractor{result: map[string]interface{}{
+			"schemaVersion": "v1",
+			"status":        "success",
+			"summary":       "Extractor summary matches resultSummary.",
+			"whatChanged":   []string{"Changed by extractor."},
+			"decisions":     []string{},
+			"risks":         []string{},
+			"checksRun":     []map[string]interface{}{},
+			"filesTouched":  []string{},
+			"git": map[string]interface{}{
+				"mode":       "manual",
+				"baseBranch": nil,
+				"branch":     nil,
+				"commitShas": []string{},
+				"prUrl":      nil,
+				"prNumber":   nil,
+			},
+			"followups":        []string{},
+			"memoryCandidates": []string{},
+			"skillCandidates":  []map[string]interface{}{},
+		}}, nil
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-match-summary","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":51,"title":"Comment matches resultSummary","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-match-summary","orgId":"org-1","taskId":"task-match-summary","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-match-summary","projectId":"project-1","executionId":"exec-match-summary","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-match-summary","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-match-summary":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-match-summary/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-match-summary/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, &config.ResultExtractorConfig{
+		Enabled:    boolPtr(true),
+		Provider:   "gemini",
+		Model:      "gemini-3.1-flash-lite",
+		APIKey:     "test-key",
+		TimeoutSec: 10,
+	})
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "match-test.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if comment == "" {
+		t.Fatal("expected comment to be present in finalize payload")
+	}
+	if !strings.Contains(comment, "Extractor summary matches resultSummary.") {
+		t.Fatalf("expected comment to contain extracted summary, got %q", comment)
+	}
+	if finalizeBody["resultSummary"] != "Extractor summary matches resultSummary." {
+		t.Fatalf("expected resultSummary to match comment, got %#v", finalizeBody["resultSummary"])
+	}
+}
+
+func TestRunOnceCommentNoRegressionOnFailure(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-fail-comment","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":52,"title":"Failure comment regression","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-fail-comment","orgId":"org-1","taskId":"task-fail-comment","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-fail-comment","projectId":"project-1","executionId":"exec-fail-comment","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-fail-comment","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-fail-comment":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-fail-comment/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-fail-comment/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: false, ExitCode: 1},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "FAILED" {
+		t.Fatalf("expected FAILED status, got %v", finalizeBody["status"])
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if comment == "" {
+		t.Fatal("expected comment to be present for failure")
+	}
+	if !strings.Contains(comment, "Execution Failed") {
+		t.Fatalf("expected failure header in comment, got %q", comment)
+	}
+	if !strings.Contains(comment, "Exit Code") {
+		t.Fatalf("expected exit code in failure comment, got %q", comment)
+	}
+	resultSummary, _ := finalizeBody["resultSummary"].(string)
+	if resultSummary == "" {
+		t.Fatal("expected non-empty resultSummary for failure")
 	}
 }
 
@@ -1226,6 +2269,14 @@ func ifaceStrings(value interface{}) []string {
 		}
 	}
 	return result
+}
+
+func mapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func initWorkerTestGitRepo(t *testing.T) string {

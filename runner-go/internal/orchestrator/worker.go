@@ -151,10 +151,12 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			BlockReason:   nullableString(errorMessage),
 			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
-				"tool":           agent.Tool,
-				"model":          agent.Model,
-				"git":            runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
-				"outputContract": outputContractMetadata(resultMeta),
+				"tool":                 agent.Tool,
+				"model":                agent.Model,
+				"git":                  runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
+				"outputContract":       outputContractMetadata(resultMeta),
+				"finalSummarySource":   string(resultMeta.Source),
+				"commentSummarySource": "raw",
 				"runtimeBinding": map[string]interface{}{
 					"id":                  claimed.RuntimeBinding.ID,
 					"projectId":           claimed.RuntimeBinding.ProjectID,
@@ -204,10 +206,12 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			BlockReason:   nullableString(errorMessage),
 			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
-				"tool":           agent.Tool,
-				"model":          agent.Model,
-				"git":            runner.GitMetadataMap(failedGitSnapshot),
-				"outputContract": outputContractMetadata(resultMeta),
+				"tool":                 agent.Tool,
+				"model":                agent.Model,
+				"git":                  runner.GitMetadataMap(failedGitSnapshot),
+				"outputContract":       outputContractMetadata(resultMeta),
+				"finalSummarySource":   string(resultMeta.Source),
+				"commentSummarySource": "raw",
 				"runtimeBinding": map[string]interface{}{
 					"id":                  claimed.RuntimeBinding.ID,
 					"projectId":           claimed.RuntimeBinding.ProjectID,
@@ -258,10 +262,12 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			BlockReason:   nullableString(errorMessage),
 			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
-				"tool":           agent.Tool,
-				"model":          agent.Model,
-				"git":            runner.GitMetadataMap(failedGitSnapshot),
-				"outputContract": outputContractMetadata(resultMeta),
+				"tool":                 agent.Tool,
+				"model":                agent.Model,
+				"git":                  runner.GitMetadataMap(failedGitSnapshot),
+				"outputContract":       outputContractMetadata(resultMeta),
+				"finalSummarySource":   string(resultMeta.Source),
+				"commentSummarySource": "raw",
 				"preflight": map[string]interface{}{
 					"ok":          preflight.OK,
 					"branch":      preflight.CurrentBranch,
@@ -375,6 +381,11 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			lastFlush = time.Now()
 		}
 	}
+	flushEventsForKind := func(kind string) {
+		if isHighPriorityEventKind(kind) {
+			flushEvents(true)
+		}
+	}
 
 	start := time.Now()
 	execCtx, execCancel := context.WithCancel(ctx)
@@ -414,6 +425,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		fullOutput = append(fullOutput, content)
 		eventMu.Unlock()
 		flushEvents(false)
+		flushEventsForKind(event.Kind)
 	})
 	execCancel()
 	<-heartbeatDone
@@ -439,14 +451,6 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if !result.Success {
 		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, blockAwareOutput, timeout)
 	}
-	commentOutput := rawOutput
-	if failureHeadline != "" {
-		commentOutput = strings.TrimSpace(failureHeadline + "\n\n" + commentOutput)
-	}
-	if commentOutput == "" {
-		commentOutput = structuredOutput
-	}
-	comment := runner.FormatExecutionComment(agent.Name, agent.Tool, result.Success, float64(duration), commentOutput, result.ExitCode)
 
 	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
 	filesTouched := runner.DiffWorktreeFiles(worktreeBefore, runner.CaptureWorktreeSnapshot(workdir))
@@ -517,9 +521,37 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	}
 
 	structuredResult = runner.MergeGitResult(structuredResult, gitSnapshot)
-	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
+
 	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 	agentSummary := parseAgentSummaryMetadata(rawOutput)
+
+	commentSummary := structuredSummary
+	if commentSummary == "" && agentSummary != nil {
+		commentSummary = agentSummary.Summary
+	}
+
+	commentContent := rawOutput
+	if failureHeadline != "" {
+		commentContent = strings.TrimSpace(failureHeadline + "\n\n" + commentContent)
+	}
+	serializedStructuredResult := runner.SerializeExecutionResultV1(structuredResult)
+	commentAlreadyHasStructuredResult := serializedStructuredResult != "" && strings.Contains(commentContent, runner.ResultStartMarker)
+	if serializedStructuredResult != "" && !commentAlreadyHasStructuredResult {
+		if commentContent == "" {
+			commentContent = serializedStructuredResult
+		} else {
+			commentContent = strings.TrimSpace(commentContent + "\n\n" + serializedStructuredResult)
+		}
+	}
+	comment := runner.FormatExecutionCommentWithFinalSummary(agent.Name, agent.Tool, result.Success, float64(duration), commentContent, result.ExitCode, commentSummary)
+
+	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
+
+	finalSummarySource := string(resultMeta.Source)
+	commentSummarySource := finalSummarySource
+	if commentSummary == "" {
+		commentSummarySource = "raw"
+	}
 
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
@@ -547,11 +579,13 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		BlockReason:         nullableString(blockReason),
 		Comment:             comment,
 		Metadata: map[string]interface{}{
-			"tool":      agent.Tool,
-			"model":     agent.Model,
-			"git":       runner.GitMetadataMap(gitSnapshot),
-			"agentSummary": agentSummaryValue(agentSummary),
-			"extractor": extractorMeta,
+			"tool":               agent.Tool,
+			"model":              agent.Model,
+			"git":                runner.GitMetadataMap(gitSnapshot),
+			"agentSummary":       agentSummaryValue(agentSummary),
+			"extractor":          extractorMeta,
+			"finalSummarySource": finalSummarySource,
+			"commentSummarySource": commentSummarySource,
 			"execution": map[string]interface{}{
 				"timeoutSeconds": int(timeout.Seconds()),
 				"timedOut":       result.TimedOut,
@@ -628,6 +662,15 @@ func defaultStr(val, def string) string {
 		return def
 	}
 	return val
+}
+
+func isHighPriorityEventKind(kind string) bool {
+	switch kind {
+	case "step_start", "step_end", "result", "error":
+		return true
+	default:
+		return false
+	}
 }
 
 func truncate(val string, max int) string {

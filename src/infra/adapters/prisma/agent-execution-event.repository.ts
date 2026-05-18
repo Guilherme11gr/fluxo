@@ -23,6 +23,14 @@ function mapRecord(record: any): AgentExecutionEventRecord {
   };
 }
 
+export interface ExecutionEventsPage {
+  items: AgentExecutionEventRecord[];
+  lastSeq: number;
+  nextAfterSeq: number;
+  returnedCount: number;
+  hasMore: boolean;
+}
+
 export class AgentExecutionEventRepository {
   constructor(private prisma: PrismaClient) {}
 
@@ -60,15 +68,39 @@ export class AgentExecutionEventRepository {
     afterSeq?: number,
     limit = 200
   ): Promise<AgentExecutionEventRecord[]> {
+    const page = await this.findPageByExecutionId(executionId, afterSeq, limit);
+    return page.items;
+  }
+
+  async findPageByExecutionId(
+    executionId: string,
+    afterSeq?: number,
+    limit = 200
+  ): Promise<ExecutionEventsPage> {
+    const fetchLimit = limit + 1;
     const records = await this.client.agentExecutionEvent.findMany({
       where: {
         executionId,
         ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
       },
       orderBy: { seq: 'asc' },
-      take: limit,
+      take: fetchLimit,
     });
-    return records.map(mapRecord);
+
+    const hasMore = records.length > limit;
+    const items = records.slice(0, limit).map(mapRecord);
+    const returnedCount = items.length;
+
+    const lastSeqInResult = items.length > 0 ? items[items.length - 1].seq : 0;
+    const lastSeqOverall = await this.getLastSeq(executionId);
+
+    return {
+      items,
+      lastSeq: lastSeqOverall,
+      nextAfterSeq: lastSeqInResult,
+      returnedCount,
+      hasMore,
+    };
   }
 
   async getLastSeq(executionId: string): Promise<number> {

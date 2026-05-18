@@ -14,12 +14,12 @@ interface AgentSuccessResponse<T> {
   data: T;
 }
 
-interface AgentListResponse<T> {
+interface AgentListResponse<T, M extends Record<string, unknown> = Record<string, unknown>> {
   success: true;
   data: T[];
   meta: {
     total: number;
-  };
+  } & M;
 }
 
 interface AgentErrorResponse {
@@ -40,11 +40,15 @@ export function agentSuccess<T>(data: T, status = 200): NextResponse<AgentSucces
 /**
  * Return success response with list data
  */
-export function agentList<T>(data: T[], total?: number): NextResponse<AgentListResponse<T>> {
+export function agentList<T, M extends Record<string, unknown> = Record<string, unknown>>(
+  data: T[],
+  total?: number,
+  meta?: M
+): NextResponse<AgentListResponse<T, M>> {
   return NextResponse.json({
     success: true,
     data,
-    meta: { total: total ?? data.length },
+    meta: { total: total ?? data.length, ...meta } as AgentListResponse<T, M>['meta'],
   });
 }
 

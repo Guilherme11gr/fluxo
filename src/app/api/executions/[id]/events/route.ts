@@ -23,13 +23,19 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const afterSeq = searchParams.get('afterSeq');
     const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '200', 10)));
-    const events = await agentExecutionEventRepository.findByExecutionId(
+    const page = await agentExecutionEventRepository.findPageByExecutionId(
       id,
       afterSeq ? parseInt(afterSeq, 10) : undefined,
       limit
     );
 
-    return jsonSuccess({ items: events, total: events.length });
+    return jsonSuccess({
+      items: page.items,
+      lastSeq: page.lastSeq,
+      nextAfterSeq: page.nextAfterSeq,
+      returnedCount: page.returnedCount,
+      hasMore: page.hasMore,
+    });
   } catch (error) {
     const { status, body } = handleError(error);
     return jsonError(body.error.code, body.error.message, status);

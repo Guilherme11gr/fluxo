@@ -1025,6 +1025,10 @@ func FormatDuration(seconds float64) string {
 }
 
 func FormatExecutionComment(agentName, tool string, success bool, elapsed float64, output string, exitCode int) string {
+	return FormatExecutionCommentWithFinalSummary(agentName, tool, success, elapsed, output, exitCode, "")
+}
+
+func FormatExecutionCommentWithFinalSummary(agentName, tool string, success bool, elapsed float64, output string, exitCode int, finalSummary string) string {
 	var b strings.Builder
 	sanitizedOutput := StripStructuredResultBlock(output)
 
@@ -1044,9 +1048,11 @@ func FormatExecutionComment(agentName, tool string, success bool, elapsed float6
 
 	readable := ExtractReadableOutput(sanitizedOutput)
 
-	summary := ""
-	if structured, err := ParseExecutionResultV1(output); err == nil && structured != nil {
-		summary = strings.TrimSpace(structured.Summary)
+	summary := strings.TrimSpace(finalSummary)
+	if summary == "" {
+		if structured, err := ParseExecutionResultV1(output); err == nil && structured != nil {
+			summary = strings.TrimSpace(structured.Summary)
+		}
 	}
 	if success && summary == "" {
 		if agentSummary, err := ParseAgentSummary(output); err == nil && agentSummary != nil {

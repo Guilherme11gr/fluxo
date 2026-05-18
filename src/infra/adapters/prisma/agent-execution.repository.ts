@@ -163,7 +163,7 @@ export class AgentExecutionRepository {
 
   async findByOrgId(
     orgId: string,
-    filters?: { status?: AgentExecStatus; agentId?: string; projectId?: string },
+    filters?: { status?: AgentExecStatus; agentId?: string; projectId?: string; taskId?: string },
     page = 1,
     limit = 20
   ): Promise<{ items: AgentExecutionRecord[]; total: number }> {
@@ -171,6 +171,7 @@ export class AgentExecutionRepository {
     if (filters?.status) where.status = filters.status;
     if (filters?.agentId) where.agentId = filters.agentId;
     if (filters?.projectId) where.projectId = filters.projectId;
+    if (filters?.taskId) where.taskId = filters.taskId;
 
     const [items, total] = await Promise.all([
       this.client.agentExecution.findMany({

@@ -29,13 +29,17 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const afterSeq = searchParams.get('afterSeq');
     const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '200', 10)));
-    const events = await agentExecutionEventRepository.findByExecutionId(
+    const page = await agentExecutionEventRepository.findPageByExecutionId(
       id,
       afterSeq ? parseInt(afterSeq, 10) : undefined,
       limit
     );
 
-    return agentList(events, events.length);
+    return agentList(page.items, page.returnedCount, {
+      lastSeq: page.lastSeq,
+      nextAfterSeq: page.nextAfterSeq,
+      hasMore: page.hasMore,
+    });
   } catch (error) {
     return handleAgentError(error);
   }

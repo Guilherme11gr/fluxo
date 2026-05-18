@@ -23,6 +23,7 @@ export async function GET(request: Request) {
     const status = statusParam ? (statusParam as AgentExecStatus) : undefined;
     const agentId = searchParams.get('agentId') || undefined;
     const projectId = searchParams.get('projectId') || undefined;
+    const taskId = searchParams.get('taskId') || undefined;
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
 
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
       status,
       agentId,
       projectId,
+      taskId,
     }, page, limit);
 
     return jsonSuccess(result);

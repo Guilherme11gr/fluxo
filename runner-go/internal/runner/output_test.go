@@ -1925,3 +1925,48 @@ func TestFormatToolInputScreenshot(t *testing.T) {
 		t.Fatalf("expected uid, got %q", result)
 	}
 }
+
+func TestFormatExecutionCommentWithFinalSummaryUsesExplicitSummary(t *testing.T) {
+	raw := "Some plain output without structured blocks."
+	comment := FormatExecutionCommentWithFinalSummary("dev", "opencode", true, 30, raw, 0, "Explicit final summary from extractor.")
+	if !strings.Contains(comment, "Explicit final summary from extractor.") {
+		t.Fatalf("expected comment to use explicit final summary, got %s", comment)
+	}
+}
+
+func TestFormatExecutionCommentWithFinalSummaryFallsBackWhenEmpty(t *testing.T) {
+	raw := strings.Join([]string{
+		ResultStartMarker,
+		`{"schemaVersion":"v1","status":"success","summary":"Parsed from output.","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		ResultEndMarker,
+	}, "\n")
+	comment := FormatExecutionCommentWithFinalSummary("dev", "opencode", true, 30, raw, 0, "")
+	if !strings.Contains(comment, "Parsed from output.") {
+		t.Fatalf("expected comment to fall back to parsed output summary, got %s", comment)
+	}
+}
+
+func TestFormatExecutionCommentWithFinalSummaryOverridesParsedSummary(t *testing.T) {
+	raw := strings.Join([]string{
+		ResultStartMarker,
+		`{"schemaVersion":"v1","status":"success","summary":"Stale derived summary.","whatChanged":[],"decisions":[],"risks":[],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		ResultEndMarker,
+	}, "\n")
+	comment := FormatExecutionCommentWithFinalSummary("dev", "opencode", true, 30, raw, 0, "Extractor improved summary.")
+	if !strings.Contains(comment, "Extractor improved summary.") {
+		t.Fatalf("expected comment to use explicit summary over parsed one, got %s", comment)
+	}
+	if strings.Contains(comment, "Stale derived summary.") {
+		t.Fatalf("expected stale summary to be overridden, got %s", comment)
+	}
+}
+
+func TestFormatExecutionCommentWithFinalSummaryFailureUsesExplicit(t *testing.T) {
+	comment := FormatExecutionCommentWithFinalSummary("dev", "opencode", false, 30, "error output", 1, "Explicit failure summary.")
+	if !strings.Contains(comment, "Execution Failed") {
+		t.Fatalf("expected failure header, got %s", comment)
+	}
+	if !strings.Contains(comment, "Explicit failure summary.") {
+		t.Fatalf("expected explicit failure summary in comment, got %s", comment)
+	}
+}
