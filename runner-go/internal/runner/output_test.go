@@ -1970,3 +1970,93 @@ func TestFormatExecutionCommentWithFinalSummaryFailureUsesExplicit(t *testing.T)
 		t.Fatalf("expected explicit failure summary in comment, got %s", comment)
 	}
 }
+
+func TestParseExecutionResultV1PreservesRejectedStatus(t *testing.T) {
+	raw := strings.Join([]string{
+		"Review completed.",
+		SummaryStartMarker,
+		"Version: v1",
+		"Summary: Rejected due to missing tests.",
+		"What changed:",
+		"- No changes verified.",
+		"Risks:",
+		"- No test coverage added.",
+		SummaryEndMarker,
+		ResultStartMarker,
+		`{"schemaVersion":"v1","status":"rejected","summary":"Rejected due to missing tests","whatChanged":[],"decisions":[],"risks":["No test coverage added"],"checksRun":[{"name":"Tests","status":"failed","details":"No tests found"}],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":["Add unit tests"],"memoryCandidates":[],"skillCandidates":[]}`,
+		ResultEndMarker,
+	}, "\n")
+
+	result, err := ParseExecutionResultV1(raw)
+	if err != nil {
+		t.Fatalf("expected parse to succeed, got %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected parsed result")
+	}
+	if result.Status != "rejected" {
+		t.Fatalf("expected status=rejected, got %q", result.Status)
+	}
+	if result.Summary != "Rejected due to missing tests" {
+		t.Fatalf("expected summary, got %q", result.Summary)
+	}
+	if len(result.ChecksRun) != 1 || result.ChecksRun[0].Name != "Tests" {
+		t.Fatalf("expected checksRun preserved, got %#v", result.ChecksRun)
+	}
+}
+
+func TestExecutionReviewOutcomeRecognizesRejected(t *testing.T) {
+	outcome := ExecutionReviewOutcome(map[string]interface{}{
+		"status": "rejected",
+	})
+	if outcome != "rejected" {
+		t.Fatalf("expected rejected outcome, got %q", outcome)
+	}
+
+	outcome = ExecutionReviewOutcome(map[string]interface{}{
+		"status": "success",
+	})
+	if outcome != "success" {
+		t.Fatalf("expected success outcome, got %q", outcome)
+	}
+
+	outcome = ExecutionReviewOutcome(nil)
+	if outcome != "" {
+		t.Fatalf("expected empty outcome for nil result, got %q", outcome)
+	}
+}
+
+func TestBuildExecutionResultV1WithContextAndMetaPreservesRejected(t *testing.T) {
+	raw := strings.Join([]string{
+		"Review done.",
+		ResultStartMarker,
+		`{"schemaVersion":"v1","status":"rejected","summary":"Failed review","whatChanged":[],"decisions":[],"risks":["Incomplete"],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		ResultEndMarker,
+	}, "\n")
+
+	result, meta := BuildExecutionResultV1WithContextAndMeta(true, raw, 0, ExecutionResultDerivedContext{})
+	if meta.Source != StructuredResultSourceModel {
+		t.Fatalf("expected model source, got %#v", meta)
+	}
+	if status, _ := result["status"].(string); status != "rejected" {
+		t.Fatalf("expected status=rejected in structured result, got %q", status)
+	}
+}
+
+func TestNormalizeExecutionStatusPreservesRejected(t *testing.T) {
+	if s := normalizeExecutionStatus("rejected"); s != "rejected" {
+		t.Fatalf("expected rejected, got %q", s)
+	}
+	if s := normalizeExecutionStatus("Reject"); s != "rejected" {
+		t.Fatalf("expected rejected for Reject, got %q", s)
+	}
+	if s := normalizeExecutionStatus("REJECTED"); s != "rejected" {
+		t.Fatalf("expected rejected for REJECTED, got %q", s)
+	}
+	if s := normalizeExecutionStatus("success"); s != "success" {
+		t.Fatalf("expected success, got %q", s)
+	}
+	if s := normalizeExecutionStatus("failed"); s != "failed" {
+		t.Fatalf("expected failed, got %q", s)
+	}
+}

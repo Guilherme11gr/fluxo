@@ -83,8 +83,8 @@ export default function ExecutionsPage() {
 
   const apiFilters: Record<string, string> = {};
   if (statusFilter && statusFilter !== 'ALL') apiFilters.status = statusFilter;
-  if (projectFilter) apiFilters.projectId = projectFilter;
-  if (taskFilter) apiFilters.taskId = taskFilter;
+  if (projectFilter && projectFilter !== '__all__') apiFilters.projectId = projectFilter;
+  if (taskFilter && taskFilter !== '__all__') apiFilters.taskId = taskFilter;
 
   const { data, isLoading } = useExecutions(Object.keys(apiFilters).length > 0 ? apiFilters : undefined);
   const { data: agents } = useAgents();
@@ -203,7 +203,7 @@ export default function ExecutionsPage() {
               <SelectValue placeholder="Projeto" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos os projetos</SelectItem>
+              <SelectItem value="__all__">Todos os projetos</SelectItem>
               {(projects ?? []).map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.name}
@@ -216,7 +216,7 @@ export default function ExecutionsPage() {
               <SelectValue placeholder="Task" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todas as tasks</SelectItem>
+              <SelectItem value="__all__">Todas as tasks</SelectItem>
               {filteredTaskOptions.map((t) => (
                 <SelectItem key={t.id} value={t.id}>
                   {t.label}

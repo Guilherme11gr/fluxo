@@ -525,9 +525,15 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	structuredSummary := runner.ExecutionResultSummary(structuredResult)
 	agentSummary := parseAgentSummaryMetadata(rawOutput)
 
+	reviewOutcome := runner.ExecutionReviewOutcome(structuredResult)
+
 	commentSummary := structuredSummary
 	if commentSummary == "" && agentSummary != nil {
 		commentSummary = agentSummary.Summary
+	}
+
+	if reviewOutcome == "rejected" && failureHeadline == "" {
+		failureHeadline = "## Review Rejected\n\n" + truncate(structuredSummary, 500)
 	}
 
 	commentContent := rawOutput
@@ -556,9 +562,17 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	status := "FAILED"
 	nextStatus := defaultStr(agent.ClaimStatus, "DOING")
 	var nextAssignee *string
-	if result.Success {
+	if result.Success && reviewOutcome != "rejected" {
 		status = "SUCCESS"
 		nextStatus = defaultStr(agent.DoneStatus, "DONE")
+		errorMessage = ""
+		if agent.NextAssigneeID != "" {
+			nextAssignee = &agent.NextAssigneeID
+		}
+		blockReason = ""
+	} else if result.Success && reviewOutcome == "rejected" {
+		status = "SUCCESS"
+		nextStatus = "TODO"
 		errorMessage = ""
 		if agent.NextAssigneeID != "" {
 			nextAssignee = &agent.NextAssigneeID
@@ -808,7 +822,7 @@ func validateExtractedResult(result map[string]interface{}, ctx extractedValidat
 		return nil, fmt.Errorf("extracted result did not contain meaningful structured content")
 	}
 	parsed.SchemaVersion = "v1"
-	if ctx.ExecSuccess {
+	if ctx.ExecSuccess && parsed.Status != "rejected" {
 		parsed.Status = "success"
 	}
 	runnerFiles := dedupeStrings(ctx.FilesTouched)

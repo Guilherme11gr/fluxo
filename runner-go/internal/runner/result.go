@@ -447,6 +447,25 @@ func ExecutionResultSummary(result map[string]interface{}) string {
 	return ""
 }
 
+func ExecutionReviewOutcome(result map[string]interface{}) string {
+	if result == nil {
+		return ""
+	}
+	status, ok := result["status"].(string)
+	if !ok {
+		return ""
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case "rejected", "reject":
+		return "rejected"
+	case "success", "passed":
+		return "success"
+	default:
+		return ""
+	}
+}
+
 func stripAllAgentSummaryBlocks(text string) string {
 	text = strings.TrimSpace(text)
 	for {
@@ -851,11 +870,15 @@ func normalizeExecutionStatus(value interface{}) string {
 		return "failed"
 	case "error", "errored":
 		return "error"
+	case "rejected", "reject":
+		return "rejected"
 	case "":
 		return ""
 	}
 
 	switch {
+	case strings.Contains(raw, "reject"):
+		return "rejected"
 	case strings.Contains(raw, "success"), strings.Contains(raw, "pass"), strings.Contains(raw, "done"), strings.Contains(raw, "complete"):
 		return "success"
 	case strings.Contains(raw, "error"):

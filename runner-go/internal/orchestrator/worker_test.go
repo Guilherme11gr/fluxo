@@ -2279,6 +2279,219 @@ func mapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+func TestValidateExtractedResultPreservesRejectedStatus(t *testing.T) {
+	ctx := extractedValidationContext{
+		ExecSuccess:     true,
+		FilesTouched:    []string{},
+		FallbackSummary: "Fallback summary",
+	}
+	result, err := validateExtractedResult(map[string]interface{}{
+		"schemaVersion": "v1",
+		"status":        "rejected",
+		"summary":       "Missing tests in handler.ts",
+		"whatChanged":   []string{},
+		"decisions":     []string{},
+		"risks":         []string{"No test coverage added"},
+		"checksRun":     []map[string]interface{}{{"name": "Tests", "status": "failed", "details": "No new tests added"}},
+		"filesTouched":  []string{},
+		"git": map[string]interface{}{
+			"mode":       "manual",
+			"baseBranch": nil,
+			"branch":     nil,
+			"commitShas": []string{},
+			"prUrl":      nil,
+			"prNumber":   nil,
+		},
+		"followups":        []string{},
+		"memoryCandidates": []string{},
+		"skillCandidates":  []map[string]interface{}{},
+	}, ctx)
+	if err != nil {
+		t.Fatalf("expected validation to succeed, got %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected validated result")
+	}
+	if status, _ := result["status"].(string); status != "rejected" {
+		t.Fatalf("expected status=rejected, got %q", status)
+	}
+}
+
+func TestRunOnceReviewerRejectedRoutesToTODO(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	rejectedJSON := `{"schemaVersion":"v1","status":"rejected","summary":"Rejected: No tests found","whatChanged":[],"decisions":[],"risks":["Handler lacks test coverage"],"checksRun":[{"name":"Tests","status":"failed","details":"No tests"}],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":["Add unit tests before resubmitting"],"memoryCandidates":[],"skillCandidates":[]}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-review-1","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":99,"title":"Review: add auth","description":"Verify acceptance criteria","status":"REVIEW","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-review-1","orgId":"org-1","taskId":"task-review-1","projectId":"project-1","agentId":"agent-reviewer","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-17T00:00:00Z"},"lease":{"id":"lease-review-1","projectId":"project-1","executionId":"exec-review-1","expiresAt":"2026-05-17T00:01:00Z"},"runtimeBinding":{"id":"binding-review-1","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-review-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-review-1/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-review-1/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:             "agent-reviewer",
+		Name:           "reviewer",
+		Tool:           "opencode",
+		Model:          "glm-5.1",
+		AgentType:      "reviewer",
+		ClaimStatus:    "REVIEW",
+		PickStatus:     "REVIEW",
+		DoneStatus:     "QA_READY",
+		NextAssigneeID: "agent-builder",
+		Timeout:        30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{
+				Success: true,
+				Output:  "Review output.\n\n" + runner.ResultStartMarker + "\n" + rejectedJSON + "\n" + runner.ResultEndMarker,
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if status, _ := finalizeBody["status"].(string); status != "SUCCESS" {
+		t.Fatalf("expected SUCCESS finalize status, got %q", status)
+	}
+	nextStatus, _ := finalizeBody["nextStatus"].(string)
+	if nextStatus != "TODO" {
+		t.Fatalf("expected nextStatus TODO, got %q", nextStatus)
+	}
+	nextAssignee, _ := finalizeBody["nextAssigneeAgentId"].(string)
+	if nextAssignee != "agent-builder" {
+		t.Fatalf("expected nextAssigneeAgentId agent-builder, got %q", nextAssignee)
+	}
+	blockReason, _ := finalizeBody["blockReason"].(string)
+	if blockReason != "" {
+		t.Fatalf("expected no blockReason on rejected review, got %q", blockReason)
+	}
+	resultMap, ok := finalizeBody["result"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected result map in finalize payload")
+	}
+	resultStatus, _ := resultMap["status"].(string)
+	if resultStatus != "rejected" {
+		t.Fatalf("expected result.status=rejected, got %q", resultStatus)
+	}
+	comment, _ := finalizeBody["comment"].(string)
+	if comment == "" {
+		t.Fatal("expected comment in finalize payload")
+	}
+	if !strings.Contains(comment, "Review Rejected") {
+		t.Fatalf("expected comment to contain Review Rejected headline, got %q", comment)
+	}
+	if !strings.Contains(comment, "No tests found") {
+		t.Fatalf("expected comment to contain rejection reason, got %q", comment)
+	}
+}
+
+func TestRunOnceReviewerRejectedWithoutNextAssignee(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-review-2","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":100,"title":"Review: no builder config","description":"desc","status":"REVIEW","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-review-2","orgId":"org-1","taskId":"task-review-2","projectId":"project-1","agentId":"agent-reviewer-2","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-17T00:00:00Z"},"lease":{"id":"lease-review-2","projectId":"project-1","executionId":"exec-review-2","expiresAt":"2026-05-17T00:01:00Z"},"runtimeBinding":{"id":"binding-review-2","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-review-2":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-review-2/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-review-2/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-reviewer-2",
+		Name:        "reviewer",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		AgentType:   "reviewer",
+		ClaimStatus: "REVIEW",
+		PickStatus:  "REVIEW",
+		DoneStatus:  "QA_READY",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{
+				Success: true,
+				Output:  "Review failed.\n\n" + runner.ResultStartMarker + "\n" + `{"schemaVersion":"v1","status":"rejected","summary":"No PR found","whatChanged":[],"decisions":[],"risks":["Missing PR"],"checksRun":[],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}` + "\n" + runner.ResultEndMarker,
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if status, _ := finalizeBody["status"].(string); status != "SUCCESS" {
+		t.Fatalf("expected SUCCESS finalize status even without nextAssignee, got %q", status)
+	}
+	nextStatus, _ := finalizeBody["nextStatus"].(string)
+	if nextStatus != "TODO" {
+		t.Fatalf("expected nextStatus TODO, got %q", nextStatus)
+	}
+	nextAssignee, _ := finalizeBody["nextAssigneeAgentId"].(string)
+	if nextAssignee != "" {
+		t.Fatalf("expected no nextAssigneeAgentId when not configured, got %q", nextAssignee)
+	}
+}
+
 func initWorkerTestGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
