@@ -43,11 +43,15 @@ func (s *stubExtractor) Extract(_ context.Context, _ extractor.ExtractRequest) (
 type stubExecutor struct {
 	result executor.Result
 	work   func(workdir string) error
+	prompt *string
 }
 
 func (s *stubExecutor) Name() string { return "stub-executor" }
 
-func (s *stubExecutor) Execute(_ context.Context, _ string, workdir string, _ time.Duration, _ executor.StreamFunc) executor.Result {
+func (s *stubExecutor) Execute(_ context.Context, prompt string, workdir string, _ time.Duration, _ executor.StreamFunc) executor.Result {
+	if s.prompt != nil {
+		*s.prompt = prompt
+	}
 	if s.work != nil {
 		if err := s.work(workdir); err != nil {
 			return executor.Result{Success: false, Output: err.Error(), ExitCode: 1}
@@ -1294,12 +1298,13 @@ func TestRunOnceBranchOnlyPushesAndCleansExecutionWorktree(t *testing.T) {
 		"",
 		"",
 	)
-	expectedBranch := runner.BuildBranchName(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix)
+	expectedBranch := runner.ResolveTaskBranch(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix, claim.Task.LocalID, claim.Task.ProjectKey, claim.Task.Title)
 	worktreePath := filepath.Join(runner.WorktreesRootForRepo(repo), claim.Execution.ID)
 
 	var (
-		mu           sync.Mutex
-		finalizeBody map[string]interface{}
+		mu             sync.Mutex
+		finalizeBody   map[string]interface{}
+		executorPrompt string
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1341,6 +1346,7 @@ func TestRunOnceBranchOnlyPushesAndCleansExecutionWorktree(t *testing.T) {
 	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
 		return &stubExecutor{
 			result: executor.Result{Success: true},
+			prompt: &executorPrompt,
 			work: func(workdir string) error {
 				return os.WriteFile(filepath.Join(workdir, "worker-change.txt"), []byte("hello"), 0644)
 			},
@@ -1362,6 +1368,12 @@ func TestRunOnceBranchOnlyPushesAndCleansExecutionWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
 		t.Fatalf("expected execution worktree to be removed, stat err=%v", err)
+	}
+	if !strings.Contains(executorPrompt, "Working directory: "+worktreePath) {
+		t.Fatalf("expected prompt to contain execution worktree %q, got %q", worktreePath, executorPrompt)
+	}
+	if strings.Contains(executorPrompt, "Working directory: "+repo) {
+		t.Fatalf("expected prompt not to point agent at base repo %q, got %q", repo, executorPrompt)
 	}
 
 	result, ok := finalizeBody["result"].(map[string]interface{})
@@ -1432,7 +1444,7 @@ func TestRunOnceProvisionFailureCleansExecutionWorktree(t *testing.T) {
 		"install deps",
 		"cache-key-failure",
 	)
-	expectedBranch := runner.BuildBranchName(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix)
+	expectedBranch := runner.ResolveTaskBranch(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix, claim.Task.LocalID, claim.Task.ProjectKey, claim.Task.Title)
 	worktreePath := filepath.Join(runner.WorktreesRootForRepo(repo), claim.Execution.ID)
 	executorRan := false
 
@@ -1524,7 +1536,7 @@ func TestRunOnceBranchOnlyPushFailureFinalizesExecutionAsFailed(t *testing.T) {
 		"",
 		"",
 	)
-	expectedBranch := runner.BuildBranchName(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix)
+	expectedBranch := runner.ResolveTaskBranch(claim.Task.ID, claim.Task.Type, "builder", claim.RuntimeBinding.AllowedBranchPrefix, claim.Task.LocalID, claim.Task.ProjectKey, claim.Task.Title)
 	worktreePath := filepath.Join(runner.WorktreesRootForRepo(repo), claim.Execution.ID)
 
 	var (
@@ -1676,7 +1688,12 @@ func TestRunOnceBranchOnlyProvisionRunsForEachFreshWorktree(t *testing.T) {
 			Timeout:     30,
 		}, time.Second, nil)
 		worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
-			return &stubExecutor{result: executor.Result{Success: true}}
+			return &stubExecutor{
+				result: executor.Result{Success: true},
+				work: func(workdir string) error {
+					return os.WriteFile(filepath.Join(workdir, fmt.Sprintf("provision-%s.txt", executionID)), []byte("ok"), 0644)
+				},
+			}
 		}
 		worker.runOnce(context.Background())
 		server.Close()
@@ -3082,6 +3099,91 @@ func TestRunOnceReviewerRejectedWithoutNextAssignee(t *testing.T) {
 	}
 }
 
+func TestRunOnceQaSuccessSendsQaEvidence(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-qa-1","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":101,"title":"QA: verify flow","description":"desc","status":"QA_READY","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-qa-1","orgId":"org-1","taskId":"task-qa-1","projectId":"project-1","agentId":"agent-qa","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-17T00:00:00Z"},"lease":{"id":"lease-qa-1","projectId":"project-1","executionId":"exec-qa-1","expiresAt":"2026-05-17T00:01:00Z"},"runtimeBinding":{"id":"binding-qa-1","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-qa-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-qa-1/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-qa-1/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-qa",
+		Name:        "qa",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		AgentType:   "qa",
+		ClaimStatus: "QA_READY",
+		PickStatus:  "QA_READY",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{
+				Success: true,
+				Output:  "QA passed.",
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["callerRoleHint"] != "qa" {
+		t.Fatalf("expected callerRoleHint qa, got %#v", finalizeBody["callerRoleHint"])
+	}
+	if finalizeBody["nextStatus"] != "DONE" {
+		t.Fatalf("expected nextStatus DONE, got %#v", finalizeBody["nextStatus"])
+	}
+	evidence, ok := finalizeBody["evidence"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected evidence map, got %#v", finalizeBody["evidence"])
+	}
+	qaEvidence, ok := evidence["qa"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected qa evidence map, got %#v", evidence["qa"])
+	}
+	if qaEvidence["passed"] != true {
+		t.Fatalf("expected qa evidence passed=true, got %#v", qaEvidence["passed"])
+	}
+	checks, ok := qaEvidence["checks"].([]interface{})
+	if !ok || len(checks) == 0 {
+		t.Fatalf("expected non-empty qa checks, got %#v", qaEvidence["checks"])
+	}
+}
+
 func initWorkerTestGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -3116,4 +3218,327 @@ func runGit(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestRunOnceFallsBackToLocalProjectConfigWhenRuntimeBindingRepoPathEmpty(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	localCfg := &config.ProjectConfig{
+		ProjectID:         "proj-local-fallback",
+		RepoPath:          repo,
+		ProvisionCommand:  "",
+		ProvisionCacheKey: "",
+	}
+
+	repoInfo := config.GitRepoInfo{
+		IsRepo:    true,
+		GitRoot:   repo,
+		GitDir:    filepath.Join(repo, ".git"),
+		CommonDir: filepath.Join(repo, ".git"),
+	}
+	if err := config.SaveProjectConfig(repoInfo, localCfg); err != nil {
+		t.Fatalf("save local config: %v", err)
+	}
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-local-fb","orgId":"org-1","projectId":"project-1","featureId":"feature-1","localId":50,"title":"Local fallback test","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-local-fb","orgId":"org-1","taskId":"task-local-fb","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-local-fb","projectId":"project-1","executionId":"exec-local-fb","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-local-fb","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":"","defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-local-fb":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-local-fb/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-local-fb/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	originalCwd, _ := os.Getwd()
+	os.Chdir(repo)
+	defer os.Chdir(originalCwd)
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "local-fb-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "SUCCESS" {
+		t.Fatalf("expected SUCCESS, got %#v", finalizeBody["status"])
+	}
+}
+
+func TestMergeWithOwnershipInWorkerContext(t *testing.T) {
+	remote := &config.RemotePolicy{
+		GitPolicy:           "branch_commit_pr",
+		DefaultBaseBranch:   "develop",
+		AllowedBranchPrefix: "feat/",
+		ExecutionMode:       "remote",
+		PRPolicy:            "always_draft",
+	}
+	local := &config.ProjectConfig{
+		ProjectID:         "proj-merge-test",
+		RepoPath:          "/local/repo",
+		ProvisionCommand:  "go mod tidy",
+		ProvisionCacheKey: "go.sum",
+	}
+
+	merged := config.MergeWithOwnership(remote, local, "/fallback/workdir")
+
+	if merged.GitPolicy != "branch_commit_pr" {
+		t.Fatalf("expected remote gitPolicy, got %s", merged.GitPolicy)
+	}
+	if merged.DefaultBaseBranch != "develop" {
+		t.Fatalf("expected remote baseBranch, got %s", merged.DefaultBaseBranch)
+	}
+	if merged.RepoPath != "/local/repo" {
+		t.Fatalf("expected local repoPath, got %s", merged.RepoPath)
+	}
+	if merged.ProvisionCommand != "go mod tidy" {
+		t.Fatalf("expected local provisionCommand, got %s", merged.ProvisionCommand)
+	}
+	if merged.Workdir != "/local/repo" {
+		t.Fatalf("expected workdir from local repoPath, got %s", merged.Workdir)
+	}
+}
+
+func TestRunOnceAcquiresFeatureLockForWritePolicy(t *testing.T) {
+	repo, _ := initWorkerTestGitRepoWithRemote(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-lock-1","orgId":"org-1","projectId":"project-1","featureId":"feature-abc","localId":30,"title":"Feature lock test","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-lock-1","orgId":"org-1","taskId":"task-lock-1","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-lock-1","projectId":"project-1","executionId":"exec-lock-1","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-lock-1","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"agent/","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"branch_only","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-lock-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-lock-1/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-lock-1/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "locked-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "SUCCESS" {
+		t.Fatalf("expected SUCCESS, got %v", finalizeBody["status"])
+	}
+}
+
+func TestRunOnceNoLockForNoWritePolicy(t *testing.T) {
+	repo := initWorkerTestGitRepo(t)
+
+	var (
+		mu           sync.Mutex
+		finalizeBody map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data":{"task":{"id":"task-nolock-1","orgId":"org-1","projectId":"project-1","featureId":"feature-xyz","localId":31,"title":"No lock test","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-nolock-1","orgId":"org-1","taskId":"task-nolock-1","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-nolock-1","projectId":"project-1","executionId":"exec-nolock-1","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-nolock-1","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"no_write","metadata":{}}}}`, repo)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/executions/exec-nolock-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-nolock-1/comments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/executions/exec-nolock-1/finalize":
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBody = body
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+		ID:          "agent-1",
+		Name:        "builder",
+		Tool:        "opencode",
+		Model:       "glm-5.1",
+		ClaimStatus: "DOING",
+		DoneStatus:  "DONE",
+		Timeout:     30,
+	}, time.Second, nil)
+	worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+		return &stubExecutor{
+			result: executor.Result{Success: true},
+			work: func(workdir string) error {
+				return os.WriteFile(filepath.Join(workdir, "nowrite-change.txt"), []byte("hello"), 0644)
+			},
+		}
+	}
+
+	worker.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if finalizeBody == nil {
+		t.Fatal("expected finalize payload")
+	}
+	if finalizeBody["status"] != "SUCCESS" {
+		t.Fatalf("expected SUCCESS, got %v", finalizeBody["status"])
+	}
+}
+
+func TestRunOnceSequentialExecutionOnSameFeature(t *testing.T) {
+	repo, remoteDir := initWorkerTestGitRepoWithRemote(t)
+	_ = remoteDir
+
+	var (
+		mu             sync.Mutex
+		finalizeBodies []map[string]interface{}
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/agents/") && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/claim-next":
+			body := fmt.Sprintf(`{"data":{"task":{"id":"task-seq-%d","orgId":"org-1","projectId":"project-1","featureId":"feature-same","localId":40,"title":"Sequential task %d","description":"desc","status":"DOING","type":"TASK","priority":"HIGH"},"execution":{"id":"exec-seq-%d","orgId":"org-1","taskId":"task-seq-%d","projectId":"project-1","agentId":"agent-1","runnerInstanceId":"runner-1","status":"CLAIMED","tool":"opencode","model":"glm-5.1","metadata":{},"startedAt":"2026-05-16T00:00:00Z"},"lease":{"id":"lease-seq-%d","projectId":"project-1","executionId":"exec-seq-%d","expiresAt":"2026-05-16T00:01:00Z"},"runtimeBinding":{"id":"binding-seq-%d","projectId":"project-1","runnerProfile":"local","hostOs":"windows","repoPath":%q,"defaultBaseBranch":"main","allowedBranchPrefix":"agent/","executionMode":"local","gitProvider":"github","prPolicy":"draft","gitPolicy":"branch_only","metadata":{}}}}`,
+				len(finalizeBodies)+1, len(finalizeBodies)+1,
+				len(finalizeBodies)+1, len(finalizeBodies)+1,
+				len(finalizeBodies)+1, len(finalizeBodies)+1,
+				len(finalizeBodies)+1, repo)
+			_, _ = w.Write([]byte(body))
+		case strings.HasPrefix(r.URL.Path, "/executions/exec-seq-") && r.Method == http.MethodPatch:
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case strings.HasPrefix(r.URL.Path, "/tasks/task-seq-") && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		case strings.HasPrefix(r.URL.Path, "/executions/exec-seq-") && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/finalize"):
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize body: %v", err)
+			}
+			mu.Lock()
+			finalizeBodies = append(finalizeBodies, body)
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	fileNames := []string{"seq-change-1.txt", "seq-change-2.txt"}
+	for i := 0; i < 2; i++ {
+		worker := NewAgentWorker(server.URL, "test-key", "runner-1", config.AgentConfig{
+			ID:          "agent-1",
+			Name:        "builder",
+			Tool:        "opencode",
+			Model:       "glm-5.1",
+			ClaimStatus: "DOING",
+			DoneStatus:  "DONE",
+			Timeout:     30,
+		}, time.Second, nil)
+		idx := i
+		worker.executorFactory = func(agent config.AgentConfig) executor.Executor {
+			return &stubExecutor{
+				result: executor.Result{Success: true},
+				work: func(workdir string) error {
+					return os.WriteFile(filepath.Join(workdir, fileNames[idx]), []byte(fmt.Sprintf("execution %d", idx+1)), 0644)
+				},
+			}
+		}
+
+		worker.runOnce(context.Background())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(finalizeBodies) != 2 {
+		t.Fatalf("expected 2 finalize payloads, got %d", len(finalizeBodies))
+	}
+	for i, body := range finalizeBodies {
+		if body["status"] != "SUCCESS" {
+			t.Fatalf("execution %d: expected SUCCESS, got %v", i+1, body["status"])
+		}
+	}
 }

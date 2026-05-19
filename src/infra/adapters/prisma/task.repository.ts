@@ -38,6 +38,7 @@ export interface UpdateTaskInput {
   modules?: string[];
   assigneeId?: string | null;
   assigneeAgentId?: string | null;
+  currentExecutionId?: string | null;
   blocked?: boolean;
   blockReason?: string | null;
   focus?: TaskFocus | null;
@@ -183,6 +184,7 @@ export class TaskRepository {
         localId: true,
         assigneeId: true,
         assigneeAgentId: true,
+        currentExecutionId: true,
         featureId: true,
         createdAt: true,
         updatedAt: true,
@@ -470,6 +472,50 @@ export class TaskRepository {
     return updated;
   }
 
+  async clearCurrentExecution(
+    id: string,
+    orgId: string,
+    executionId: string
+  ): Promise<boolean> {
+    const result = await this.prisma.task.updateMany({
+      where: {
+        id,
+        orgId,
+        currentExecutionId: executionId,
+      },
+      data: {
+        currentExecutionId: null,
+      },
+    });
+
+    return result.count > 0;
+  }
+
+  async requeueStaleExecution(
+    id: string,
+    orgId: string,
+    executionId: string
+  ): Promise<boolean> {
+    const result = await this.prisma.task.updateMany({
+      where: {
+        id,
+        orgId,
+        OR: [
+          { currentExecutionId: executionId },
+          { currentExecutionId: null },
+        ],
+      },
+      data: {
+        blocked: false,
+        blockReason: null,
+        status: 'TODO',
+        currentExecutionId: null,
+      },
+    });
+
+    return result.count > 0;
+  }
+
   /**
    * Bulk update tasks
    * Securely updates multiple tasks belonging to the same organization
@@ -618,7 +664,7 @@ export class TaskRepository {
         // Busca textual em title e description
         // NOTA: Para buscas com múltiplas palavras (>2 termos), considere usar:
         // Prisma.$queryRaw com to_tsvector/plainto_tsquery (idx_tasks_fulltext_search)
-        // Exemplo: SELECT * FROM tasks WHERE to_tsvector('portuguese', title || ' ' || COALESCE(description, '')) 
+        // Exemplo: SELECT * FROM tasks WHERE to_tsvector('portuguese', title || ' ' || COALESCE(description, ''))
         //          @@ plainto_tsquery('portuguese', ${search}) AND org_id = ${orgId};
         // Benefício: ~10x mais rápido para buscas textuais complexas
         where.OR = [

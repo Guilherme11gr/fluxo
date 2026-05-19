@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,8 +22,11 @@ func TestCaptureGitSnapshotEmptyWorkdir(t *testing.T) {
 	if snapshot.BaseBranch != "main" {
 		t.Fatalf("expected base from prep, got %q", snapshot.BaseBranch)
 	}
-	if len(snapshot.CommitShas) != 1 || snapshot.CommitShas[0] != "abc123" {
-		t.Fatalf("expected prep commit shas, got %v", snapshot.CommitShas)
+	if len(snapshot.CommitShas) != 0 {
+		t.Fatalf("expected no new commit shas before work starts, got %v", snapshot.CommitShas)
+	}
+	if snapshot.BaselineHeadSHA != "abc123" || snapshot.FinalHeadSHA != "abc123" {
+		t.Fatalf("expected baseline/final from prep, got baseline=%q final=%q", snapshot.BaselineHeadSHA, snapshot.FinalHeadSHA)
 	}
 	if snapshot.Mode != string(GitPolicyBranchOnly) {
 		t.Fatalf("expected mode from prep, got %q", snapshot.Mode)
@@ -42,8 +46,11 @@ func TestCaptureGitSnapshotFromWorkdir(t *testing.T) {
 	if snapshot.BaseBranch != "main" {
 		t.Fatalf("expected base=main, got %q", snapshot.BaseBranch)
 	}
-	if len(snapshot.CommitShas) == 0 {
-		t.Fatal("expected at least one commit SHA")
+	if len(snapshot.CommitShas) != 0 {
+		t.Fatalf("expected no new commit SHA before changes, got %v", snapshot.CommitShas)
+	}
+	if snapshot.BaselineHeadSHA == "" || snapshot.FinalHeadSHA == "" {
+		t.Fatalf("expected baseline/final HEADs, got baseline=%q final=%q", snapshot.BaselineHeadSHA, snapshot.FinalHeadSHA)
 	}
 	if snapshot.CapturedAt == "" {
 		t.Fatal("expected non-empty capturedAt")
@@ -64,6 +71,12 @@ func TestCaptureGitSnapshotDetectsNewCommits(t *testing.T) {
 	snapshot := CaptureGitSnapshot(dir, prep)
 	if len(snapshot.CommitShas) == 0 {
 		t.Fatal("expected new commit SHAs after commit")
+	}
+	if !snapshot.HasVerifiableDelta {
+		t.Fatalf("expected verifiable delta, got %#v", snapshot)
+	}
+	if len(snapshot.NewCommitSHAs) == 0 {
+		t.Fatal("expected newCommitShas after commit")
 	}
 
 	shas, err := CollectNewCommitSHAs(dir, prep.CommitShas[0])
@@ -123,6 +136,95 @@ func TestGitMetadataMapWithPR(t *testing.T) {
 	}
 	if meta["capturedAt"] != "2026-05-14T00:00:00Z" {
 		t.Fatalf("expected capturedAt, got %v", meta["capturedAt"])
+	}
+}
+
+func TestGitEvidenceMapIncludesArtifactFields(t *testing.T) {
+	snapshot := GitSnapshot{
+		Branch:             "agent/task-1",
+		BaseBranch:         "main",
+		BaselineHeadSHA:    "abc",
+		FinalHeadSHA:       "def",
+		NewCommitSHAs:      []string{"def"},
+		ChangedFiles:       []string{"src/foo.ts"},
+		HasVerifiableDelta: true,
+		PolicyVerified:     true,
+		Mode:               "branch_only",
+	}
+
+	evidence := GitEvidenceMap(snapshot)
+	if evidence["gitPolicy"] != "branch_only" {
+		t.Fatalf("expected gitPolicy=branch_only, got %#v", evidence["gitPolicy"])
+	}
+	if evidence["hasVerifiableDelta"] != true {
+		t.Fatalf("expected hasVerifiableDelta=true, got %#v", evidence["hasVerifiableDelta"])
+	}
+	if evidence["baselineHeadSha"] != "abc" || evidence["finalHeadSha"] != "def" {
+		t.Fatalf("expected baseline/final shas, got %#v", evidence)
+	}
+}
+
+func TestNormalizeGitRemoteURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		remote string
+		want   string
+	}{
+		{
+			name:   "https remote",
+			remote: "https://github.com/org/repo.git",
+			want:   "https://github.com/org/repo",
+		},
+		{
+			name:   "ssh remote",
+			remote: "git@github.com:org/repo.git",
+			want:   "https://github.com/org/repo",
+		},
+		{
+			name:   "non github remote ignored",
+			remote: "https://gitlab.com/org/repo.git",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeGitRemoteURL(tt.remote); got != tt.want {
+				t.Fatalf("normalizeGitRemoteURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildGitLinks(t *testing.T) {
+	repo := initTestGitRepo(t)
+	defer os.RemoveAll(repo)
+	if _, err := gitCommand(repo, "remote", "add", "origin", "git@github.com:org/repo.git"); err != nil {
+		t.Fatalf("add origin: %v", err)
+	}
+
+	snapshot := GitSnapshot{
+		Branch:          "agent/codex/task-flxo-387-runner-worktree-fix-validation",
+		BaseBranch:      "main",
+		BaselineHeadSHA: "1111111111111111111111111111111111111111",
+		FinalHeadSHA:    "2222222222222222222222222222222222222222",
+		NewCommitSHAs: []string{
+			"2222222222222222222222222222222222222222",
+		},
+	}
+
+	links := BuildGitLinks(repo, snapshot)
+	if links.Repository != "https://github.com/org/repo" {
+		t.Fatalf("expected repository link, got %q", links.Repository)
+	}
+	if !strings.Contains(links.Branch, "agent%2Fcodex%2Ftask-flxo-387-runner-worktree-fix-validation") {
+		t.Fatalf("expected escaped branch link, got %q", links.Branch)
+	}
+	if !strings.Contains(links.Compare, "11111111") || !strings.Contains(links.Compare, "22222222") {
+		t.Fatalf("expected compare link with SHAs, got %q", links.Compare)
+	}
+	if len(links.Commits) != 1 || !strings.Contains(links.Commits[0], "/commit/22222222") {
+		t.Fatalf("expected commit link, got %#v", links.Commits)
 	}
 }
 

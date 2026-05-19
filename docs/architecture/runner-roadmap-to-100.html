@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FluXo Runner Roadmap to 100%</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101211;
+        --panel: #181b19;
+        --panel-2: #202421;
+        --panel-3: #2a2f2b;
+        --line: #3c453e;
+        --line-strong: #647164;
+        --text: #f1eee4;
+        --muted: #bcb7aa;
+        --quiet: #878478;
+        --amber: #f2b84b;
+        --cyan: #66c8d3;
+        --green: #8bc47b;
+        --red: #e36d63;
+        --blue: #79a9ef;
+        --rose: #df8298;
+        --ink: #0b0c0b;
+        --shadow: 0 22px 72px rgba(0, 0, 0, 0.34);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(90deg, rgba(242, 184, 75, 0.035) 1px, transparent 1px) 0 0 / 40px 40px,
+          linear-gradient(rgba(102, 200, 211, 0.028) 1px, transparent 1px) 0 0 / 40px 40px,
+          linear-gradient(135deg, rgba(102, 200, 211, 0.08), transparent 34rem),
+          linear-gradient(315deg, rgba(242, 184, 75, 0.07), transparent 34rem),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          "Aptos",
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.45;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      code {
+        color: var(--cyan);
+        font-family:
+          "Cascadia Code",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        font-size: 0.92em;
+      }
+
+      .page {
+        width: min(1500px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 30px 0 72px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 26px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-weight: 900;
+      }
+
+      .brand::before {
+        content: "";
+        width: 30px;
+        height: 30px;
+        border: 1px solid rgba(102, 200, 211, 0.72);
+        background:
+          linear-gradient(90deg, rgba(102, 200, 211, 0.85) 0 34%, transparent 35%),
+          linear-gradient(180deg, rgba(242, 184, 75, 0.92) 0 38%, transparent 39%),
+          var(--panel);
+        box-shadow: 0 0 0 5px rgba(102, 200, 211, 0.08);
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .nav a {
+        border: 1px solid var(--line);
+        background: rgba(24, 27, 25, 0.76);
+        padding: 7px 10px;
+        text-decoration: none;
+      }
+
+      .nav a:hover,
+      .link-card:hover {
+        border-color: var(--line-strong);
+        background: rgba(42, 47, 43, 0.9);
+      }
+
+      .hero {
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 38%),
+          linear-gradient(180deg, rgba(24, 27, 25, 0.96), rgba(17, 19, 18, 0.96));
+        box-shadow: var(--shadow);
+        padding: clamp(24px, 4vw, 54px);
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+        gap: 24px;
+        align-items: stretch;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--amber);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 28px;
+        height: 2px;
+        background: var(--amber);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 930px;
+        margin: 24px 0 22px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(42px, 6vw, 90px);
+        line-height: 0.92;
+        letter-spacing: -0.03em;
+      }
+
+      h2 {
+        margin-bottom: 14px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(28px, 3.4vw, 48px);
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+
+      h3 {
+        margin-bottom: 10px;
+        font-size: 17px;
+      }
+
+      .lede {
+        max-width: 800px;
+        margin-bottom: 24px;
+        color: var(--muted);
+        font-size: clamp(17px, 1.5vw, 21px);
+      }
+
+      .scoreboard {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .score {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        min-height: 132px;
+        padding: 16px;
+      }
+
+      .score b {
+        display: block;
+        margin-bottom: 8px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(34px, 4vw, 58px);
+        line-height: 0.9;
+      }
+
+      .score span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .hero-panel {
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(90deg, rgba(102, 200, 211, 0.05), transparent 70%),
+          var(--panel-2);
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .hero-panel strong {
+        color: var(--cyan);
+      }
+
+      .hero-panel p {
+        color: var(--muted);
+        margin-bottom: 0;
+      }
+
+      .run-facts {
+        display: grid;
+        gap: 8px;
+      }
+
+      .fact {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 10px;
+        border-top: 1px solid var(--line);
+        padding-top: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .fact b {
+        color: var(--text);
+      }
+
+      .section {
+        margin-top: 28px;
+        border: 1px solid var(--line);
+        background: rgba(24, 27, 25, 0.92);
+        box-shadow: var(--shadow);
+        padding: clamp(20px, 3vw, 34px);
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 22px;
+      }
+
+      .section-head p {
+        max-width: 760px;
+        color: var(--muted);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        background: var(--panel-3);
+        color: var(--muted);
+        padding: 7px 10px;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .tag.green {
+        color: var(--green);
+        border-color: rgba(139, 196, 123, 0.5);
+      }
+
+      .tag.amber {
+        color: var(--amber);
+        border-color: rgba(242, 184, 75, 0.55);
+      }
+
+      .tag.red {
+        color: var(--red);
+        border-color: rgba(227, 109, 99, 0.5);
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .grid.cols-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.cols-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid.cols-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 18px;
+      }
+
+      .card h3 {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .card p,
+      .card li {
+        color: var(--muted);
+      }
+
+      .card ul,
+      .card ol {
+        margin: 12px 0 0;
+        padding-left: 20px;
+      }
+
+      .card li + li {
+        margin-top: 7px;
+      }
+
+      .status-dot {
+        width: 11px;
+        height: 11px;
+        flex: 0 0 auto;
+        border: 1px solid currentColor;
+        background: currentColor;
+      }
+
+      .green-text {
+        color: var(--green);
+      }
+
+      .amber-text {
+        color: var(--amber);
+      }
+
+      .red-text {
+        color: var(--red);
+      }
+
+      .blue-text {
+        color: var(--blue);
+      }
+
+      .rose-text {
+        color: var(--rose);
+      }
+
+      .rail {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 14px;
+        align-items: stretch;
+      }
+
+      .stage {
+        position: relative;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 18px;
+        min-height: 260px;
+      }
+
+      .stage::before {
+        content: attr(data-score);
+        display: inline-flex;
+        min-width: 70px;
+        justify-content: center;
+        border: 1px solid var(--line-strong);
+        background: var(--ink);
+        padding: 8px 10px;
+        color: var(--cyan);
+        font-weight: 900;
+      }
+
+      .stage h3 {
+        margin-top: 18px;
+        font-size: 20px;
+      }
+
+      .stage p {
+        color: var(--muted);
+      }
+
+      .matrix {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        font-size: 14px;
+      }
+
+      .matrix th,
+      .matrix td {
+        border: 1px solid var(--line);
+        padding: 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .matrix th {
+        background: var(--panel-3);
+        color: var(--text);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .matrix td {
+        background: rgba(32, 36, 33, 0.68);
+        color: var(--muted);
+      }
+
+      .matrix strong {
+        color: var(--text);
+      }
+
+      .links {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .link-card {
+        min-height: 90px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 14px;
+        text-decoration: none;
+      }
+
+      .link-card b {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--cyan);
+      }
+
+      .link-card span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .sequence {
+        counter-reset: step;
+        display: grid;
+        gap: 12px;
+      }
+
+      .sequence .card {
+        counter-increment: step;
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+      }
+
+      .sequence .card::before {
+        content: counter(step);
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        background: var(--ink);
+        color: var(--amber);
+        font-weight: 900;
+      }
+
+      .codeblock {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        background: #0c0e0d;
+        color: var(--muted);
+        padding: 14px;
+        font-family:
+          "Cascadia Code",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        font-size: 13px;
+      }
+
+      @media (max-width: 1050px) {
+        .hero,
+        .grid.cols-2,
+        .grid.cols-3,
+        .grid.cols-4,
+        .rail,
+        .links {
+          grid-template-columns: 1fr;
+        }
+
+        .scoreboard {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          width: min(100% - 24px, 1500px);
+          padding-top: 18px;
+        }
+
+        .topbar,
+        .section-head {
+          display: block;
+        }
+
+        .nav {
+          justify-content: flex-start;
+          margin-top: 14px;
+        }
+
+        .fact {
+          grid-template-columns: 1fr;
+        }
+
+        .matrix {
+          font-size: 13px;
+        }
+
+        .matrix th,
+        .matrix td {
+          padding: 10px;
+        }
+
+        .sequence .card {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand">FluXo Runner Hardening</div>
+        <nav class="nav" aria-label="Navegacao">
+          <a href="#estado">Estado</a>
+          <a href="#roadmap-95">95%</a>
+          <a href="#roadmap-100">100%</a>
+          <a href="#testes">Matriz</a>
+          <a href="#ordem">Execucao</a>
+        </nav>
+      </header>
+
+      <section class="hero" id="estado">
+        <div>
+          <div class="eyebrow">Roadmap operacional</div>
+          <h1>Runner to 100%</h1>
+          <p class="lede">
+            Consolidacao das lacunas restantes para transformar o runner/kernel em um fluxo
+            auditavel, repetivel, resistente a queda e com evidencia suficiente para confiar no
+            resultado sem abrir terminal.
+          </p>
+
+          <div class="scoreboard" aria-label="Pontuacao de maturidade">
+            <div class="score">
+              <b class="green-text">88%</b>
+              <span>Provado em PRD com FLXO-388: owner, worktree, commit, push, links e finalize.</span>
+            </div>
+            <div class="score">
+              <b class="amber-text">95%</b>
+              <span>Fecha quando QA/evidence/checks virarem fatos estruturados, nao apenas texto.</span>
+            </div>
+            <div class="score">
+              <b class="blue-text">100%</b>
+              <span>Fecha com PR policy real, UI operacional, chaos tests, CI e release do runner.</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="hero-panel" aria-label="Ultima execucao validada">
+          <div>
+            <strong>Baseline real: FLXO-388</strong>
+            <p>
+              A ultima run recuperou uma queda de maquina, relancou o runner atualizado, concluiu
+              com sucesso e publicou links Git clicaveis no comentario final.
+            </p>
+          </div>
+
+          <div class="run-facts">
+            <div class="fact"><b>Task</b><span>FLXO-388 em <code>REVIEW</code></span></div>
+            <div class="fact"><b>Execucao</b><span><code>01abfe82-a5b2-491c-87ee-2ff661cd67da</code></span></div>
+            <div class="fact"><b>Commit</b><span><code>de8f96689fe0a1a3b1ed30429693b3f62c0d6ef3</code></span></div>
+            <div class="fact"><b>Gap</b><span><code>checksRun</code> ficou vazio porque faltou o JSON v1 final.</span></div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Maturidade</div>
+            <h2>O que cada faixa significa</h2>
+          </div>
+          <p>
+            A nota nao mede quantidade de codigo. Mede o quanto uma execucao pode ser confiada,
+            auditada e recuperada em producao, inclusive quando o agent erra, a maquina cai ou duas
+            instancias competem pela mesma task.
+          </p>
+        </div>
+
+        <div class="rail">
+          <article class="stage" data-score="88%">
+            <h3>Provado em PRD</h3>
+            <p>
+              O caminho feliz e a recuperacao basica funcionam. O runner reivindica ownership,
+              escreve em worktree efemero, valida delta real, commita, faz push, finaliza com
+              <code>expectedExecutionId</code> e publica links Git.
+            </p>
+            <span class="tag green">Confiavel para smoke</span>
+          </article>
+
+          <article class="stage" data-score="95%">
+            <h3>Auditavel por contrato</h3>
+            <p>
+              Toda run bem-sucedida precisa deixar evidencia estruturada: checks observados,
+              artefato, git links, delta, policy e contrato v1. Se faltar essa estrutura, o sistema
+              deve reparar com fatos locais ou rejeitar o sucesso.
+            </p>
+            <span class="tag amber">Proximo alvo</span>
+          </article>
+
+          <article class="stage" data-score="100%">
+            <h3>Operacao completa</h3>
+            <p>
+              Alem do fluxo branch-only, o sistema precisa provar PR policy, reviewer handoff, UI,
+              caos concorrente, CI, release versionado e limpeza automatica de restos locais.
+            </p>
+            <span class="tag">Meta final</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Evidencia da run</div>
+            <h2>Links que ja precisam aparecer sempre</h2>
+          </div>
+          <p>
+            A FLXO-388 confirmou a necessidade mais pratica: o operador nao deve cacar branch ou
+            commit no GitHub. O runner deve publicar esses links no comentario e na metadata.
+          </p>
+        </div>
+
+        <div class="links">
+          <a class="link-card" href="https://github.com/Guilherme11gr/fluxo" target="_blank" rel="noreferrer">
+            <b>Repository</b>
+            <span>github.com/Guilherme11gr/fluxo</span>
+          </a>
+          <a class="link-card" href="https://github.com/Guilherme11gr/fluxo/tree/agent%2Fcodex-updated-runner-smoke%2Ftask-flxo-388-runner-semantic-git-links-validation-2026-05-19t21-29-42" target="_blank" rel="noreferrer">
+            <b>Branch</b>
+            <span><code>agent/&lt;agent&gt;/task-flxo-388-...</code></span>
+          </a>
+          <a class="link-card" href="https://github.com/Guilherme11gr/fluxo/compare/0b6c5af8c223f64d5021fa06319cec06d6b8e343...de8f96689fe0a1a3b1ed30429693b3f62c0d6ef3" target="_blank" rel="noreferrer">
+            <b>Compare</b>
+            <span><code>0b6c5af8...de8f9668</code></span>
+          </a>
+          <a class="link-card" href="https://github.com/Guilherme11gr/fluxo/commit/de8f96689fe0a1a3b1ed30429693b3f62c0d6ef3" target="_blank" rel="noreferrer">
+            <b>Commit</b>
+            <span><code>de8f9668</code></span>
+          </a>
+        </div>
+      </section>
+
+      <section class="section" id="roadmap-95">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Roadmap para 95%</div>
+            <h2>Fechar a auditabilidade</h2>
+          </div>
+          <span class="tag amber">Prioridade alta</span>
+        </div>
+
+        <div class="grid cols-3">
+          <article class="card">
+            <h3>Contrato v1 completo <span class="status-dot amber-text"></span></h3>
+            <p>
+              Exigir <code>FLUXO_RESULT_JSON_START/END</code> alem do summary. Se o agent omitir o
+              JSON, o runner deve reparar com fatos observados ou marcar a saida como incompleta.
+            </p>
+            <ul>
+              <li><code>schemaVersion: "v1"</code> obrigatorio.</li>
+              <li><code>checksRun</code> nao pode ficar vazio quando comandos foram executados.</li>
+              <li>Teste cobrindo summary-only, JSON valido e JSON quebrado.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>QA por fato observado <span class="status-dot amber-text"></span></h3>
+            <p>
+              O runner precisa construir evidencia a partir dos comandos reais, nao apenas confiar
+              na frase final do agent.
+            </p>
+            <ul>
+              <li>Capturar comando, exit code, duracao e status.</li>
+              <li>Rejeitar sucesso se uma checagem critica falhou.</li>
+              <li>Expor <code>metadata.qa.passed</code> e <code>metadata.qa.checksRun</code>.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Evidence schema <span class="status-dot amber-text"></span></h3>
+            <p>
+              Consolidar a estrutura que o finalize recebe e persiste para auditoria independente
+              do comentario.
+            </p>
+            <ul>
+              <li><code>artifact.changedFiles</code> e <code>hasVerifiableDelta</code>.</li>
+              <li><code>git.policyVerified</code>, branch, commit, compare e PR.</li>
+              <li><code>qa.required</code>, <code>qa.passed</code> e detalhes.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Paridade da API em PRD <span class="status-dot amber-text"></span></h3>
+            <p>
+              Hoje o runner tem fallback para buscar <code>projectKey</code>. Bom para compatibilidade,
+              mas a API de claim deve retornar o campo diretamente.
+            </p>
+            <ul>
+              <li><code>claim-next</code> devolve <code>projectKey: "FLXO"</code>.</li>
+              <li>Backend e runner compartilham a mesma branch semantica.</li>
+              <li>Fallback continua para ambientes antigos.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Smoke e2e automatizado <span class="status-dot amber-text"></span></h3>
+            <p>
+              O teste manual da FLXO-388 deve virar script repetivel para validar PRD sem lembrar
+              todos os passos de cabeca.
+            </p>
+            <ul>
+              <li>Criar task fake no FLXO via API.</li>
+              <li>Rodar runner <code>--once</code>.</li>
+              <li>Validar status, git links, checks, cleanup e task em <code>REVIEW</code>.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Janitor local pos-crash <span class="status-dot amber-text"></span></h3>
+            <p>
+              O server reap funcionou. Falta o runner limpar automaticamente restos locais de
+              execucoes que ja terminaram ou expiraram no servidor.
+            </p>
+            <ul>
+              <li>Remover locks orfaos no startup.</li>
+              <li>Prunar worktrees de executions terminais.</li>
+              <li>Logar o que foi limpo sem bloquear a proxima run.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="roadmap-100">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Roadmap para 100%</div>
+            <h2>Fechar a operacao inteira</h2>
+          </div>
+          <span class="tag">Meta final</span>
+        </div>
+
+        <div class="grid cols-2">
+          <article class="card">
+            <h3>PR policy real <span class="status-dot blue-text"></span></h3>
+            <p>
+              Alem de <code>branch_only</code>, validar a policy que exige PR. Se a policy pedir PR
+              e nao existir <code>prUrl</code>/<code>prNumber</code>, finalize deve rejeitar sucesso.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Console operacional <span class="status-dot blue-text"></span></h3>
+            <p>
+              A UI deve mostrar owner, execution id, checks, delta, branch, compare, commit, PR,
+              motivo de reject e historico de reaps sem obrigar o operador a abrir metadata crua.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Chaos tests de concorrencia <span class="status-dot blue-text"></span></h3>
+            <p>
+              Provar dois runners competindo, execucao velha tentando finalizar, owner errado
+              comentando, patch direto durante ownership e run sem delta tentando sucesso.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Quality gate do repo <span class="status-dot blue-text"></span></h3>
+            <p>
+              Corrigir lint do Next atual, separar suites antigas quebradas, fazer CI rodar build,
+              testes focados, typecheck e testes Go do runner.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Release versionado do runner <span class="status-dot blue-text"></span></h3>
+            <p>
+              Binarios Windows/Linux com versao e commit embutidos, artefato publicavel, config
+              clara e heartbeat reportando exatamente qual build esta rodando.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Reviewer handoff completo <span class="status-dot blue-text"></span></h3>
+            <p>
+              Fluxo builder -> reviewer/QA com transicoes explicitas, comentarios estruturados,
+              rejeicao sem terminalizar indevidamente e reassign controlado pelo protocolo.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="testes">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Matriz de validacao</div>
+            <h2>O que precisa estar verde</h2>
+          </div>
+          <p>
+            Esta matriz separa o que ja foi observado em PRD do que ainda precisa virar teste
+            automatizado. Ela deve guiar as proximas runs fake no FLXO.
+          </p>
+        </div>
+
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th>Cenario</th>
+              <th>Resultado esperado</th>
+              <th>Estado</th>
+              <th>Promove para</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Claim com ownership</strong></td>
+              <td>Task grava <code>currentExecutionId</code>, owner e role derivados server-side.</td>
+              <td><span class="green-text">Provado</span></td>
+              <td>88%</td>
+            </tr>
+            <tr>
+              <td><strong>Crash no meio da run</strong></td>
+              <td><code>reap-stale</code> marca TIMEOUT, limpa ownership e permite nova run.</td>
+              <td><span class="green-text">Provado manualmente</span></td>
+              <td>88%</td>
+            </tr>
+            <tr>
+              <td><strong>Branch semantica</strong></td>
+              <td><code>agent/&lt;agent&gt;/task-flxo-388-&lt;slug&gt;</code> criada e publicada.</td>
+              <td><span class="green-text">Provado</span></td>
+              <td>88%</td>
+            </tr>
+            <tr>
+              <td><strong>Git links finais</strong></td>
+              <td>Comentario e metadata incluem repository, branch, compare e commits.</td>
+              <td><span class="green-text">Provado</span></td>
+              <td>88%</td>
+            </tr>
+            <tr>
+              <td><strong>Checks observados</strong></td>
+              <td><code>checksRun</code> contem teste e typecheck com status factual.</td>
+              <td><span class="amber-text">Gap atual</span></td>
+              <td>95%</td>
+            </tr>
+            <tr>
+              <td><strong>Evidence estruturada</strong></td>
+              <td><code>metadata.evidence</code> ou equivalente contem artifact, git e QA.</td>
+              <td><span class="amber-text">A consolidar</span></td>
+              <td>95%</td>
+            </tr>
+            <tr>
+              <td><strong>Finalize sem delta</strong></td>
+              <td>Run de escrita sem commit/delta real e rejeitada.</td>
+              <td><span class="green-text">Coberto em testes locais</span></td>
+              <td>95%</td>
+            </tr>
+            <tr>
+              <td><strong>PR policy required</strong></td>
+              <td>Sem PR: reject. Com PR valido: success + link persistido.</td>
+              <td><span class="rose-text">Pendente</span></td>
+              <td>100%</td>
+            </tr>
+            <tr>
+              <td><strong>Concorrencia hostil</strong></td>
+              <td>Owner errado, execucao velha e runner concorrente nao conseguem corromper estado.</td>
+              <td><span class="rose-text">Pendente</span></td>
+              <td>100%</td>
+            </tr>
+            <tr>
+              <td><strong>CI completo</strong></td>
+              <td>Build, typecheck, testes TS focados e testes Go rodam em pipeline confiavel.</td>
+              <td><span class="rose-text">Pendente</span></td>
+              <td>100%</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section" id="ordem">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Ordem sugerida</div>
+            <h2>Sequencia que maximiza confianca</h2>
+          </div>
+          <span class="tag green">Proximo passo claro</span>
+        </div>
+
+        <div class="sequence">
+          <article class="card">
+            <div>
+              <h3>Fechar <code>checksRun</code> e QA factual</h3>
+              <p>
+                Instrumentar o runner para transformar comandos observados em checks estruturados.
+                Depois rodar outra task FLXO fake e exigir que <code>metadata.result.checksRun</code>
+                venha preenchido.
+              </p>
+            </div>
+          </article>
+
+          <article class="card">
+            <div>
+              <h3>Consolidar evidence/artifact no finalize</h3>
+              <p>
+                Tornar a estrutura de evidencia explicita no payload, na persistencia e nos testes
+                de rota. O comentario continua humano; a metadata vira a fonte auditavel.
+              </p>
+            </div>
+          </article>
+
+          <article class="card">
+            <div>
+              <h3>Publicar paridade da API em PRD</h3>
+              <p>
+                Subir <code>projectKey</code> no claim-next e manter fallback no runner. A branch
+                semantica deixa de depender de chamada extra em producao.
+              </p>
+            </div>
+          </article>
+
+          <article class="card">
+            <div>
+              <h3>Criar smoke e2e automatizado</h3>
+              <p>
+                Um script deve criar task, rodar runner, aguardar finalize e validar todos os campos
+                criticos. Esse script vira o botao de confianca antes de mexer no protocolo.
+              </p>
+            </div>
+          </article>
+
+          <article class="card">
+            <div>
+              <h3>Atacar PR policy e chaos tests</h3>
+              <p>
+                Quando o 95% estiver estavel, testar os casos que quebram operacao real: PR
+                obrigatorio, runner concorrente, stale finalize, owner errado e patch indevido.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Definition of done</div>
+            <h2>Como saber que chegou la</h2>
+          </div>
+        </div>
+
+        <div class="grid cols-2">
+          <article class="card">
+            <h3>Done para 95%</h3>
+            <ul>
+              <li>Nova run FLXO termina em <code>SUCCESS</code> e task em <code>REVIEW</code>.</li>
+              <li><code>metadata.result.checksRun</code> lista teste e typecheck executados.</li>
+              <li><code>metadata.git.links</code> inclui repository, branch, compare e commit.</li>
+              <li><code>hasVerifiableDelta=true</code> e <code>newCommitShas</code> nao vazio.</li>
+              <li>Crash anterior nao deixa lock/worktree impedindo nova run.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Done para 100%</h3>
+            <ul>
+              <li>Policy com PR obrigatorio validada em sucesso e rejeicao.</li>
+              <li>UI mostra toda evidencia sem abrir JSON bruto.</li>
+              <li>Chaos suite cobre ownership, stale execution e concorrencia.</li>
+              <li>CI roda os checks reais do app e do runner.</li>
+              <li>Runner tem binario versionado e reporta versao/commit no heartbeat.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Contrato esperado</div>
+            <h2>Forma minima da evidencia</h2>
+          </div>
+          <p>
+            A ideia nao e prender o agent em burocracia; e garantir que o kernel consiga decidir
+            com fatos quando uma run pode ou nao avancar.
+          </p>
+        </div>
+
+        <pre class="codeblock"><code>{
+  "schemaVersion": "v1",
+  "status": "success",
+  "checksRun": [
+    { "name": "npm run test -- src/...spec.ts --run", "status": "passed", "details": null },
+    { "name": "npm run typecheck", "status": "passed", "details": null }
+  ],
+  "filesTouched": ["src/..."],
+  "git": {
+    "mode": "branch_only",
+    "baseBranch": "main",
+    "branch": "agent/codex-updated-runner-smoke/task-flxo-388-runner-semantic-git-links-validation-...",
+    "commitShas": ["de8f96689fe0a1a3b1ed30429693b3f62c0d6ef3"],
+    "links": {
+      "repository": "https://github.com/Guilherme11gr/fluxo",
+      "branch": "https://github.com/Guilherme11gr/fluxo/tree/...",
+      "compare": "https://github.com/Guilherme11gr/fluxo/compare/...",
+      "commits": ["https://github.com/Guilherme11gr/fluxo/commit/..."]
+    }
+  },
+  "evidence": {
+    "artifact": { "hasVerifiableDelta": true, "changedFiles": ["src/..."] },
+    "qa": { "passed": true, "required": true, "checksRun": ["npm run test ...", "npm run typecheck"] }
+  }
+}</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

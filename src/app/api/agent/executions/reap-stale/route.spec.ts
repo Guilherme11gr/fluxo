@@ -5,13 +5,13 @@ const {
   mockFindActiveByOrg,
   mockMarkStaleAsTimeout,
   mockDeleteExpired,
-  mockUpdateTask,
+  mockRequeueStaleExecution,
 } = vi.hoisted(() => ({
   mockExtractAgentAuth: vi.fn(),
   mockFindActiveByOrg: vi.fn(),
   mockMarkStaleAsTimeout: vi.fn(),
   mockDeleteExpired: vi.fn(),
-  mockUpdateTask: vi.fn(),
+  mockRequeueStaleExecution: vi.fn(),
 }));
 
 vi.mock('@/shared/http/agent-auth', () => ({
@@ -26,13 +26,11 @@ vi.mock('@/infra/adapters/prisma', () => ({
   executionLeaseRepository: {
     deleteExpired: mockDeleteExpired,
   },
-  taskRepository: {},
+  taskRepository: {
+    requeueStaleExecution: mockRequeueStaleExecution,
+  },
   auditLogRepository: {},
   agentRepository: {},
-}));
-
-vi.mock('@/domain/use-cases/tasks/update-task', () => ({
-  updateTask: mockUpdateTask,
 }));
 
 import { POST } from './route';
@@ -58,7 +56,7 @@ describe('POST /api/agent/executions/reap-stale', () => {
     ]);
     mockMarkStaleAsTimeout.mockResolvedValue(1);
     mockDeleteExpired.mockResolvedValue(1);
-    mockUpdateTask.mockResolvedValue({ id: 'task-1' });
+    mockRequeueStaleExecution.mockResolvedValue(true);
   });
 
   it('requeues stale tasks without leaving them blocked', async () => {
@@ -71,20 +69,10 @@ describe('POST /api/agent/executions/reap-stale', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mockUpdateTask).toHaveBeenCalledWith(
+    expect(mockRequeueStaleExecution).toHaveBeenCalledWith(
       'task-1',
       'org-1',
-      'user-1',
-      {
-        blocked: false,
-        blockReason: null,
-        status: 'TODO',
-      },
-      expect.any(Object),
-      expect.objectContaining({
-        source: 'agent',
-        agentName: 'runner',
-      })
+      'exec-1',
     );
   });
 });

@@ -472,6 +472,7 @@ model Task {
   points          Int?
   assigneeId      String?             @map("assignee_id") @db.Uuid
   assigneeAgentId String?             @map("assignee_agent_id") @db.Uuid
+  currentExecutionId String?          @unique(map: "uq_tasks_current_execution") @map("current_execution_id") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   modules         String[]            @default([])
@@ -491,7 +492,8 @@ model Task {
   comments        Comment[]
   pokerSession    PokerSession?
   tagAssignments  TaskTagAssignment[]
-  executions      AgentExecution[]
+  currentExecution AgentExecution?    @relation("TaskCurrentExecution", fields: [currentExecutionId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  executions      AgentExecution[]    @relation("TaskExecutions")
   memories        ProjectMemory[]
   assignee        users?              @relation("TaskAssignee", fields: [assigneeId], references: [id], onUpdate: NoAction)
   assigneeAgent   Agent?              @relation("TaskAssigneeAgent", fields: [assigneeAgentId], references: [id], onDelete: SetNull, onUpdate: NoAction)
@@ -1147,7 +1149,8 @@ model AgentExecution {
 
   agent           Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
   runnerInstance  RunnerInstance?  @relation(fields: [runnerInstanceId], references: [id], onDelete: SetNull)
-  task            Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  currentTask     Task?            @relation("TaskCurrentExecution")
+  task            Task             @relation("TaskExecutions", fields: [taskId], references: [id], onDelete: Cascade)
   project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   organization    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   memories        ProjectMemory[]

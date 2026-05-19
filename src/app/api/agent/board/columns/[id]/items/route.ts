@@ -1,6 +1,6 @@
 /**
  * Agent API - Board Items
- * 
+ *
  * POST /api/agent/board/columns/:columnId/items - Create a new item
  */
 

@@ -1,6 +1,6 @@
 /**
  * Agent API - Board Columns
- * 
+ *
  * POST /api/agent/board/columns - Create a new column
  */
 

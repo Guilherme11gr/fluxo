@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
  * JT-Kill MCP Server
- * 
+ *
  * Model Context Protocol server for the JT-Kill Agent API.
  * Provides 35 tools for complete task management automation.
- * 
+ *
  * Usage:
  *   AGENT_API_KEY=agk_xxx node dist/index.js
- * 
+ *
  * Or add to Claude Desktop config:
  *   {
  *     "mcpServers": {
@@ -45,7 +45,7 @@ const DEFAULT_AGENT_API_URL = 'http://localhost:3005/api/agent';
 function validateEnv(): void {
   const required = ['AGENT_API_KEY'];
   const missing = required.filter((key) => !process.env[key]);
-  
+
   if (missing.length > 0) {
     console.error(`❌ Missing required environment variables: ${missing.join(', ')}`);
     console.error(`
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   // --------------------------------------------------------
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    
+
     const handler = TOOL_HANDLERS[name];
     if (!handler) {
       return {
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
   // --------------------------------------------------------
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  
+
   console.error('🚀 JT-Kill MCP Server started');
   console.error(`📡 API: ${process.env.AGENT_API_URL || DEFAULT_AGENT_API_URL}`);
   console.error(`🔑 Key: ${process.env.AGENT_API_KEY?.substring(0, 12)}...`);

@@ -1,6 +1,6 @@
 /**
  * Agent API - Task by ID
- * 
+ *
  * GET /api/agent/tasks/:id - Get task by ID
  * PATCH /api/agent/tasks/:id - Update task
  * DELETE /api/agent/tasks/:id - Delete task
@@ -10,7 +10,13 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentSuccess, agentError, handleAgentError } from '@/shared/http/agent-responses';
-import { taskRepository, taskTagRepository, auditLogRepository, agentRepository } from '@/infra/adapters/prisma';
+import {
+  agentExecutionRepository,
+  taskRepository,
+  taskTagRepository,
+  auditLogRepository,
+  agentRepository,
+} from '@/infra/adapters/prisma';
 import { updateTask } from '@/domain/use-cases/tasks/update-task';
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +55,7 @@ const agentMetadataSchema = z.object({
 }).optional();
 
 const updateTaskSchema = z.object({
+  expectedExecutionId: z.string().min(1).optional(),
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   type: z.enum(['TASK', 'BUG']).optional(),
@@ -86,10 +93,43 @@ export async function PATCH(
     // Extract metadata before filtering
     const agentMetadata = parsed.data._metadata;
     const tagIds = parsed.data.tagIds;
+    const expectedExecutionId = parsed.data.expectedExecutionId;
+
+    const existingTask = await taskRepository.findById(id, orgId);
+    if (!existingTask) {
+      return agentError('NOT_FOUND', 'Task not found', 404);
+    }
+
+    if (existingTask.currentExecutionId) {
+      if (!expectedExecutionId) {
+        return agentError(
+          'EXECUTION_EXPECTED',
+          'expectedExecutionId is required while this task is owned by an active execution',
+          409
+        );
+      }
+
+      if (existingTask.currentExecutionId !== expectedExecutionId) {
+        return agentError('EXECUTION_NOT_CURRENT', 'Execution is not the current owner of this task', 409);
+      }
+    }
+
+    if (expectedExecutionId) {
+      const execution = await agentExecutionRepository.findById(expectedExecutionId);
+      if (!execution || execution.orgId !== orgId || execution.taskId !== id) {
+        return agentError('EXECUTION_MISMATCH', 'expectedExecutionId does not belong to this task', 409);
+      }
+
+      if (!['CLAIMED', 'RUNNING'].includes(execution.status)) {
+        return agentError('EXECUTION_NOT_ACTIVE', 'expectedExecutionId is not an active execution', 409);
+      }
+    }
 
     // Filter out undefined values, _metadata, and tagIds
     const updateData = Object.fromEntries(
-      Object.entries(parsed.data).filter(([k, v]) => k !== '_metadata' && k !== 'tagIds' && v !== undefined)
+      Object.entries(parsed.data).filter(
+        ([k, v]) => !['_metadata', 'tagIds', 'expectedExecutionId'].includes(k) && v !== undefined
+      )
     );
 
     // Handle tag assignment FIRST (validate before updating task fields)
@@ -101,7 +141,7 @@ export async function PATCH(
     // Update task fields (if any non-tag fields provided)
     let updated;
     if (Object.keys(updateData).length > 0) {
-      updated = await updateTask(id, orgId, userId, updateData, { 
+      updated = await updateTask(id, orgId, userId, updateData, {
         taskRepository,
         auditLogRepository,
         agentRepository,

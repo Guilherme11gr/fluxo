@@ -1,0 +1,1659 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FluXo Runner Architecture Map</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111211;
+        --panel: #191b1a;
+        --panel-2: #202321;
+        --panel-3: #262a27;
+        --line: #394038;
+        --line-strong: #5b675b;
+        --text: #f0eee5;
+        --muted: #b8b5a8;
+        --quiet: #87867b;
+        --amber: #f0b94a;
+        --cyan: #65c7d0;
+        --green: #85bd72;
+        --red: #e46d63;
+        --blue: #7aa8e8;
+        --rose: #de7f95;
+        --ink: #0d0e0d;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(90deg, rgba(240, 185, 74, 0.035) 1px, transparent 1px) 0 0 / 42px 42px,
+          linear-gradient(rgba(101, 199, 208, 0.03) 1px, transparent 1px) 0 0 / 42px 42px,
+          radial-gradient(circle at 12% 0%, rgba(240, 185, 74, 0.09), transparent 32rem),
+          radial-gradient(circle at 96% 12%, rgba(101, 199, 208, 0.08), transparent 30rem),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          "Aptos",
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.45;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .page {
+        width: min(1480px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 34px 0 64px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 28px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+      }
+
+      .mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        color: var(--text);
+      }
+
+      .mark::before {
+        content: "";
+        width: 28px;
+        height: 28px;
+        border: 1px solid rgba(240, 185, 74, 0.65);
+        background:
+          linear-gradient(135deg, rgba(240, 185, 74, 0.95) 0 48%, transparent 49%),
+          linear-gradient(315deg, rgba(101, 199, 208, 0.9) 0 40%, transparent 41%),
+          var(--panel);
+        box-shadow: 0 0 0 5px rgba(240, 185, 74, 0.08);
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .nav a {
+        border: 1px solid var(--line);
+        padding: 7px 10px;
+        text-decoration: none;
+        background: rgba(25, 27, 26, 0.72);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+        gap: 22px;
+        align-items: stretch;
+      }
+
+      .hero-copy {
+        min-height: 360px;
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 38%),
+          linear-gradient(180deg, rgba(25, 27, 26, 0.94), rgba(20, 22, 21, 0.96));
+        box-shadow: var(--shadow);
+        padding: clamp(24px, 4vw, 54px);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero-copy::after {
+        content: "";
+        position: absolute;
+        inset: auto 34px 30px auto;
+        width: 160px;
+        height: 160px;
+        border: 1px solid rgba(101, 199, 208, 0.28);
+        background:
+          linear-gradient(90deg, transparent 48%, rgba(101, 199, 208, 0.2) 49% 51%, transparent 52%),
+          linear-gradient(transparent 48%, rgba(101, 199, 208, 0.2) 49% 51%, transparent 52%);
+        opacity: 0.45;
+        transform: rotate(8deg);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        color: var(--amber);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 28px;
+        height: 2px;
+        background: var(--amber);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 900px;
+        margin: 26px 0 22px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(44px, 7vw, 106px);
+        line-height: 0.88;
+        letter-spacing: -0.03em;
+      }
+
+      h2 {
+        margin-bottom: 18px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(28px, 4vw, 52px);
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+
+      h3 {
+        margin-bottom: 10px;
+        font-size: 16px;
+      }
+
+      .lede {
+        max-width: 740px;
+        margin-bottom: 32px;
+        color: var(--muted);
+        font-size: clamp(17px, 1.8vw, 22px);
+      }
+
+      .callout {
+        display: grid;
+        gap: 10px;
+        border-left: 4px solid var(--amber);
+        padding: 16px 18px;
+        background: rgba(240, 185, 74, 0.08);
+        color: var(--text);
+        max-width: 760px;
+        position: relative;
+        z-index: 1;
+      }
+
+      .callout strong {
+        color: var(--amber);
+      }
+
+      .legend-panel {
+        border: 1px solid var(--line);
+        background: rgba(25, 27, 26, 0.92);
+        box-shadow: var(--shadow);
+        padding: 22px;
+        display: grid;
+        align-content: space-between;
+        gap: 18px;
+      }
+
+      .truth-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .truth-mini {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 16px;
+        min-height: 116px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .truth-mini::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 5px;
+        background: var(--truth-color);
+      }
+
+      .truth-mini h3 {
+        margin-left: 4px;
+        color: var(--text);
+      }
+
+      .truth-mini p {
+        margin: 0 0 0 4px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .truth-protocol {
+        --truth-color: var(--cyan);
+      }
+
+      .truth-artifact {
+        --truth-color: var(--green);
+      }
+
+      .truth-workflow {
+        --truth-color: var(--amber);
+      }
+
+      .section {
+        margin-top: 28px;
+        border: 1px solid var(--line);
+        background: rgba(25, 27, 26, 0.9);
+        box-shadow: var(--shadow);
+        padding: clamp(20px, 3vw, 34px);
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 22px;
+      }
+
+      .section-head p {
+        max-width: 660px;
+        color: var(--muted);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        border: 1px solid var(--line-strong);
+        padding: 3px 8px;
+        color: var(--muted);
+        font-family:
+          "Cascadia Mono",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .topology {
+        display: grid;
+        grid-template-columns: 1.05fr 1.05fr 1fr;
+        gap: 16px;
+      }
+
+      .goal-system {
+        display: grid;
+        grid-template-columns: 0.9fr minmax(0, 1.35fr);
+        gap: 16px;
+        align-items: stretch;
+      }
+
+      .goal-brief {
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(122, 168, 232, 0.12), transparent 42%),
+          var(--panel-2);
+        padding: 18px;
+        display: grid;
+        align-content: start;
+        gap: 14px;
+      }
+
+      .goal-brief h3 {
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: 28px;
+        line-height: 1;
+      }
+
+      .goal-map {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr 1fr;
+        gap: 10px;
+      }
+
+      .goal-column {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        min-height: 390px;
+        padding: 14px;
+      }
+
+      .goal-column h3 {
+        min-height: 42px;
+        margin-bottom: 14px;
+        color: var(--text);
+      }
+
+      .goal-chip {
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        background: rgba(17, 18, 17, 0.72);
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .goal-chip strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .goal-chip span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .goal-chip.ceo {
+        border-left: 5px solid var(--blue);
+      }
+
+      .goal-chip.builder {
+        border-left: 5px solid var(--green);
+      }
+
+      .goal-chip.reviewer {
+        border-left: 5px solid var(--amber);
+      }
+
+      .goal-chip.qa {
+        border-left: 5px solid var(--cyan);
+      }
+
+      .goal-chip.guard {
+        border-left: 5px solid var(--red);
+      }
+
+      .qa-flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .qa-step {
+        min-height: 190px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 14px;
+        position: relative;
+      }
+
+      .qa-step::before {
+        content: attr(data-step);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        margin-bottom: 14px;
+        background: var(--cyan);
+        color: var(--ink);
+        font-weight: 900;
+        font-size: 12px;
+      }
+
+      .qa-step strong {
+        display: block;
+        margin-bottom: 7px;
+      }
+
+      .qa-step span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .qa-step.pass {
+        border-color: rgba(133, 189, 114, 0.45);
+      }
+
+      .qa-step.fail {
+        border-color: rgba(228, 109, 99, 0.45);
+      }
+
+      .principles {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .principle {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 16px;
+        min-height: 170px;
+      }
+
+      .principle b {
+        color: var(--rose);
+        font-family:
+          "Cascadia Mono",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        font-size: 12px;
+      }
+
+      .principle strong {
+        display: block;
+        margin: 12px 0 6px;
+      }
+
+      .principle span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .zone {
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 30%),
+          var(--panel-2);
+        min-height: 330px;
+        padding: 18px;
+        display: grid;
+        align-content: start;
+        gap: 12px;
+      }
+
+      .zone h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 4px;
+      }
+
+      .zone h3::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        background: var(--zone);
+      }
+
+      .zone-control {
+        --zone: var(--blue);
+      }
+
+      .zone-execution {
+        --zone: var(--cyan);
+      }
+
+      .zone-evidence {
+        --zone: var(--green);
+      }
+
+      .node {
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        background: rgba(17, 18, 17, 0.72);
+        padding: 14px;
+      }
+
+      .node strong {
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      .node span,
+      .node p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .node p {
+        margin-bottom: 0;
+      }
+
+      .node code,
+      .code {
+        font-family:
+          "Cascadia Mono",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        color: #dfe8db;
+      }
+
+      .arrow-strip {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(120px, 1fr));
+        gap: 8px;
+        align-items: stretch;
+      }
+
+      .step {
+        min-height: 138px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 13px;
+        position: relative;
+      }
+
+      .step::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: -10px;
+        width: 12px;
+        height: 12px;
+        border-top: 2px solid var(--line-strong);
+        border-right: 2px solid var(--line-strong);
+        transform: translateY(-50%) rotate(45deg);
+        background: var(--bg);
+        z-index: 2;
+      }
+
+      .step:last-child::after {
+        display: none;
+      }
+
+      .step b {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 25px;
+        height: 25px;
+        margin-bottom: 10px;
+        background: var(--amber);
+        color: var(--ink);
+        font-size: 13px;
+      }
+
+      .step strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .step span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+      }
+
+      .truth-card {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        min-height: 270px;
+        padding: 18px;
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      .truth-card h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 18px;
+      }
+
+      .truth-card h3::before {
+        content: "";
+        width: 12px;
+        height: 12px;
+        background: var(--truth);
+        box-shadow: 0 0 0 5px color-mix(in srgb, var(--truth) 15%, transparent);
+      }
+
+      .truth-card.protocol {
+        --truth: var(--cyan);
+      }
+
+      .truth-card.artifact {
+        --truth: var(--green);
+      }
+
+      .truth-card.workflow {
+        --truth: var(--amber);
+      }
+
+      .truth-card.recovery {
+        --truth: var(--red);
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      li {
+        margin: 7px 0;
+        color: var(--muted);
+      }
+
+      li strong {
+        color: var(--text);
+      }
+
+      .matrix {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 860px;
+        background: var(--panel-2);
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+        padding: 13px 14px;
+        vertical-align: top;
+        text-align: left;
+        font-size: 14px;
+      }
+
+      th {
+        color: var(--text);
+        background: var(--panel-3);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      td {
+        color: var(--muted);
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 0;
+      }
+
+      .lane-board {
+        display: grid;
+        grid-template-columns: 190px repeat(5, minmax(160px, 1fr));
+        border: 1px solid var(--line);
+        overflow-x: auto;
+      }
+
+      .lane-head,
+      .lane-cell,
+      .lane-label {
+        min-height: 96px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 13px;
+      }
+
+      .lane-head {
+        min-height: 54px;
+        background: var(--panel-3);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .lane-label {
+        background: rgba(122, 168, 232, 0.08);
+        color: var(--text);
+        font-weight: 800;
+      }
+
+      .lane-cell {
+        background: var(--panel-2);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .lane-cell strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text);
+      }
+
+      .lane-board > :nth-last-child(-n + 6) {
+        border-bottom: 0;
+      }
+
+      .lane-board > :nth-child(6n) {
+        border-right: 0;
+      }
+
+      .reference-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .reference {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 18px;
+        min-height: 250px;
+      }
+
+      .reference h3 {
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: 26px;
+        margin-bottom: 12px;
+      }
+
+      .reference.paperclip {
+        border-top: 5px solid var(--amber);
+      }
+
+      .reference.hermes {
+        border-top: 5px solid var(--cyan);
+      }
+
+      .reference.fluxo {
+        border-top: 5px solid var(--green);
+      }
+
+      .sequence {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(140px, 1fr));
+        gap: 10px;
+      }
+
+      .sequence-card {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        min-height: 170px;
+        padding: 14px;
+        position: relative;
+      }
+
+      .sequence-card b {
+        display: block;
+        color: var(--amber);
+        font-family:
+          "Cascadia Mono",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        margin-bottom: 16px;
+      }
+
+      .sequence-card strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .sequence-card span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .danger {
+        border-color: rgba(228, 109, 99, 0.45);
+        background:
+          linear-gradient(135deg, rgba(228, 109, 99, 0.12), transparent 40%),
+          var(--panel-2);
+      }
+
+      .ok {
+        border-color: rgba(133, 189, 114, 0.45);
+        background:
+          linear-gradient(135deg, rgba(133, 189, 114, 0.11), transparent 40%),
+          var(--panel-2);
+      }
+
+      .note {
+        color: var(--quiet);
+        font-size: 12px;
+      }
+
+      .footer {
+        margin-top: 28px;
+        color: var(--quiet);
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      @media (max-width: 1160px) {
+        .hero,
+        .topology,
+        .goal-system,
+        .split,
+        .reference-grid,
+        .principles {
+          grid-template-columns: 1fr;
+        }
+
+        .arrow-strip,
+        .sequence,
+        .qa-flow {
+          overflow-x: auto;
+          grid-template-columns: repeat(7, 190px);
+          padding-bottom: 4px;
+        }
+
+        .sequence {
+          grid-template-columns: repeat(8, 190px);
+        }
+
+        .goal-map {
+          grid-template-columns: 1fr;
+        }
+
+        .qa-flow {
+          grid-template-columns: repeat(5, 190px);
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          width: min(100% - 24px, 1480px);
+          padding-top: 18px;
+        }
+
+        .topbar,
+        .section-head {
+          display: grid;
+          justify-content: stretch;
+        }
+
+        .nav {
+          justify-content: flex-start;
+        }
+
+        .hero-copy,
+        .legend-panel,
+        .section {
+          padding: 18px;
+        }
+
+        h1 {
+          font-size: clamp(42px, 16vw, 70px);
+        }
+
+        .lane-board {
+          grid-template-columns: 150px repeat(5, 170px);
+        }
+      }
+
+      @media print {
+        body {
+          background: #fff;
+          color: #111;
+        }
+
+        .page {
+          width: 100%;
+          padding: 0;
+        }
+
+        .nav,
+        .hero-copy::after,
+        .step::after {
+          display: none;
+        }
+
+        .hero,
+        .topology,
+        .goal-system,
+        .goal-map,
+        .split,
+        .reference-grid,
+        .principles,
+        .sequence,
+        .qa-flow {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-copy,
+        .legend-panel,
+        .section,
+        .zone,
+        .node,
+        .truth-card,
+        .goal-brief,
+        .goal-column,
+        .goal-chip,
+        .qa-step,
+        .principle,
+        .reference,
+        .sequence-card {
+          box-shadow: none;
+          break-inside: avoid;
+          background: #fff;
+          color: #111;
+        }
+
+        p,
+        li,
+        td,
+        .node span,
+        .lane-cell,
+        .sequence-card span {
+          color: #333;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="mark">FluXo Runner Architecture Map</div>
+        <nav class="nav" aria-label="Seções">
+          <a href="#topologia">Topologia</a>
+          <a href="#goals">Goals</a>
+          <a href="#fluxo">Fluxo</a>
+          <a href="#verdades">3 verdades</a>
+          <a href="#qa">QA runner</a>
+          <a href="#swimlane">Swimlane</a>
+          <a href="#referencias">Referências</a>
+          <a href="#qualidade">Qualidade</a>
+          <a href="#sequencia">Roadmap</a>
+          <a href="runner-architecture-implementation-plan.html">Plano técnico</a>
+        </nav>
+      </header>
+
+      <section class="hero" aria-labelledby="title">
+        <div class="hero-copy">
+          <span class="eyebrow">Norte arquitetural</span>
+          <h1 id="title">Runner como plano de execução verificável</h1>
+          <p class="lede">
+            O Project Manager organiza trabalho, prioridade e workflow. O runner executa em worktree,
+            coleta evidência objetiva e devolve uma transição validada. A fronteira crítica é simples:
+            nenhum agente, nem mesmo um orquestrador de feature, deve conseguir transformar narrativa
+            em sucesso sem protocolo, artefato e destino de workflow.
+          </p>
+          <div class="callout">
+            <strong>Regra de ouro</strong>
+            <span>
+              Para task de escrita, <span class="code">SUCCESS</span> só existe quando a execução dona
+              da task produziu delta git durável e escolheu uma disposição de workflow válida.
+            </span>
+          </div>
+        </div>
+
+        <aside class="legend-panel" aria-label="Resumo das verdades">
+          <div>
+            <span class="eyebrow">Modelo alvo</span>
+            <h2>Três verdades, uma decisão</h2>
+          </div>
+          <div class="truth-stack">
+            <article class="truth-mini truth-protocol">
+              <h3>1. Protocol truth</h3>
+              <p>A execução atual é dona do lifecycle. Exit code, texto final e processo filho não são autoridade suficiente.</p>
+            </article>
+            <article class="truth-mini truth-artifact">
+              <h3>2. Artifact truth</h3>
+              <p>O git precisa provar entrega: baseline, HEAD final, commits novos e delta verificável.</p>
+            </article>
+            <article class="truth-mini truth-workflow">
+              <h3>3. Workflow truth</h3>
+              <p>A task termina em destino válido: review, QA, done, blocked ou continuação explícita.</p>
+            </article>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section" id="topologia">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Topologia</span>
+            <h2>Quem é dono de cada coisa</h2>
+          </div>
+          <p>
+            A arquitetura fica mais fácil quando o web app é tratado como control plane e o runner como
+            execution plane. O erro perigoso é deixar o execution plane decidir sozinho que uma task
+            terminou, ou deixar o control plane aceitar conclusão sem evidência.
+          </p>
+        </div>
+
+        <div class="topology">
+          <article class="zone zone-control">
+            <h3>Project Manager / Web</h3>
+            <div class="node">
+              <strong>Fonte de workflow</strong>
+              <span>Projeto, feature, task, status, assignee, stage e próximo dono.</span>
+            </div>
+            <div class="node">
+              <strong>Agent API</strong>
+              <span><span class="code">claim-next</span>, heartbeat, events, comments e <span class="code">/finalize</span>.</span>
+            </div>
+            <div class="node">
+              <strong>Policy guard</strong>
+              <span>Valida quem pode mover estado, com qual execution e com qual evidência.</span>
+            </div>
+          </article>
+
+          <article class="zone zone-execution">
+            <h3>Runner / Execution Plane</h3>
+            <div class="node">
+              <strong>Claim + lease</strong>
+              <span>Recebe task, execution, runtime binding, memória e execução anterior.</span>
+            </div>
+            <div class="node">
+              <strong>Worktree por execução</strong>
+              <span>Isola branch, HEAD inicial, alterações e commit workflow.</span>
+            </div>
+            <div class="node">
+              <strong>Executor adapter</strong>
+              <span>OpenCode, Claude, Codex ou outro agente; produz logs e output contract.</span>
+            </div>
+          </article>
+
+          <article class="zone zone-evidence">
+            <h3>Evidence / Audit</h3>
+            <div class="node">
+              <strong>Git snapshot</strong>
+              <span><span class="code">baselineHeadSha</span>, <span class="code">finalHeadSha</span>, arquivos e commits novos.</span>
+            </div>
+            <div class="node">
+              <strong>Run facts</strong>
+              <span>Exit code, duração, checks, stdout/stderr excerpts, eventos e logs completos.</span>
+            </div>
+            <div class="node">
+              <strong>Handoff estruturado</strong>
+              <span>Resumo humano + fatos objetivos persistidos na execution, não só em comentário.</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="goals">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Orquestração</span>
+            <h2>Feature goal run, não empresa infinita</h2>
+          </div>
+          <p>
+            A unidade mais estável para autonomia não parece ser “um time de agentes trabalhando para
+            sempre”. Parece ser uma run limitada por feature: ela planeja, dispara task runs, observa
+            evidência e para quando a definição de pronto da feature foi atingida ou quando precisa de humano.
+          </p>
+        </div>
+
+        <div class="goal-system">
+          <aside class="goal-brief">
+            <h3>CEO agent como maestro de goal</h3>
+            <p>
+              O nome “CEO” funciona como metáfora operacional, mas a permissão dele precisa ser estreita:
+              ele coordena a feature, não escreve código sem trilha, não aprova QA sozinho e não fica
+              criando trabalho novo para parecer produtivo.
+            </p>
+            <div class="callout">
+              <strong>Limite saudável</strong>
+              <span>
+                Toda feature run nasce com escopo, budget, critérios de parada, política de risco e
+                definition of done. Quando faltar evidência, ela bloqueia ou pede humano.
+              </span>
+            </div>
+          </aside>
+
+          <div class="goal-map" aria-label="Modelo de feature goal run">
+            <article class="goal-column">
+              <h3>Feature goal</h3>
+              <div class="goal-chip ceo">
+                <strong>FeatureRun</strong>
+                <span>Run de orquestração para uma feature específica, com deadline, budget e outcome esperado.</span>
+              </div>
+              <div class="goal-chip ceo">
+                <strong>CEO / Orchestrator</strong>
+                <span>Quebra trabalho, escolhe próximo agente, interpreta bloqueios e mantém a feature coerente.</span>
+              </div>
+              <div class="goal-chip guard">
+                <strong>Stop conditions</strong>
+                <span>Sem evidência, loop repetido, risco alto, escopo mudando ou custo estourado.</span>
+              </div>
+            </article>
+
+            <article class="goal-column">
+              <h3>Task attempts</h3>
+              <div class="goal-chip builder">
+                <strong>Builder run</strong>
+                <span>Executa uma task de escrita e só entrega com artifact truth.</span>
+              </div>
+              <div class="goal-chip reviewer">
+                <strong>Reviewer run</strong>
+                <span>Revisa contra evidência do builder e política de stage.</span>
+              </div>
+              <div class="goal-chip qa">
+                <strong>QA browser run</strong>
+                <span>Executa QA real via Chrome DevTools MCP ou browser automation, com screenshots, traces e resultado.</span>
+              </div>
+              <div class="goal-chip guard">
+                <strong>Recovery run</strong>
+                <span>Repara disposição faltante e inconsistências, sem fingir entrega.</span>
+              </div>
+            </article>
+
+            <article class="goal-column">
+              <h3>Feature disposition</h3>
+              <div class="goal-chip guard">
+                <strong>Blocked</strong>
+                <span>Precisa de humano, credencial, ambiente ou decisão de produto.</span>
+              </div>
+              <div class="goal-chip reviewer">
+                <strong>Needs changes</strong>
+                <span>Retorna para task run com comentário estruturado e evidência do problema.</span>
+              </div>
+              <div class="goal-chip qa">
+                <strong>QA passed</strong>
+                <span>QA run anexa evidência navegável e autoriza transição para done.</span>
+              </div>
+              <div class="goal-chip builder">
+                <strong>Done</strong>
+                <span>Feature fechada só quando tasks críticas estão done e a definition of done passou.</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="fluxo">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Fluxo principal</span>
+            <h2>Do card ao finalize</h2>
+          </div>
+          <span class="tag">happy path com hard gates</span>
+        </div>
+
+        <div class="arrow-strip" aria-label="Fluxo de execução">
+          <article class="step">
+            <b>1</b>
+            <strong>Feature goal nasce no PM</strong>
+            <span>Feature recebe escopo, definition of done, budget e política de risco.</span>
+          </article>
+          <article class="step">
+            <b>2</b>
+            <strong>Orchestrator agenda task</strong>
+            <span>CEO limitado escolhe a próxima task run sem pular policy de workflow.</span>
+          </article>
+          <article class="step">
+            <b>3</b>
+            <strong>Agent faz claim</strong>
+            <span><span class="code">claim-next</span> cria execution, lease e ownership operacional.</span>
+          </article>
+          <article class="step">
+            <b>4</b>
+            <strong>Runner executa</strong>
+            <span>Prepara worktree, roda agente, coleta logs e output contract.</span>
+          </article>
+          <article class="step">
+            <b>5</b>
+            <strong>Runner mede realidade</strong>
+            <span>Git snapshot final, commits novos, changed files, checks e excerpts.</span>
+          </article>
+          <article class="step">
+            <b>6</b>
+            <strong>Finalize valida</strong>
+            <span>API cruza protocolo, artefato e workflow antes de persistir sucesso.</span>
+          </article>
+          <article class="step">
+            <b>7</b>
+            <strong>Workflow avança</strong>
+            <span>Vai para review, QA real, done, blocked ou recovery com notice estruturado.</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="verdades">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Hardening</span>
+            <h2>O contrato que fecha falso sucesso</h2>
+          </div>
+          <p>
+            O runner pode continuar usando texto do agente como explicação, mas não como autoridade.
+            Autoridade vem de invariantes verificáveis.
+          </p>
+        </div>
+
+        <div class="split">
+          <article class="truth-card protocol">
+            <h3>Protocol truth</h3>
+            <ul>
+              <li><strong>currentExecutionId</strong> fica preso na task enquanto a run está ativa.</li>
+              <li><strong>expectedExecutionId</strong> é obrigatório em heartbeat, comment final, finalize e stage move.</li>
+              <li><strong>Exit code 0</strong> não encerra task; só uma transição terminal explícita encerra.</li>
+              <li><strong>Run velha</strong> não pode fechar task depois de timeout, reclaim ou nova execução.</li>
+            </ul>
+          </article>
+
+          <article class="truth-card artifact">
+            <h3>Artifact truth</h3>
+            <ul>
+              <li><strong>baselineHeadSha</strong> aponta o HEAD antes da execução.</li>
+              <li><strong>finalHeadSha</strong> aponta o HEAD validado no encerramento.</li>
+              <li><strong>newCommitShas</strong> precisa conter commits gerados pela execução.</li>
+              <li><strong>changedFiles</strong> é diagnóstico; sozinho não autoriza <span class="code">SUCCESS</span>.</li>
+              <li><strong>hasVerifiableDelta</strong> é o bit explícito para write tasks.</li>
+            </ul>
+          </article>
+
+          <article class="truth-card workflow">
+            <h3>Workflow truth</h3>
+            <ul>
+              <li><strong>Builder</strong> pode pedir review, bloquear ou continuar; não inventa aprovação.</li>
+              <li><strong>Reviewer</strong> pode aprovar/rejeitar, mas não inventa evidência ausente.</li>
+              <li><strong>System recovery</strong> corrige disposição faltante, não substitui entrega.</li>
+              <li><strong>Task sem destino</strong> vira inconsistente e entra em recovery.</li>
+            </ul>
+          </article>
+
+          <article class="truth-card recovery">
+            <h3>Recovery truth</h3>
+            <ul>
+              <li><strong>successful run missing disposition</strong> vira watchdog, não silêncio.</li>
+              <li><strong>Notice estruturado</strong> carrega source execution, evidência e ação requerida.</li>
+              <li><strong>Circuit breaker</strong> bloqueia thrash depois de falhas repetidas.</li>
+              <li><strong>Diagnostics</strong> apontam stale execution, missing evidence e reviewer path quebrado.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="qa">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">QA real</span>
+            <h2><span class="code">QA_READY</span> como fila, não como quase done</h2>
+          </div>
+          <p>
+            O status atual já ajuda: <span class="code">QA_READY</span> pode ser a fila que o QA runner
+            claima. A mudança conceitual é que <span class="code">DONE</span> deixa de ser o próximo
+            passo automático e vira uma decisão produzida por uma QA execution com evidência.
+          </p>
+        </div>
+
+        <div class="qa-flow" aria-label="Fluxo de QA runner">
+          <article class="qa-step" data-step="QA1">
+            <strong>Reviewer promove para QA</strong>
+            <span>
+              Reviewer só envia para <span class="code">QA_READY</span> quando existe evidência revisável:
+              commits, arquivos, summary, riscos e instruções de validação.
+            </span>
+          </article>
+          <article class="qa-step" data-step="QA2">
+            <strong>QA runner faz claim</strong>
+            <span>
+              Um agente com browser capability claima tasks em <span class="code">QA_READY</span> e cria
+              uma execution própria com <span class="code">expectedExecutionId</span>.
+            </span>
+          </article>
+          <article class="qa-step" data-step="QA3">
+            <strong>Browser evidence</strong>
+            <span>
+              Roda app, navega fluxos críticos, captura screenshots, console errors, network failures,
+              traces e passos executados via Chrome DevTools MCP ou browser automation.
+            </span>
+          </article>
+          <article class="qa-step pass" data-step="QA4">
+            <strong>Passou: vira DONE</strong>
+            <span>
+              Se os critérios passam, finalize usa <span class="code">nextStatus=DONE</span> e anexa
+              evidence pack da QA run.
+            </span>
+          </article>
+          <article class="qa-step fail" data-step="QA5">
+            <strong>Falhou: volta com handoff</strong>
+            <span>
+              Se falha, a task volta para <span class="code">REVIEW</span> ou <span class="code">DOING</span>
+              com bug notes, screenshots, repro steps e owner sugerido.
+            </span>
+          </article>
+        </div>
+
+        <div class="split" style="margin-top: 16px">
+          <article class="truth-card artifact">
+            <h3>Evidence pack de QA</h3>
+            <ul>
+              <li><strong>urlUnderTest</strong>, browser, viewport e ambiente.</li>
+              <li><strong>stepsRun</strong> com resultado por etapa.</li>
+              <li><strong>screenshots</strong> ou trace refs para auditoria humana.</li>
+              <li><strong>consoleErrors</strong> e network failures categorizados.</li>
+              <li><strong>acceptanceCriteria</strong> mapeados para pass/fail.</li>
+            </ul>
+          </article>
+          <article class="truth-card workflow">
+            <h3>Handoff quando falha</h3>
+            <ul>
+              <li><strong>Não marcar DONE</strong> quando QA detecta regressão.</li>
+              <li><strong>Voltar para REVIEW</strong> quando a dúvida é de qualidade/critério.</li>
+              <li><strong>Voltar para DOING</strong> quando há bug reproduzível de implementação.</li>
+              <li><strong>Bloquear</strong> quando falta ambiente, credencial ou decisão de produto.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="swimlane">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Swimlane</span>
+            <h2>Como o web conversa com o runner</h2>
+          </div>
+          <p>
+            A linha importante é onde a API deixa de ser só persistência e passa a ser kernel:
+            ela valida que a execution certa está tentando fazer a transição certa com evidência certa.
+          </p>
+        </div>
+
+        <div class="lane-board" role="table" aria-label="Swimlane de integração web runner">
+          <div class="lane-head">Ator</div>
+          <div class="lane-head">Claim</div>
+          <div class="lane-head">Execução</div>
+          <div class="lane-head">Evidência</div>
+          <div class="lane-head">Finalize</div>
+          <div class="lane-head">Depois</div>
+
+          <div class="lane-label">Project Manager</div>
+          <div class="lane-cell"><strong>Seleciona trabalho</strong>Prioridade, status, assignee, feature lock e política de escrita.</div>
+          <div class="lane-cell">Mostra progresso, eventos e comentários para humanos.</div>
+          <div class="lane-cell">Exibe arquivos, commits, checks e riscos sem tratar texto como prova.</div>
+          <div class="lane-cell">Só reflete transição aceita pelo backend.</div>
+          <div class="lane-cell">Mostra review, QA, blocked, done ou recovery owner.</div>
+
+          <div class="lane-label">Agent API</div>
+          <div class="lane-cell"><strong><span class="code">claim-next</span></strong>Cria execution e prende ownership.</div>
+          <div class="lane-cell">Recebe heartbeat/eventos com <span class="code">expectedExecutionId</span>.</div>
+          <div class="lane-cell">Recebe facts objetivos do runner, logs e snapshots.</div>
+          <div class="lane-cell"><strong>Kernel gate</strong>Valida protocolo, artefato e workflow.</div>
+          <div class="lane-cell">Emite comments, events, notices e possível wake/recovery.</div>
+
+          <div class="lane-label">Runner</div>
+          <div class="lane-cell">Recebe task, execution, binding, previous execution e memory.</div>
+          <div class="lane-cell"><strong>Executa em worktree</strong>Agent adapter trabalha com branch e isolamento.</div>
+          <div class="lane-cell">Calcula delta real e prepara payload final.</div>
+          <div class="lane-cell">Chama <span class="code">/finalize</span> com status desejado e evidência.</div>
+          <div class="lane-cell">Se negado, registra falha/retry em vez de fingir sucesso.</div>
+
+          <div class="lane-label">Git / Repo</div>
+          <div class="lane-cell">Base branch e policy definem o chão permitido.</div>
+          <div class="lane-cell">Alterações acontecem no worktree de execução.</div>
+          <div class="lane-cell"><strong>Fonte canônica para write</strong>Commits novos e HEAD final.</div>
+          <div class="lane-cell">Sem delta durável, write task não vira success.</div>
+          <div class="lane-cell">Branch/PR/review seguem com rastreabilidade.</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Matriz</span>
+            <h2>Decisão por tipo de execução</h2>
+          </div>
+          <span class="tag">primeiro corte de policy</span>
+        </div>
+
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Protocol truth</th>
+                <th>Artifact truth</th>
+                <th>Workflow truth</th>
+                <th>Resultado permitido</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Feature orchestrator</strong></td>
+                <td>FeatureRun atual, budget válido e plano de task runs auditável.</td>
+                <td>Não produz artefato diretamente; exige evidência das task runs que coordena.</td>
+                <td>Pode criar/ordenar runs e bloquear feature, mas não pular review/QA.</td>
+                <td>Coordenação limitada por goal, não autonomia contínua sem critério de parada.</td>
+              </tr>
+              <tr>
+                <td><strong>Builder write</strong></td>
+                <td>Execution atual, lease válido, terminal transition explícita.</td>
+                <td><span class="code">hasVerifiableDelta=true</span> com commits novos.</td>
+                <td>Review, QA, blocked ou continuação explícita.</td>
+                <td><span class="code">SUCCESS</span> só se as três verdades passam.</td>
+              </tr>
+              <tr>
+                <td><strong>Reviewer</strong></td>
+                <td>Reviewer autorizado e execution atual.</td>
+                <td>Evidência revisável herdada do builder; não precisa criar commit.</td>
+                <td>Aprova, rejeita, pede changes ou bloqueia com razão.</td>
+                <td>Não promove para QA sem evidência revisável.</td>
+              </tr>
+              <tr>
+                <td><strong>QA browser runner</strong></td>
+                <td>Execution atual claimada a partir de <span class="code">QA_READY</span>.</td>
+                <td>Evidence pack de browser: screenshots, traces, console, network e critérios pass/fail.</td>
+                <td>Passa para <span class="code">DONE</span>, retorna para <span class="code">REVIEW/DOING</span> ou bloqueia.</td>
+                <td><span class="code">DONE</span> só depois de QA pass quando a feature exigir validação real.</td>
+              </tr>
+              <tr>
+                <td><strong>Research / no_write</strong></td>
+                <td>Execution atual e conclusão explícita.</td>
+                <td>Opcional; sources/output estruturado substituem delta git.</td>
+                <td>Done, blocked ou follow-up/delegation explícito.</td>
+                <td>Workflow truth basta quando a task não promete artefato git.</td>
+              </tr>
+              <tr>
+                <td><strong>System recovery</strong></td>
+                <td>Run de recovery identificada e idempotente.</td>
+                <td>Não cria prova de entrega; só aponta ausência ou recupera disposição.</td>
+                <td>Define próximo dono, bloqueia ou reabre caminho válido.</td>
+                <td>Corrige inconsistência, não mascara falso sucesso.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="referencias">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Referências</span>
+            <h2>O que copiar, adaptar e manter</h2>
+          </div>
+          <p>
+            Paperclip e Hermes não são concorrentes do desenho; são duas lentes maduras sobre o mesmo
+            problema. O FluXo deve absorver mecanismos, não importar a arquitetura inteira.
+          </p>
+        </div>
+
+        <div class="reference-grid">
+          <article class="reference paperclip">
+            <h3>Paperclip</h3>
+            <ul>
+              <li><strong>Copiar:</strong> signoff policy explícita e gates por papel.</li>
+              <li><strong>Copiar:</strong> recovery para run bem-sucedida sem disposição válida.</li>
+              <li><strong>Copiar:</strong> notices estruturados, run events, excerpts e logs completos.</li>
+              <li><strong>Adaptar:</strong> wakeup coordinator, coalescing, reason tracking e session state.</li>
+              <li><strong>Evitar:</strong> deixar workflow truth substituir artifact truth.</li>
+            </ul>
+          </article>
+
+          <article class="reference hermes">
+            <h3>Hermes Kanban</h3>
+            <ul>
+              <li><strong>Copiar:</strong> completion via protocolo, não por processo encerrado.</li>
+              <li><strong>Copiar:</strong> <span class="code">current_run_id</span> / <span class="code">expected_run_id</span>.</li>
+              <li><strong>Copiar:</strong> attempts first-class com outcome, summary, metadata e log.</li>
+              <li><strong>Adaptar:</strong> circuit breaker e diagnostics operacionais.</li>
+              <li><strong>Evitar:</strong> review-required como convenção textual e git evidence sem validação.</li>
+            </ul>
+          </article>
+
+          <article class="reference fluxo">
+            <h3>FluXo</h3>
+            <ul>
+              <li><strong>Manter:</strong> Project Manager como control plane central.</li>
+              <li><strong>Manter:</strong> claim-next atômico com task, execution, lease e contextos.</li>
+              <li><strong>Endurecer:</strong> git-aware execution virar critério de sucesso.</li>
+              <li><strong>Endurecer:</strong> reviewer ancorado em evidência, não narrativa.</li>
+              <li><strong>Adicionar:</strong> protocol truth como camada anterior ao artifact gate.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="qualidade">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Produto</span>
+            <h2>Autonomia estável, não fábrica de IA slop</h2>
+          </div>
+          <p>
+            A arquitetura precisa favorecer runs menores, evidência forte e paradas explícitas. O sistema
+            deve parecer mais um PM disciplinado com bons executores do que uma simulação de empresa que
+            trabalha o tempo todo porque consegue.
+          </p>
+        </div>
+
+        <div class="principles">
+          <article class="principle">
+            <b>01</b>
+            <strong>Goal bounded</strong>
+            <span>Feature run tem escopo e fim. Sem objetivo claro, o orquestrador não ganha trabalho novo.</span>
+          </article>
+          <article class="principle">
+            <b>02</b>
+            <strong>Evidence first</strong>
+            <span>Texto explica; evidência decide. Git, browser, checks e logs vencem narrativa bonita.</span>
+          </article>
+          <article class="principle">
+            <b>03</b>
+            <strong>Human interrupt</strong>
+            <span>Ambiguidade de produto, risco alto e repetição de falha viram bloqueio visível, não loop.</span>
+          </article>
+          <article class="principle">
+            <b>04</b>
+            <strong>Small loops</strong>
+            <span>Runs curtas e auditáveis ganham de mega-runs. Melhor várias tentativas legíveis do que uma epopeia opaca.</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="sequencia">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Implementação</span>
+            <h2>Sequência sugerida</h2>
+          </div>
+          <p>
+            A ordem é deliberada: primeiro impedir conclusão indevida, depois enriquecer recovery e
+            observabilidade. Recovery é excelente, mas não deve ser o primeiro freio.
+          </p>
+        </div>
+
+        <div class="sequence">
+          <article class="sequence-card danger">
+            <b>01</b>
+            <strong>Endurecer runner e <span class="code">/finalize</span></strong>
+            <span>Execution não vira sucesso só por exit code ou JSON plausível.</span>
+          </article>
+          <article class="sequence-card">
+            <b>02</b>
+            <strong>Adicionar ownership explícito</strong>
+            <span><span class="code">currentExecutionId</span> na task e <span class="code">expectedExecutionId</span> nas mutações.</span>
+          </article>
+          <article class="sequence-card ok">
+            <b>03</b>
+            <strong>Fechar contrato git evidence</strong>
+            <span>Baseline, HEAD final, commits novos, delta verificável e motivo quando ausente.</span>
+          </article>
+          <article class="sequence-card">
+            <b>04</b>
+            <strong>Modelar feature runs</strong>
+            <span>Goal, budget, stop conditions e orquestrador limitado por feature.</span>
+          </article>
+          <article class="sequence-card">
+            <b>05</b>
+            <strong>Reviewer gate</strong>
+            <span>Reviewer aprova/rejeita contra evidência herdada e policy de stage.</span>
+          </article>
+          <article class="sequence-card">
+            <b>06</b>
+            <strong>QA browser runner</strong>
+            <span><span class="code">QA_READY</span> vira fila claimable; <span class="code">DONE</span> exige evidence pack.</span>
+          </article>
+          <article class="sequence-card">
+            <b>07</b>
+            <strong>Watchdog e recovery</strong>
+            <span>Detecta successful run missing disposition e cria notice/action idempotente.</span>
+          </article>
+          <article class="sequence-card">
+            <b>08</b>
+            <strong>Observabilidade pesada</strong>
+            <span>Full logs, excerpts, run events, diagnostics, circuit breaker e review isolado.</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Definição curta</span>
+            <h2>Como explicar para o time</h2>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>Arquitetura alvo</strong>
+          <span>
+            O FluXo é um Project Manager com runs de feature e um runner git-aware. O web app guarda a
+            verdade do workflow; o orquestrador coordena goals limitados por feature; o runner executa
+            em isolamento e mede a verdade do artefato; o QA runner valida experiência real no browser;
+            a API de finalize age como kernel, aceitando transições somente da execução dona e somente
+            quando as evidências batem com a promessa da task.
+          </span>
+        </div>
+        <p class="note">
+          Documento visual derivado de <span class="code">runner-fluxo-vs-paperclip.md</span>,
+          <span class="code">runner-hardening-analysis.md</span> e das análises de Paperclip e Hermes Kanban.
+        </p>
+      </section>
+
+      <footer class="footer">
+        <span>FluXo / jt-kill architecture draft</span>
+        <span>Abra este arquivo direto no navegador; não precisa de dev server.</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 /**
  * Agent API - Board Item by ID
- * 
+ *
  * PATCH /api/agent/board/items/:id - Update an item
  * DELETE /api/agent/board/items/:id - Delete an item
  */

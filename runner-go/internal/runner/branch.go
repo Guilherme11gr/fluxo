@@ -8,12 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 const defaultBaseBranch = "main"
 
 var safeBranchRe = regexp.MustCompile(`[^a-zA-Z0-9/_\-]`)
+var safeBranchSegmentRe = regexp.MustCompile(`[^a-zA-Z0-9_\-]`)
 
 type GitPolicy string
 
@@ -94,6 +96,62 @@ func BuildBranchNameWithExecID(taskID, taskType, agentName, allowedPrefix, execI
 		name = strings.TrimRight(name[:128], "-")
 	}
 
+	return name
+}
+
+func BuildTaskBranchName(taskID, taskType, agentName, allowedPrefix string, localID int, projectKey, taskTitle string) string {
+	if localID <= 0 {
+		return BuildBranchName(taskID, taskType, agentName, allowedPrefix)
+	}
+
+	agentSlug := branchSegment(agentName, "agent")
+	typeSlug := branchSegment(taskType, "task")
+	projectSlug := branchSegment(projectKey, "")
+
+	readableID := strconv.Itoa(localID)
+	if projectSlug != "" {
+		readableID = projectSlug + "-" + readableID
+	}
+
+	titleSlug := branchSegment(taskTitle, "")
+	if len(titleSlug) > 56 {
+		titleSlug = strings.Trim(titleSlug[:56], "-")
+	}
+
+	leaf := typeSlug + "-" + readableID
+	if titleSlug != "" {
+		leaf += "-" + titleSlug
+	}
+
+	prefix := strings.Trim(strings.TrimSpace(allowedPrefix), "/")
+	var name string
+	if prefix != "" {
+		name = prefix + "/" + agentSlug + "/" + leaf
+	} else {
+		name = agentSlug + "/" + leaf
+	}
+
+	return normalizeBranchName(name)
+}
+
+func branchSegment(value, fallback string) string {
+	slug := safeBranchSegmentRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), "-")
+	slug = regexp.MustCompile(`-+`).ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		return fallback
+	}
+	return slug
+}
+
+func normalizeBranchName(name string) string {
+	name = safeBranchRe.ReplaceAllString(name, "-")
+	name = regexp.MustCompile(`-+`).ReplaceAllString(name, "-")
+	name = regexp.MustCompile(`/+`).ReplaceAllString(name, "/")
+	name = strings.Trim(name, "-/")
+	if len(name) > 128 {
+		name = strings.TrimRight(name[:128], "-/")
+	}
 	return name
 }
 
@@ -200,6 +258,10 @@ func CreateExecutionWorktree(baseRepoPath, worktreesRoot, executionID, baseBranc
 }
 
 func SwitchToTaskBranch(worktreePath, branch, baseBranch, allowedPrefix string) error {
+	return SwitchToTaskBranchFromRemote(worktreePath, branch, baseBranch, allowedPrefix, "")
+}
+
+func SwitchToTaskBranchFromRemote(worktreePath, branch, baseBranch, allowedPrefix, baseRepoPath string) error {
 	if strings.TrimSpace(worktreePath) == "" {
 		return fmt.Errorf("switch branch: worktree path is required")
 	}
@@ -212,6 +274,20 @@ func SwitchToTaskBranch(worktreePath, branch, baseBranch, allowedPrefix string) 
 	}
 
 	baseBranch = normalizeBaseBranch(baseBranch)
+
+	if baseRepoPath != "" {
+		remoteExists, _ := RemoteBranchExists(baseRepoPath, branch)
+		if remoteExists {
+			if _, err := gitCommand(worktreePath, "fetch", "origin", branch); err != nil {
+				return fmt.Errorf("fetch remote branch %q: %w", branch, err)
+			}
+			if _, err := gitCommand(worktreePath, "checkout", "-B", branch, "origin/"+branch); err != nil {
+				return fmt.Errorf("checkout branch %q from origin/%s: %w", branch, branch, err)
+			}
+			return nil
+		}
+	}
+
 	if _, err := gitCommand(worktreePath, "fetch", "origin", baseBranch); err != nil {
 		return fmt.Errorf("fetch base branch %q: %w", baseBranch, err)
 	}
@@ -220,6 +296,40 @@ func SwitchToTaskBranch(worktreePath, branch, baseBranch, allowedPrefix string) 
 	}
 
 	return nil
+}
+
+func RemoteBranchExists(repoPath, branch string) (bool, error) {
+	repoPath = strings.TrimSpace(repoPath)
+	branch = strings.TrimSpace(branch)
+	if repoPath == "" || branch == "" {
+		return false, fmt.Errorf("remote branch check: repo path and branch are required")
+	}
+
+	output, err := gitCommand(repoPath, "ls-remote", "--heads", "origin", branch)
+	if err != nil {
+		return false, err
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.HasSuffix(fields[1], "refs/heads/"+branch) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func ResolveCanonicalBranch(featureID, taskID, taskType, agentName, allowedPrefix string) string {
+	idToUse := featureID
+	if strings.TrimSpace(idToUse) == "" {
+		idToUse = taskID
+	}
+	return BuildBranchName(idToUse, taskType, agentName, allowedPrefix)
+}
+
+func ResolveTaskBranch(taskID, taskType, agentName, allowedPrefix string, localID int, projectKey, taskTitle string) string {
+	return BuildTaskBranchName(taskID, taskType, agentName, allowedPrefix, localID, projectKey, taskTitle)
 }
 
 func RemoveExecutionWorktree(baseRepoPath, worktreePath, branch string) error {
@@ -747,6 +857,11 @@ func FinalizeGitWorkflow(cfg GitWorkflowConfig, prep GitPreparation) GitWorkflow
 
 	if headSHA != "" {
 		result.CommitShas = append(result.CommitShas, headSHA)
+	} else {
+		result.Error = fmt.Errorf("commit produced no changes")
+		snapshot := CaptureGitSnapshot(cfg.Workdir, prep)
+		result.Snapshot = snapshot
+		return result
 	}
 
 	if len(prep.CommitShas) > 0 {

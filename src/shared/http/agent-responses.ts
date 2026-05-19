@@ -1,6 +1,6 @@
 /**
  * Agent API Response Helpers
- * 
+ *
  * Standardized responses for the Agent API.
  * Simpler than the main API responses for easier parsing.
  */

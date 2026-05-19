@@ -81,7 +81,7 @@ export default function ExecutionsPage() {
   const [projectFilter, setProjectFilter] = useState<string>('');
   const [taskFilter, setTaskFilter] = useState<string>('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
   const { data: projects } = useProjects();
   const projectsMap = new Map((projects ?? []).map((p) => [p.id, p]));
 

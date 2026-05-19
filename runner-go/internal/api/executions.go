@@ -6,14 +6,18 @@ import (
 )
 
 type ExecutionEvent struct {
-	Seq     int                    `json:"seq"`
-	Kind    string                 `json:"kind"`
-	Content string                 `json:"content"`
+	Seq      int                    `json:"seq"`
+	Kind     string                 `json:"kind"`
+	Content  string                 `json:"content"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type FinalizeExecutionParams struct {
 	Status              string                 `json:"status"`
+	ExpectedExecutionID string                 `json:"expectedExecutionId,omitempty"`
+	CallerRoleHint      string                 `json:"callerRoleHint,omitempty"`
+	Disposition         map[string]interface{} `json:"disposition,omitempty"`
+	Evidence            map[string]interface{} `json:"evidence,omitempty"`
 	Output              string                 `json:"output,omitempty"`
 	ResultSummary       string                 `json:"resultSummary,omitempty"`
 	Result              map[string]interface{} `json:"result,omitempty"`
@@ -81,7 +85,8 @@ func UpdateExecution(client *Client, execID string, params map[string]interface{
 
 func AppendExecutionEvents(client *Client, execID string, events []ExecutionEvent) (int, error) {
 	resp, err := client.Post("/executions/"+execID+"/events", map[string]interface{}{
-		"events": events,
+		"expectedExecutionId": execID,
+		"events":              events,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("append execution events: %w", err)
@@ -95,7 +100,9 @@ func AppendExecutionEvents(client *Client, execID string, events []ExecutionEven
 }
 
 func HeartbeatExecution(client *Client, execID string) error {
-	resp, err := client.Post("/executions/"+execID+"/heartbeat", map[string]interface{}{})
+	resp, err := client.Post("/executions/"+execID+"/heartbeat", map[string]interface{}{
+		"expectedExecutionId": execID,
+	})
 	if err != nil {
 		return fmt.Errorf("execution heartbeat: %w", err)
 	}
@@ -106,8 +113,23 @@ func HeartbeatExecution(client *Client, execID string) error {
 }
 
 func FinalizeExecution(client *Client, execID string, params FinalizeExecutionParams) (map[string]interface{}, error) {
+	expectedExecutionID := params.ExpectedExecutionID
+	if expectedExecutionID == "" {
+		expectedExecutionID = execID
+	}
+
 	body := map[string]interface{}{
-		"status": params.Status,
+		"status":              params.Status,
+		"expectedExecutionId": expectedExecutionID,
+	}
+	if params.CallerRoleHint != "" {
+		body["callerRoleHint"] = params.CallerRoleHint
+	}
+	if params.Disposition != nil {
+		body["disposition"] = params.Disposition
+	}
+	if params.Evidence != nil {
+		body["evidence"] = params.Evidence
 	}
 	if params.Output != "" {
 		body["output"] = params.Output

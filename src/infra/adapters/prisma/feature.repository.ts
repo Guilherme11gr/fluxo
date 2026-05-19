@@ -139,7 +139,7 @@ export class FeatureRepository {
 
   /**
    * Ligthweight list for dropdowns
-   * 
+   *
    * Note: Returns epicId at root level for compatibility with task-filters.tsx
    * which expects { id, title, epicId } format
    */

@@ -1,6 +1,6 @@
 /**
  * Agent API - Agent Registry
- * 
+ *
  * GET  /api/agent/agents - List agents for org
  * POST /api/agent/agents - Register a new agent
  */

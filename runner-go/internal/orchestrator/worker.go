@@ -18,6 +18,7 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/config"
 	"github.com/fluxo-app/fluxo-runner/internal/executor"
 	"github.com/fluxo-app/fluxo-runner/internal/extractor"
+	"github.com/fluxo-app/fluxo-runner/internal/featurelock"
 	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 )
@@ -77,20 +78,60 @@ func runtimeBindingMetadataMap(binding api.ClaimedTaskResponse) map[string]inter
 	}
 }
 
+func finalizeCallerRoleHint(agent config.AgentConfig) string {
+	if strings.TrimSpace(agent.Role) != "" {
+		return strings.ToLower(strings.TrimSpace(agent.Role))
+	}
+	if strings.EqualFold(agent.PickStatus, "QA_READY") && strings.EqualFold(agent.ClaimStatus, "QA_READY") {
+		return "qa"
+	}
+	if strings.EqualFold(agent.PickStatus, "REVIEW") {
+		return "reviewer"
+	}
+	return "builder"
+}
+
+func boolRef(value bool) *bool {
+	return &value
+}
+
+func finalizeEvidence(agent config.AgentConfig, snapshot runner.GitSnapshot, qaPassed *bool) map[string]interface{} {
+	evidence := map[string]interface{}{
+		"artifact": runner.GitEvidenceMap(snapshot),
+	}
+
+	if strings.EqualFold(finalizeCallerRoleHint(agent), "qa") && qaPassed != nil {
+		check := "runner_execution_failed"
+		if *qaPassed {
+			check = "runner_execution_success"
+		}
+		evidence["qa"] = map[string]interface{}{
+			"passed":   *qaPassed,
+			"checks":   []string{check},
+			"provider": "runner",
+			"mode":     "agent_report",
+		}
+	}
+
+	return evidence
+}
+
 func finalizeSetupFailure(client *api.Client, executionID string, agent config.AgentConfig, gitPolicy runner.GitPolicy, gitSnapshot runner.GitSnapshot, binding api.ClaimedTaskResponse, errorMessage string) {
 	structuredResult, resultMeta := runner.BuildExecutionResultV1WithMeta(false, errorMessage, 1)
 	persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
 	_, _ = api.FinalizeExecution(client, executionID, api.FinalizeExecutionParams{
-		Status:        "FAILED",
-		Output:        persistedOutput,
-		ResultSummary: truncate(errorMessage, 500),
-		Result:        structuredResult,
-		ErrorMessage:  truncate(errorMessage, 2000),
-		ExitCode:      1,
-		Duration:      0,
-		NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
-		BlockReason:   nullableString(errorMessage),
-		Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+		Status:         "FAILED",
+		CallerRoleHint: finalizeCallerRoleHint(agent),
+		Evidence:       finalizeEvidence(agent, gitSnapshot, boolRef(false)),
+		Output:         persistedOutput,
+		ResultSummary:  truncate(errorMessage, 500),
+		Result:         structuredResult,
+		ErrorMessage:   truncate(errorMessage, 2000),
+		ExitCode:       1,
+		Duration:       0,
+		NextStatus:     defaultStr(agent.ClaimStatus, "DOING"),
+		BlockReason:    nullableString(errorMessage),
+		Comment:        runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 		Metadata: map[string]interface{}{
 			"tool":                 agent.Tool,
 			"model":                agent.Model,
@@ -219,38 +260,84 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	logging.Debugf("worker[%s] claimed task=%s exec=%s runtimeBinding.repoPath=%q runtimeBinding.gitPolicy=%q runtimeBinding.runnerProfile=%q", agent.Name, claimed.Task.ID, claimed.Execution.ID, claimed.RuntimeBinding.RepoPath, claimed.RuntimeBinding.GitPolicy, claimed.RuntimeBinding.RunnerProfile)
 
 	gitPolicy := runner.ParseGitPolicy(claimed.RuntimeBinding.GitPolicy)
-	gitBranch := runner.BuildBranchName(
-		claimed.Task.ID,
-		claimed.Task.Type,
-		agent.Name,
-		claimed.RuntimeBinding.AllowedBranchPrefix,
-	)
+	var gitBranch string
 	gitBaseBranch := claimed.RuntimeBinding.DefaultBaseBranch
 	if gitBaseBranch == "" {
 		gitBaseBranch = "main"
 	}
 	baseRepoPath := strings.TrimSpace(claimed.RuntimeBinding.RepoPath)
-	workdir := agent.Workdir
-	if claimed.RuntimeBinding.RepoPath != "" {
-		workdir = claimed.RuntimeBinding.RepoPath
+
+	var localProjectCfg *config.ProjectConfig
+	if baseRepoPath == "" {
+		repoInfo, detectErr := config.DetectGitRepo("")
+		if detectErr == nil && repoInfo.IsRepo {
+			localProjectCfg, _ = config.LoadProjectConfig(repoInfo)
+		}
 	}
+
+	workdir := config.ResolveWorkdir(claimed.RuntimeBinding.RepoPath, agent.Workdir, localProjectCfg)
 	workdir = strings.TrimSpace(workdir)
+
+	if localProjectCfg != nil && baseRepoPath == "" {
+		baseRepoPath = strings.TrimSpace(localProjectCfg.RepoPath)
+	}
+
+	localProvCmd, localCacheKey := config.ResolveProvision(localProjectCfg)
+	if localProvCmd != "" && claimed.RuntimeBinding.ProvisionCommand == "" {
+		claimed.RuntimeBinding.ProvisionCommand = localProvCmd
+	}
+	if localCacheKey != "" && claimed.RuntimeBinding.ProvisionCacheKey == "" {
+		claimed.RuntimeBinding.ProvisionCacheKey = localCacheKey
+	}
+	if strings.TrimSpace(claimed.Task.ProjectKey) == "" && looksLikeUUID(claimed.Task.ProjectID) {
+		if projectKey := api.ResolveProjectKey(client, claimed.Task.ProjectID); projectKey != "" {
+			claimed.Task.ProjectKey = projectKey
+			logging.Debugf("worker[%s] resolved project key=%q for project=%s", agent.Name, projectKey, claimed.Task.ProjectID)
+		}
+	}
+
 	cleanupWorktree := false
 	cleanupBranch := ""
 	retainWorktreeForRecovery := false
+	var featureLock *featurelock.FeatureLock
+
+	featureID := claimed.Task.FeatureID
+	if featureID == "" {
+		featureID = claimed.Task.ID
+	}
+	gitBranch = runner.ResolveTaskBranch(
+		claimed.Task.ID,
+		claimed.Task.Type,
+		agent.Name,
+		claimed.RuntimeBinding.AllowedBranchPrefix,
+		claimed.Task.LocalID,
+		claimed.Task.ProjectKey,
+		claimed.Task.Title,
+	)
+
 	if gitPolicy != runner.GitPolicyNoWrite && baseRepoPath != "" {
+		lock, lockErr := featurelock.AcquireLock(baseRepoPath, featureID, claimed.Execution.ID, agent.Name)
+		if lockErr != nil {
+			finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Failed to acquire feature write lock: %v", lockErr))
+			return
+		}
+		featureLock = lock
+		logging.Debugf("worker[%s] acquired feature lock feature=%s exec=%s", agent.Name, featureID, claimed.Execution.ID)
+
 		worktreesRoot := runner.WorktreesRootForRepo(baseRepoPath)
 		worktreePath, err := runner.CreateExecutionWorktree(baseRepoPath, worktreesRoot, claimed.Execution.ID, gitBaseBranch)
 		if err != nil {
 			finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Failed to create execution worktree: %v", err))
+			_ = featureLock.Release()
 			return
 		}
 		workdir = worktreePath
 		cleanupWorktree = true
 		cleanupBranch = gitBranch
-		if err := runner.SwitchToTaskBranch(workdir, gitBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix); err != nil {
+		if err := runner.SwitchToTaskBranchFromRemote(workdir, gitBranch, gitBaseBranch, claimed.RuntimeBinding.AllowedBranchPrefix, baseRepoPath); err != nil {
 			finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Failed to switch execution branch: %v", err))
 			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+			_ = featureLock.Release()
 			return
 		}
 	}
@@ -272,21 +359,24 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 
 		structuredResult, resultMeta := runner.BuildExecutionResultV1WithMeta(false, errorMessage, 1)
 		persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
+		gitSnapshot := runner.GitSnapshot{Mode: string(gitPolicy)}
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
-			Status:        "FAILED",
-			Output:        persistedOutput,
-			ResultSummary: truncate(errorMessage, 500),
-			Result:        structuredResult,
-			ErrorMessage:  truncate(errorMessage, 2000),
-			ExitCode:      1,
-			Duration:      0,
-			NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
-			BlockReason:   nullableString(errorMessage),
-			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+			Status:         "FAILED",
+			CallerRoleHint: finalizeCallerRoleHint(agent),
+			Evidence:       finalizeEvidence(agent, gitSnapshot, boolRef(false)),
+			Output:         persistedOutput,
+			ResultSummary:  truncate(errorMessage, 500),
+			Result:         structuredResult,
+			ErrorMessage:   truncate(errorMessage, 2000),
+			ExitCode:       1,
+			Duration:       0,
+			NextStatus:     defaultStr(agent.ClaimStatus, "DOING"),
+			BlockReason:    nullableString(errorMessage),
+			Comment:        runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
 				"tool":                 agent.Tool,
 				"model":                agent.Model,
-				"git":                  runner.GitMetadataMap(runner.GitSnapshot{Mode: string(gitPolicy)}),
+				"git":                  runner.GitMetadataMap(gitSnapshot),
 				"outputContract":       outputContractMetadata(resultMeta),
 				"finalSummarySource":   string(resultMeta.Source),
 				"commentSummarySource": "raw",
@@ -297,12 +387,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		if cleanupWorktree {
 			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
 		}
+		if featureLock != nil {
+			_ = featureLock.Release()
+		}
 		return
 	}
 	if err := provisionExecutionWorkspace(ctx, workdir, provisionCacheRoot, claimed.RuntimeBinding.HostOS, claimed.RuntimeBinding.ProvisionCommand, claimed.RuntimeBinding.ProvisionCacheKey); err != nil {
 		finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Provision command failed: %v", err))
 		if cleanupWorktree {
 			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
+		if featureLock != nil {
+			_ = featureLock.Release()
 		}
 		return
 	}
@@ -325,16 +421,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		)
 		persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
-			Status:        "FAILED",
-			Output:        persistedOutput,
-			ResultSummary: truncate(errorMessage, 500),
-			Result:        structuredResult,
-			ErrorMessage:  truncate(errorMessage, 2000),
-			ExitCode:      1,
-			Duration:      0,
-			NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
-			BlockReason:   nullableString(errorMessage),
-			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+			Status:         "FAILED",
+			CallerRoleHint: finalizeCallerRoleHint(agent),
+			Evidence:       finalizeEvidence(agent, failedGitSnapshot, boolRef(false)),
+			Output:         persistedOutput,
+			ResultSummary:  truncate(errorMessage, 500),
+			Result:         structuredResult,
+			ErrorMessage:   truncate(errorMessage, 2000),
+			ExitCode:       1,
+			Duration:       0,
+			NextStatus:     defaultStr(agent.ClaimStatus, "DOING"),
+			BlockReason:    nullableString(errorMessage),
+			Comment:        runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
 				"tool":                 agent.Tool,
 				"model":                agent.Model,
@@ -348,6 +446,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		runner.SendHeartbeat(client, agent, "ONLINE")
 		if cleanupWorktree {
 			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
+		if featureLock != nil {
+			_ = featureLock.Release()
 		}
 		return
 	}
@@ -371,16 +472,18 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		)
 		persistedOutput := buildPersistedExecutionOutput("", errorMessage, "", structuredResult)
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
-			Status:        "FAILED",
-			Output:        persistedOutput,
-			ResultSummary: truncate(errorMessage, 500),
-			Result:        structuredResult,
-			ErrorMessage:  truncate(errorMessage, 2000),
-			ExitCode:      1,
-			Duration:      0,
-			NextStatus:    defaultStr(agent.ClaimStatus, "DOING"),
-			BlockReason:   nullableString(errorMessage),
-			Comment:       runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
+			Status:         "FAILED",
+			CallerRoleHint: finalizeCallerRoleHint(agent),
+			Evidence:       finalizeEvidence(agent, failedGitSnapshot, boolRef(false)),
+			Output:         persistedOutput,
+			ResultSummary:  truncate(errorMessage, 500),
+			Result:         structuredResult,
+			ErrorMessage:   truncate(errorMessage, 2000),
+			ExitCode:       1,
+			Duration:       0,
+			NextStatus:     defaultStr(agent.ClaimStatus, "DOING"),
+			BlockReason:    nullableString(errorMessage),
+			Comment:        runner.FormatExecutionComment(agent.Name, agent.Tool, false, 0, errorMessage, 1),
 			Metadata: map[string]interface{}{
 				"tool":                 agent.Tool,
 				"model":                agent.Model,
@@ -400,6 +503,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		runner.SendHeartbeat(client, agent, "ONLINE")
 		if cleanupWorktree {
 			cleanupExecutionWorktree(baseRepoPath, workdir, "", agent)
+		}
+		if featureLock != nil {
+			_ = featureLock.Release()
 		}
 		return
 	}
@@ -424,8 +530,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	})
 
 	_, _ = client.Post("/tasks/"+claimed.Task.ID+"/comments", map[string]interface{}{
-		"content": fmt.Sprintf("## Execution Started\n\n**Agent:** %s  \n**Tool:** %s  \n**Model:** %s  \n**Git Policy:** %s  \n**Branch:** %s", agent.Name, agent.Tool, agent.Model, gitPolicy, preparedGit.Branch),
-		"agentId": agent.ID,
+		"content":             fmt.Sprintf("## Execution Started\n\n**Agent:** %s  \n**Tool:** %s  \n**Model:** %s  \n**Git Policy:** %s  \n**Branch:** %s", agent.Name, agent.Tool, agent.Model, gitPolicy, preparedGit.Branch),
+		"agentId":             agent.ID,
+		"expectedExecutionId": claimed.Execution.ID,
 	})
 
 	var previousExecution *runner.PreviousExecutionContext
@@ -464,6 +571,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		})
 	}
 
+	promptAgent := agent
+	promptAgent.Workdir = workdir
 	prompt := runner.BuildPromptWithExecutionContext(runner.Task{
 		ID:          claimed.Task.ID,
 		Title:       claimed.Task.Title,
@@ -471,8 +580,10 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		Priority:    claimed.Task.Priority,
 		Type:        claimed.Task.Type,
 		ProjectID:   claimed.Task.ProjectID,
+		ProjectKey:  claimed.Task.ProjectKey,
 		Status:      claimed.Task.Status,
-	}, agent, previousExecution, retrievedMemory)
+		LocalID:     claimed.Task.LocalID,
+	}, promptAgent, previousExecution, retrievedMemory)
 
 	var exec executor.Executor
 	exec = w.executorFactory(agent)
@@ -598,6 +709,8 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		if commitSHA, err := runner.CommitChanges(workdir, preparedGit.Branch, claimed.Task.ID, claimed.Task.Title); err != nil {
 			fmt.Printf("[%s] post-exec commit error: %v\n", agent.Name, err)
 			failExecutionWithGitError(fmt.Sprintf("Required git commit failed: %v", err))
+		} else if commitSHA == "" {
+			failExecutionWithGitError("Required git commit produced no changes")
 		} else if commitSHA != "" {
 			logging.Debugf("worker[%s] committed changes sha=%s", agent.Name, commitSHA)
 			gitSnapshot = runner.CaptureGitSnapshot(workdir, preparedGit)
@@ -633,11 +746,14 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 				})
 				if err != nil {
 					fmt.Printf("[%s] PR creation error: %v\n", agent.Name, err)
+					failExecutionWithGitError(fmt.Sprintf("Required pull request creation failed: %v", err))
 				} else if prResult != nil {
 					logging.Debugf("worker[%s] created PR #%d %s", agent.Name, prResult.Number, prResult.URL)
 					gitSnapshot.PRUrl = &prResult.URL
 					prNum := prResult.Number
 					gitSnapshot.PRNumber = &prNum
+				} else {
+					failExecutionWithGitError("Required pull request creation returned no PR")
 				}
 			}
 		}
@@ -696,6 +812,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		}
 	}
 	comment := runner.FormatExecutionCommentWithFinalSummary(agent.Name, agent.Tool, result.Success, float64(duration), commentContent, result.ExitCode, commentSummary)
+	if gitSummary := runner.FormatGitOperationSummary(gitSnapshot); gitSummary != "" {
+		comment = strings.TrimSpace(comment + "\n\n" + gitSummary)
+	}
 
 	persistedOutput := buildPersistedExecutionOutput(rawOutput, readableOutput, failureHeadline, structuredResult)
 
@@ -718,16 +837,23 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		blockReason = ""
 	} else if result.Success && reviewOutcome == "rejected" {
 		status = "SUCCESS"
-		nextStatus = "TODO"
+		if strings.EqualFold(finalizeCallerRoleHint(agent), "qa") {
+			nextStatus = "REVIEW"
+		} else {
+			nextStatus = "TODO"
+		}
 		errorMessage = ""
 		if agent.NextAssigneeID != "" {
 			nextAssignee = &agent.NextAssigneeID
 		}
 		blockReason = ""
 	}
+	qaPassed := boolRef(status == "SUCCESS" && result.Success && reviewOutcome != "rejected")
 
 	finalizeParams := api.FinalizeExecutionParams{
 		Status:              status,
+		CallerRoleHint:      finalizeCallerRoleHint(agent),
+		Evidence:            finalizeEvidence(agent, gitSnapshot, qaPassed),
 		Output:              persistedOutput,
 		ResultSummary:       truncate(defaultStr(structuredSummary, strippedOutput), 500),
 		Result:              structuredResult,
@@ -764,6 +890,13 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if cleanupWorktree && !retainWorktreeForRecovery {
 		cleanupExecutionWorktree(baseRepoPath, workdir, cleanupBranch, agent)
 	}
+	if featureLock != nil {
+		if relErr := featureLock.Release(); relErr != nil {
+			fmt.Printf("[%s] feature lock release error: %v\n", agent.Name, relErr)
+		} else {
+			logging.Debugf("worker[%s] released feature lock feature=%s exec=%s", agent.Name, featureID, claimed.Execution.ID)
+		}
+	}
 
 	if result.Success && gitSnapshot.PRUrl != nil && *gitSnapshot.PRUrl != "" {
 		prComment := fmt.Sprintf("## Pull Request Created\n\n**PR:** [#%d](%s)\n**Branch:** %s\n**Base:** %s", func() int {
@@ -773,8 +906,9 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			return 0
 		}(), *gitSnapshot.PRUrl, preparedGit.Branch, gitBaseBranch)
 		_, _ = client.Post("/tasks/"+claimed.Task.ID+"/comments", map[string]interface{}{
-			"content": prComment,
-			"agentId": agent.ID,
+			"content":             prComment,
+			"agentId":             agent.ID,
+			"expectedExecutionId": claimed.Execution.ID,
 		})
 
 		taskPatch := map[string]interface{}{
@@ -812,6 +946,11 @@ func defaultStr(val, def string) string {
 		return def
 	}
 	return val
+}
+
+func looksLikeUUID(value string) bool {
+	value = strings.TrimSpace(value)
+	return len(value) == 36 && strings.Count(value, "-") == 4
 }
 
 func isHighPriorityEventKind(kind string) bool {

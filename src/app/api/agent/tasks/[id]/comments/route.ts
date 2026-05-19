@@ -9,7 +9,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentSuccess, agentError, agentList, handleAgentError } from '@/shared/http/agent-responses';
-import { taskRepository, commentRepository } from '@/infra/adapters/prisma';
+import { taskRepository, commentRepository, agentExecutionRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +47,7 @@ export async function GET(
 const createCommentSchema = z.object({
   content: z.string().min(1, 'Content is required'),
   agentId: z.string().uuid().optional(),
+  expectedExecutionId: z.string().min(1).optional(),
 });
 
 export async function POST(
@@ -74,7 +75,18 @@ export async function POST(
       return agentError('VALIDATION_ERROR', parsed.error.issues[0].message, 400);
     }
 
-    const { content, agentId } = parsed.data;
+    const { content, agentId, expectedExecutionId } = parsed.data;
+
+    if (expectedExecutionId) {
+      if (task.currentExecutionId && task.currentExecutionId !== expectedExecutionId) {
+        return agentError('EXECUTION_NOT_CURRENT', 'Execution is not the current owner of this task', 409);
+      }
+
+      const execution = await agentExecutionRepository.findById(expectedExecutionId);
+      if (!execution || execution.orgId !== orgId || execution.taskId !== taskId) {
+        return agentError('EXECUTION_MISMATCH', 'expectedExecutionId does not belong to this task', 409);
+      }
+    }
 
     // If agentId provided, validate it belongs to this org
     if (agentId) {

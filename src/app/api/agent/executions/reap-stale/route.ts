@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import { extractAgentAuth } from '@/shared/http/agent-auth';
 import { agentSuccess, handleAgentError } from '@/shared/http/agent-responses';
-import { agentExecutionRepository, executionLeaseRepository, taskRepository, auditLogRepository, agentRepository } from '@/infra/adapters/prisma';
-import { updateTask } from '@/domain/use-cases/tasks/update-task';
+import { agentExecutionRepository, executionLeaseRepository, taskRepository } from '@/infra/adapters/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,23 +22,10 @@ export async function POST(request: Request) {
     );
 
     for (const execution of staleExecutions) {
-      await updateTask(
+      await taskRepository.requeueStaleExecution(
         execution.taskId,
         auth.orgId,
-        auth.userId,
-        {
-          blocked: false,
-          blockReason: null,
-          status: 'TODO',
-        },
-        { taskRepository, auditLogRepository, agentRepository },
-        {
-          source: 'agent',
-          agentName: auth.agentName,
-          keyPrefix: auth.keyPrefix,
-          authMethod: auth.authMethod,
-          keyId: auth.keyId,
-        }
+        execution.id
       ).catch(() => {});
     }
 

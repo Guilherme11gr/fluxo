@@ -7,11 +7,14 @@ const {
   mockUpdateStatus,
   mockFindTaskById,
   mockUpdateTaskRecord,
+  mockClearCurrentExecution,
   mockDeleteLease,
   mockFindCommentsByTaskId,
   mockCreateComment,
   mockUpdateTask,
   mockIngestExecutionMemory,
+  mockGetLastSeq,
+  mockCreateExecutionEvents,
 } = vi.hoisted(() => ({
   mockExtractAgentAuth: vi.fn(),
   mockFindExecutionById: vi.fn(),
@@ -19,11 +22,14 @@ const {
   mockUpdateStatus: vi.fn(),
   mockFindTaskById: vi.fn(),
   mockUpdateTaskRecord: vi.fn(),
+  mockClearCurrentExecution: vi.fn(),
   mockDeleteLease: vi.fn(),
   mockFindCommentsByTaskId: vi.fn(),
   mockCreateComment: vi.fn(),
   mockUpdateTask: vi.fn(),
   mockIngestExecutionMemory: vi.fn(),
+  mockGetLastSeq: vi.fn(),
+  mockCreateExecutionEvents: vi.fn(),
 }));
 
 vi.mock('@/shared/http/agent-auth', () => ({
@@ -34,6 +40,10 @@ vi.mock('@/infra/adapters/prisma', () => ({
   agentExecutionRepository: {
     findById: mockFindExecutionById,
     updateStatus: mockUpdateStatus,
+  },
+  agentExecutionEventRepository: {
+    getLastSeq: mockGetLastSeq,
+    createMany: mockCreateExecutionEvents,
   },
   agentRepository: {
     findById: mockFindAgentById,
@@ -49,6 +59,7 @@ vi.mock('@/infra/adapters/prisma', () => ({
   taskRepository: {
     findById: mockFindTaskById,
     update: mockUpdateTaskRecord,
+    clearCurrentExecution: mockClearCurrentExecution,
   },
 }));
 
@@ -95,6 +106,7 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
     mockFindTaskById.mockResolvedValue({
       id: 'task-1',
       status: 'DOING',
+      currentExecutionId: 'exec-1',
       blocked: false,
       blockReason: null,
       assigneeAgentId: 'agent-1',
@@ -103,7 +115,10 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
     mockFindCommentsByTaskId.mockResolvedValue([]);
     mockUpdateStatus.mockResolvedValue({ id: 'exec-1', status: 'SUCCESS' });
     mockUpdateTaskRecord.mockResolvedValue({ id: 'task-1' });
+    mockClearCurrentExecution.mockResolvedValue(true);
     mockIngestExecutionMemory.mockResolvedValue(0);
+    mockGetLastSeq.mockResolvedValue(0);
+    mockCreateExecutionEvents.mockResolvedValue(1);
   });
 
   it('stores structured result under metadata.result and preserves existing metadata', async () => {
@@ -188,6 +203,7 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
     );
     expect(payload.data.metadata.memoryIngestion.status).toBe('completed');
     expect(mockDeleteLease).toHaveBeenCalledWith('exec-1');
+    expect(mockClearCurrentExecution).toHaveBeenCalledWith('task-1', 'org-1', 'exec-1');
     expect(mockIngestExecutionMemory).toHaveBeenCalledWith(
       expect.objectContaining({
         orgId: 'org-1',
@@ -217,6 +233,52 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
     );
   });
 
+  it('rejects finalize when expectedExecutionId does not match the route execution', async () => {
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-other',
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+  });
+
+  it('rejects finalize when the task is owned by another execution', async () => {
+    mockFindTaskById.mockResolvedValueOnce({
+      id: 'task-1',
+      status: 'DOING',
+      currentExecutionId: 'exec-other',
+      blocked: false,
+      blockReason: null,
+      assigneeAgentId: 'agent-1',
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+  });
+
   it('updates task PR fields from metadata git payload when result.git is absent', async () => {
     const response = await POST(
       new Request('http://localhost/api/agent/executions/exec-1/finalize', {
@@ -241,6 +303,307 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
       githubPrNumber: 42,
       githubPrStatus: 'open',
     });
+  });
+
+  it('rejects artifact evidence that violates the runtime binding branch policy', async () => {
+    mockFindExecutionById.mockResolvedValueOnce({
+      id: 'exec-1',
+      orgId: 'org-1',
+      agentId: 'agent-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      status: 'RUNNING',
+      metadata: {
+        runtimeBinding: {
+          gitPolicy: 'branch_commit_pr',
+          defaultBaseBranch: 'main',
+          allowedBranchPrefix: 'agent',
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          evidence: {
+            artifact: {
+              gitPolicy: 'branch_commit_pr',
+              baseBranch: 'main',
+              branch: 'manual/task-1',
+              baselineHeadSha: 'abc123',
+              finalHeadSha: 'def456',
+              newCommitShas: ['def456'],
+              hasVerifiableDelta: true,
+              prUrl: 'https://github.com/fluxo-app/fluxo/pull/42',
+            },
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockUpdateTaskRecord).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+    expect(mockCreateExecutionEvents).toHaveBeenCalledWith('exec-1', [
+      expect.objectContaining({
+        seq: 1,
+        kind: 'finalize.validation_rejected',
+        metadata: expect.objectContaining({ gate: 'artifact' }),
+      }),
+    ]);
+  });
+
+  it('requires artifact evidence for write-policy success', async () => {
+    mockFindExecutionById.mockResolvedValueOnce({
+      id: 'exec-1',
+      orgId: 'org-1',
+      agentId: 'agent-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      status: 'RUNNING',
+      metadata: {
+        runtimeBinding: {
+          gitPolicy: 'branch_only',
+          defaultBaseBranch: 'main',
+          allowedBranchPrefix: 'agent',
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-1',
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockUpdateTaskRecord).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid role transitions before marking the execution terminal', async () => {
+    mockFindTaskById.mockResolvedValueOnce({
+      id: 'task-1',
+      status: 'REVIEW',
+      currentExecutionId: 'exec-1',
+      blocked: false,
+      blockReason: null,
+      assigneeAgentId: 'agent-1',
+    });
+    mockFindAgentById.mockResolvedValueOnce({
+      id: 'agent-1',
+      orgId: 'org-1',
+      config: {
+        runRole: 'reviewer',
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-1',
+          callerRoleHint: 'qa',
+          disposition: {
+            fromStatus: 'REVIEW',
+            requestedNextStatus: 'DONE',
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+    expect(mockCreateExecutionEvents).toHaveBeenCalledWith('exec-1', [
+      expect.objectContaining({
+        seq: 1,
+        kind: 'finalize.validation_rejected',
+        metadata: expect.objectContaining({
+          gate: 'transition',
+          effectiveRole: 'reviewer',
+          requestedNextStatus: 'DONE',
+        }),
+      }),
+    ]);
+  });
+
+  it('rejects QA pass without QA evidence before marking the execution terminal', async () => {
+    mockFindTaskById.mockResolvedValueOnce({
+      id: 'task-1',
+      status: 'QA_READY',
+      currentExecutionId: 'exec-1',
+      blocked: false,
+      blockReason: null,
+      assigneeAgentId: 'agent-1',
+    });
+    mockFindAgentById.mockResolvedValueOnce({
+      id: 'agent-1',
+      orgId: 'org-1',
+      config: {
+        runRole: 'qa',
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-1',
+          disposition: {
+            fromStatus: 'QA_READY',
+            requestedNextStatus: 'DONE',
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+  });
+
+  it('allows QA pass from QA_READY to DONE with QA evidence', async () => {
+    mockFindTaskById.mockResolvedValueOnce({
+      id: 'task-1',
+      status: 'QA_READY',
+      currentExecutionId: 'exec-1',
+      blocked: false,
+      blockReason: null,
+      assigneeAgentId: 'agent-1',
+    });
+    mockFindAgentById.mockResolvedValueOnce({
+      id: 'agent-1',
+      orgId: 'org-1',
+      config: {
+        runRole: 'qa',
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-1',
+          disposition: {
+            fromStatus: 'QA_READY',
+            requestedNextStatus: 'DONE',
+          },
+          evidence: {
+            qa: {
+              passed: true,
+              checks: ['runner_execution_success'],
+            },
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateStatus).toHaveBeenCalledWith(
+      'exec-1',
+      expect.objectContaining({
+        status: 'SUCCESS',
+      })
+    );
+    expect(mockUpdateTask).toHaveBeenCalledWith(
+      'task-1',
+      'org-1',
+      'user-1',
+      expect.objectContaining({
+        status: 'DONE',
+        blocked: false,
+      }),
+      expect.any(Object),
+      expect.any(Object)
+    );
+    expect(mockClearCurrentExecution).toHaveBeenCalledWith('task-1', 'org-1', 'exec-1');
+  });
+
+  it('stores valid finalize v2 evidence and uses artifact PR fields', async () => {
+    mockFindExecutionById.mockResolvedValueOnce({
+      id: 'exec-1',
+      orgId: 'org-1',
+      agentId: 'agent-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      status: 'RUNNING',
+      metadata: {
+        runtimeBinding: {
+          gitPolicy: 'branch_commit_pr',
+          defaultBaseBranch: 'main',
+          allowedBranchPrefix: 'agent',
+        },
+      },
+    });
+
+    const evidence = {
+      artifact: {
+        gitPolicy: 'branch_commit_pr',
+        baseBranch: 'main',
+        branch: 'agent/task-1',
+        baselineHeadSha: 'abc123',
+        finalHeadSha: 'def456',
+        newCommitShas: ['def456'],
+        changedFiles: ['src/foo.ts'],
+        hasVerifiableDelta: true,
+        prUrl: 'https://github.com/fluxo-app/fluxo/pull/42',
+        prNumber: 42,
+      },
+    };
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-1',
+          evidence,
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateStatus).toHaveBeenCalledWith(
+      'exec-1',
+      expect.objectContaining({
+        status: 'SUCCESS',
+        metadata: expect.objectContaining({
+          evidence,
+        }),
+      })
+    );
+    expect(mockUpdateTaskRecord).toHaveBeenCalledWith('task-1', 'org-1', {
+      githubPrUrl: 'https://github.com/fluxo-app/fluxo/pull/42',
+      githubPrNumber: 42,
+      githubPrStatus: 'open',
+    });
+    expect(mockClearCurrentExecution).toHaveBeenCalledWith('task-1', 'org-1', 'exec-1');
   });
 
   it('retries memory ingestion for already-terminal successful executions when ingestion is not completed', async () => {

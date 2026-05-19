@@ -1,6 +1,6 @@
 /**
  * Agent API - Board Reorder
- * 
+ *
  * POST /api/agent/board/reorder - Reorder columns and/or items
  */
 

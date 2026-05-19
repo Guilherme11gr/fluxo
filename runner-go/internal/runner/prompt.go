@@ -15,7 +15,9 @@ type Task struct {
 	Priority    string `json:"priority"`
 	Type        string `json:"type"`
 	ProjectID   string `json:"projectId"`
+	ProjectKey  string `json:"projectKey"`
 	Status      string `json:"status"`
+	LocalID     int    `json:"localId"`
 }
 
 type GitWorkflowConfig struct {
@@ -66,8 +68,8 @@ type RetrievedProjectMemoryContext struct {
 const (
 	SummaryStartMarker = "FLUXO_SUMMARY_START"
 	SummaryEndMarker   = "FLUXO_SUMMARY_END"
-	ResultStartMarker = "FLUXO_RESULT_JSON_START"
-	ResultEndMarker   = "FLUXO_RESULT_JSON_END"
+	ResultStartMarker  = "FLUXO_RESULT_JSON_START"
+	ResultEndMarker    = "FLUXO_RESULT_JSON_END"
 )
 
 const outputContractStrictReminder = "Your final response must end with exactly one valid JSON block between the exact markers above. Do not omit the markers, do not emit a second block, and do not leave malformed JSON."

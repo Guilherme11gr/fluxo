@@ -1,6 +1,6 @@
 /**
  * Agent API - Board Column by ID
- * 
+ *
  * PATCH /api/agent/board/columns/:id - Update a column
  * DELETE /api/agent/board/columns/:id - Delete a column
  */

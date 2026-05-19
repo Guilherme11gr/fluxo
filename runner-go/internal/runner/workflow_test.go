@@ -129,11 +129,11 @@ func TestPolicyRequiresPR(t *testing.T) {
 
 func TestExecuteGitWorkflowNoWrite(t *testing.T) {
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyNoWrite,
-		TaskID:   "abc12345",
-		TaskType: "TASK",
+		Policy:    GitPolicyNoWrite,
+		TaskID:    "abc12345",
+		TaskType:  "TASK",
 		AgentName: "builder",
-		Workdir:  "",
+		Workdir:   "",
 	}
 	result := ExecuteGitWorkflow(cfg)
 	if !result.PreflightOK {
@@ -152,13 +152,13 @@ func TestExecuteGitWorkflowBranchOnly(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		AgentName: "builder",
-		ExecID:   "exec12345",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		AgentName:  "builder",
+		ExecID:     "exec12345",
+		Workdir:    dir,
 	}
 	result := ExecuteGitWorkflow(cfg)
 	if !result.PreflightOK {
@@ -185,12 +185,12 @@ func TestExecuteGitWorkflowPreflightFailsOnProtected(t *testing.T) {
 	gitCommand(dir, "checkout", "-b", "main")
 
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		AgentName: "builder",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		AgentName:  "builder",
+		Workdir:    dir,
 	}
 	result := ExecuteGitWorkflow(cfg)
 	if !result.PreflightOK {
@@ -203,12 +203,12 @@ func TestExecuteGitWorkflowPreflightFailsOnProtected(t *testing.T) {
 
 func TestFinalizeGitWorkflowNoCommit(t *testing.T) {
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyNoWrite,
-		TaskID:   "abc12345",
-		TaskType: "TASK",
+		Policy:    GitPolicyNoWrite,
+		TaskID:    "abc12345",
+		TaskType:  "TASK",
 		TaskTitle: "Test Task",
 		AgentName: "builder",
-		Workdir:  "",
+		Workdir:   "",
 	}
 	prep := GitPreparation{
 		Mode:       GitPolicyNoWrite,
@@ -226,13 +226,13 @@ func TestFinalizeGitWorkflowBranchOnlyCommit(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	prepResult := ExecuteGitWorkflow(GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		AgentName: "builder",
-		ExecID:   "exec1",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		AgentName:  "builder",
+		ExecID:     "exec1",
+		Workdir:    dir,
 	})
 	if prepResult.Error != nil {
 		t.Fatalf("ExecuteGitWorkflow failed: %v", prepResult.Error)
@@ -243,13 +243,13 @@ func TestFinalizeGitWorkflowBranchOnlyCommit(t *testing.T) {
 	}
 
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		TaskTitle: "Test Task Title",
-		AgentName: "builder",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		TaskTitle:  "Test Task Title",
+		AgentName:  "builder",
+		Workdir:    dir,
 	}
 
 	finalResult := FinalizeGitWorkflow(cfg, prepResult.Preparation)
@@ -272,31 +272,31 @@ func TestFinalizeGitWorkflowNoChanges(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	prepResult := ExecuteGitWorkflow(GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		AgentName: "builder",
-		ExecID:   "exec1",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		AgentName:  "builder",
+		ExecID:     "exec1",
+		Workdir:    dir,
 	})
 	if prepResult.Error != nil {
 		t.Fatalf("ExecuteGitWorkflow failed: %v", prepResult.Error)
 	}
 
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		TaskTitle: "No Changes Task",
-		AgentName: "builder",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		TaskTitle:  "No Changes Task",
+		AgentName:  "builder",
+		Workdir:    dir,
 	}
 
 	finalResult := FinalizeGitWorkflow(cfg, prepResult.Preparation)
-	if finalResult.Error != nil {
-		t.Fatalf("FinalizeGitWorkflow with no changes failed: %v", finalResult.Error)
+	if finalResult.Error == nil {
+		t.Fatal("expected no-change finalize to fail")
 	}
 	if len(finalResult.CommitShas) != 0 {
 		t.Fatalf("expected no commits with no changes, got %d", len(finalResult.CommitShas))
@@ -308,13 +308,13 @@ func TestGitWorkflowResultSnapshotPersistence(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	prepResult := ExecuteGitWorkflow(GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		AgentName: "builder",
-		ExecID:   "exec1",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		AgentName:  "builder",
+		ExecID:     "exec1",
+		Workdir:    dir,
 	})
 	if prepResult.Error != nil {
 		t.Fatalf("ExecuteGitWorkflow failed: %v", prepResult.Error)
@@ -325,13 +325,13 @@ func TestGitWorkflowResultSnapshotPersistence(t *testing.T) {
 	}
 
 	cfg := GitWorkflowConfig{
-		Policy:   GitPolicyBranchOnly,
+		Policy:     GitPolicyBranchOnly,
 		BaseBranch: "main",
-		TaskID:   "abc12345",
-		TaskType: "TASK",
-		TaskTitle: "Snapshot test",
-		AgentName: "builder",
-		Workdir:  dir,
+		TaskID:     "abc12345",
+		TaskType:   "TASK",
+		TaskTitle:  "Snapshot test",
+		AgentName:  "builder",
+		Workdir:    dir,
 	}
 
 	finalResult := FinalizeGitWorkflow(cfg, prepResult.Preparation)
@@ -365,18 +365,18 @@ func TestGitWorkflowResultSnapshotPersistence(t *testing.T) {
 
 func TestGitWorkflowConfigFromAgentConfig(t *testing.T) {
 	cfg := GitWorkflowConfig{
-		Policy:        ResolveGitPolicy("branch_commit_pr", GitPolicyNoWrite),
-		BaseBranch:    "develop",
-		AllowedPrefix: "agent/",
-		AgentName:     "builder",
-		TaskID:        "5223add6-34fb-4088-aa3f-329d81fad580",
-		TaskType:      "TASK",
-		TaskTitle:     "Implement git workflow",
-		ExecID:        "b0514112-952d-4cab-a9d4",
-		Workdir:       "/tmp/repo",
+		Policy:          ResolveGitPolicy("branch_commit_pr", GitPolicyNoWrite),
+		BaseBranch:      "develop",
+		AllowedPrefix:   "agent/",
+		AgentName:       "builder",
+		TaskID:          "5223add6-34fb-4088-aa3f-329d81fad580",
+		TaskType:        "TASK",
+		TaskTitle:       "Implement git workflow",
+		ExecID:          "b0514112-952d-4cab-a9d4",
+		Workdir:         "/tmp/repo",
 		PushAfterCommit: PolicyRequiresPush(ResolveGitPolicy("branch_commit_pr", GitPolicyNoWrite)),
-		CreatePR:      PolicyRequiresPR(ResolveGitPolicy("branch_commit_pr", GitPolicyNoWrite)),
-		PRDraft:       true,
+		CreatePR:        PolicyRequiresPR(ResolveGitPolicy("branch_commit_pr", GitPolicyNoWrite)),
+		PRDraft:         true,
 	}
 	if cfg.Policy != GitPolicyBranchCommitPR {
 		t.Fatalf("expected branch_commit_pr, got %q", cfg.Policy)

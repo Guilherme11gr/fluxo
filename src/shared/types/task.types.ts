@@ -18,6 +18,7 @@ export interface Task {
   tags?: TagInfo[]; // New tag system
   assigneeId: string | null;
   assigneeAgentId?: string | null;
+  currentExecutionId?: string | null;
   createdAt: Date;
   updatedAt: Date;
   createdBy?: string | null; // Quem criou a tarefa

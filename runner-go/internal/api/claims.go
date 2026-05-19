@@ -1,6 +1,9 @@
 package api
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type ClaimNextTaskParams struct {
 	AgentID          string                 `json:"agentId"`
@@ -20,6 +23,7 @@ type ClaimedTaskResponse struct {
 		ID          string `json:"id"`
 		OrgID       string `json:"orgId"`
 		ProjectID   string `json:"projectId"`
+		ProjectKey  string `json:"projectKey"`
 		FeatureID   string `json:"featureId"`
 		LocalID     int    `json:"localId"`
 		Title       string `json:"title"`
@@ -143,6 +147,7 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 		result.Task.ID, _ = taskData["id"].(string)
 		result.Task.OrgID, _ = taskData["orgId"].(string)
 		result.Task.ProjectID, _ = taskData["projectId"].(string)
+		result.Task.ProjectKey, _ = taskData["projectKey"].(string)
 		result.Task.FeatureID, _ = taskData["featureId"].(string)
 		if localID, ok := taskData["localId"].(float64); ok {
 			result.Task.LocalID = int(localID)
@@ -299,4 +304,35 @@ func ClaimNextTask(client *Client, params ClaimNextTaskParams) (*ClaimedTaskResp
 		return nil, nil
 	}
 	return result, nil
+}
+
+func ResolveProjectKey(client *Client, projectID string) string {
+	projectID = strings.TrimSpace(projectID)
+	if client == nil || projectID == "" {
+		return ""
+	}
+
+	resp, err := client.Get("/projects?limit=100")
+	if err != nil {
+		return ""
+	}
+	data, ok := resp["data"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, item := range data {
+		project, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id, _ := project["id"].(string)
+		if id != projectID {
+			continue
+		}
+		key, _ := project["key"].(string)
+		return strings.TrimSpace(key)
+	}
+
+	return ""
 }

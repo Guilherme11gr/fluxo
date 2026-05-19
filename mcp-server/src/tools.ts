@@ -26,18 +26,18 @@ Common use cases:
       projectId: { type: 'string', format: 'uuid', description: 'Filter by project UUID' },
       assigneeId: { type: 'string', format: 'uuid', description: 'Filter by assignee UUID' },
       tagId: { type: 'string', format: 'uuid', description: 'Filter by tag UUID' },
-      status: { 
-        type: 'string', 
+      status: {
+        type: 'string',
         enum: ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QA_READY', 'DONE'],
         description: 'Filter by status'
       },
-      priority: { 
-        type: 'string', 
+      priority: {
+        type: 'string',
         enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
         description: 'Filter by priority'
       },
-      type: { 
-        type: 'string', 
+      type: {
+        type: 'string',
         enum: ['TASK', 'BUG'],
         description: 'Filter by type'
       },
@@ -128,8 +128,8 @@ export const bulkUpdateTasksTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      ids: { 
-        type: 'array', 
+      ids: {
+        type: 'array',
         items: { type: 'string' },
         description: 'Array of task UUIDs'
       },
@@ -150,8 +150,8 @@ export const blockTasksTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      ids: { 
-        type: 'array', 
+      ids: {
+        type: 'array',
         items: { type: 'string' },
         description: 'Array of task UUIDs'
       },

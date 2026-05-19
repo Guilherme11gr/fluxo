@@ -1,0 +1,1440 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FluXo Runner Technical Implementation Plan</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101211;
+        --panel: #181b19;
+        --panel-2: #202421;
+        --panel-3: #2a2f2b;
+        --line: #3c453e;
+        --line-strong: #647164;
+        --text: #f1eee4;
+        --muted: #bcb7aa;
+        --quiet: #878478;
+        --amber: #f2b84b;
+        --cyan: #66c8d3;
+        --green: #8bc47b;
+        --red: #e36d63;
+        --blue: #79a9ef;
+        --rose: #df8298;
+        --ink: #0b0c0b;
+        --shadow: 0 22px 72px rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(90deg, rgba(242, 184, 75, 0.032) 1px, transparent 1px) 0 0 / 40px 40px,
+          linear-gradient(rgba(102, 200, 211, 0.025) 1px, transparent 1px) 0 0 / 40px 40px,
+          radial-gradient(circle at 0% 0%, rgba(121, 169, 239, 0.09), transparent 34rem),
+          radial-gradient(circle at 100% 6%, rgba(242, 184, 75, 0.08), transparent 32rem),
+          var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          "Aptos",
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.45;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .page {
+        width: min(1500px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 30px 0 70px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 26px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-weight: 900;
+      }
+
+      .brand::before {
+        content: "";
+        width: 30px;
+        height: 30px;
+        border: 1px solid rgba(102, 200, 211, 0.72);
+        background:
+          linear-gradient(90deg, rgba(102, 200, 211, 0.85) 0 34%, transparent 35%),
+          linear-gradient(180deg, rgba(242, 184, 75, 0.92) 0 38%, transparent 39%),
+          var(--panel);
+        box-shadow: 0 0 0 5px rgba(102, 200, 211, 0.08);
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .nav a {
+        border: 1px solid var(--line);
+        background: rgba(24, 27, 25, 0.76);
+        padding: 7px 10px;
+        text-decoration: none;
+      }
+
+      .hero {
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 38%),
+          linear-gradient(180deg, rgba(24, 27, 25, 0.96), rgba(17, 19, 18, 0.96));
+        box-shadow: var(--shadow);
+        padding: clamp(24px, 4vw, 54px);
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        gap: 24px;
+        align-items: end;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--amber);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 28px;
+        height: 2px;
+        background: var(--amber);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 940px;
+        margin: 24px 0 22px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(44px, 6vw, 92px);
+        line-height: 0.92;
+        letter-spacing: -0.03em;
+      }
+
+      h2 {
+        margin-bottom: 14px;
+        font-family:
+          Georgia,
+          "Times New Roman",
+          serif;
+        font-size: clamp(28px, 3.4vw, 48px);
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+
+      h3 {
+        margin-bottom: 10px;
+        font-size: 17px;
+      }
+
+      .lede {
+        max-width: 790px;
+        color: var(--muted);
+        font-size: clamp(17px, 1.5vw, 21px);
+      }
+
+      .hero-panel {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 18px;
+      }
+
+      .hero-panel strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--cyan);
+      }
+
+      .hero-panel p {
+        color: var(--muted);
+        margin-bottom: 0;
+      }
+
+      .section {
+        margin-top: 28px;
+        border: 1px solid var(--line);
+        background: rgba(24, 27, 25, 0.92);
+        box-shadow: var(--shadow);
+        padding: clamp(20px, 3vw, 34px);
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 22px;
+      }
+
+      .section-head p {
+        max-width: 720px;
+        color: var(--muted);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        border: 1px solid var(--line-strong);
+        padding: 3px 8px;
+        color: var(--muted);
+        font-family:
+          "Cascadia Mono",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .code,
+      code,
+      pre {
+        font-family:
+          "Cascadia Mono",
+          "SFMono-Regular",
+          Consolas,
+          monospace;
+      }
+
+      .code,
+      code {
+        color: #e5ecdd;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 16px;
+        min-height: 180px;
+      }
+
+      .card h3 {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .card h3::before {
+        content: "";
+        width: 11px;
+        height: 11px;
+        background: var(--accent, var(--amber));
+        box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent, var(--amber)) 15%, transparent);
+      }
+
+      .blue {
+        --accent: var(--blue);
+      }
+
+      .cyan {
+        --accent: var(--cyan);
+      }
+
+      .green {
+        --accent: var(--green);
+      }
+
+      .amber {
+        --accent: var(--amber);
+      }
+
+      .red {
+        --accent: var(--red);
+      }
+
+      .rose {
+        --accent: var(--rose);
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      li {
+        margin: 7px 0;
+        color: var(--muted);
+      }
+
+      li strong {
+        color: var(--text);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(140px, 1fr));
+        gap: 9px;
+      }
+
+      .flow-step {
+        min-height: 150px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 13px;
+        position: relative;
+      }
+
+      .flow-step b {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        margin-bottom: 10px;
+        background: var(--amber);
+        color: var(--ink);
+        font-size: 12px;
+      }
+
+      .flow-step strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .flow-step span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .matrix {
+        border: 1px solid var(--line);
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        min-width: 980px;
+        border-collapse: collapse;
+        background: var(--panel-2);
+      }
+
+      th,
+      td {
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 12px 13px;
+        vertical-align: top;
+        text-align: left;
+        font-size: 14px;
+      }
+
+      th {
+        background: var(--panel-3);
+        color: var(--text);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      td {
+        color: var(--muted);
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 0;
+      }
+
+      .diagram {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr 1fr;
+        gap: 12px;
+      }
+
+      .rail {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 16px;
+        min-height: 440px;
+      }
+
+      .rail h3 {
+        min-height: 42px;
+      }
+
+      .pill {
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-left: 5px solid var(--accent, var(--amber));
+        background: rgba(16, 18, 17, 0.74);
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .pill strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .pill span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .snippet-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 14px;
+      }
+
+      pre {
+        margin: 0;
+        border: 1px solid var(--line);
+        background: #0d0f0e;
+        color: #e6eadf;
+        padding: 16px;
+        overflow-x: auto;
+        font-size: 12px;
+        line-height: 1.5;
+        tab-size: 2;
+      }
+
+      .callout {
+        border-left: 4px solid var(--amber);
+        background: rgba(242, 184, 75, 0.08);
+        padding: 15px 17px;
+        color: var(--text);
+      }
+
+      .callout strong {
+        color: var(--amber);
+      }
+
+      .checklist {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .phase {
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 15px;
+        min-height: 250px;
+      }
+
+      .phase b {
+        display: inline-flex;
+        margin-bottom: 12px;
+        color: var(--amber);
+      }
+
+      .phase strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .note {
+        color: var(--quiet);
+        font-size: 12px;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 28px;
+        color: var(--quiet);
+        font-size: 13px;
+      }
+
+      @media (max-width: 1180px) {
+        .hero,
+        .grid-3,
+        .grid-2,
+        .diagram,
+        .snippet-grid,
+        .checklist {
+          grid-template-columns: 1fr;
+        }
+
+        .flow {
+          overflow-x: auto;
+          grid-template-columns: repeat(8, 190px);
+          padding-bottom: 4px;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          width: min(100% - 24px, 1500px);
+          padding-top: 18px;
+        }
+
+        .topbar,
+        .section-head {
+          display: grid;
+          justify-content: stretch;
+        }
+
+        .nav {
+          justify-content: flex-start;
+        }
+
+        .hero,
+        .section {
+          padding: 18px;
+        }
+
+        h1 {
+          font-size: clamp(42px, 15vw, 68px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand">FluXo Technical Plan</div>
+        <nav class="nav" aria-label="Seções">
+          <a href="runner-architecture-map.html">Mapa visual</a>
+          <a href="#estado-atual">Estado atual</a>
+          <a href="#contratos">Contratos</a>
+          <a href="#schema">Schema</a>
+          <a href="#qa">QA runner</a>
+          <a href="#feature-run">Feature run</a>
+          <a href="#rollout">Rollout</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div>
+          <span class="eyebrow">Plano técnico</span>
+          <h1>Como transformar o runner em kernel de execução</h1>
+          <p class="lede">
+            Esta página aprofunda o mapa visual: o que existe hoje, quais invariantes faltam, quais
+            campos e contratos entram, e em que ordem implementar para chegar em feature runs com QA real
+            sem criar uma máquina autônoma opaca.
+          </p>
+        </div>
+        <aside class="hero-panel">
+          <strong>Resumo da tese</strong>
+          <p>
+            O FluXo não precisa virar “empresa de agentes”. Precisa virar um sistema de goals limitados:
+            feature run coordena, task execution tenta, reviewer/QA validam, e <span class="code">/finalize</span>
+            decide com base em protocolo, artefato, workflow e evidência de QA.
+          </p>
+        </aside>
+      </section>
+
+      <section class="section" id="estado-atual">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Revisão</span>
+            <h2>Estado atual do código</h2>
+          </div>
+          <p>
+            A base já tem quase todos os tijolos operacionais. A lacuna é que eles ainda não formam um
+            kernel: <span class="code">claim-next</span> cria a execução, o runner executa, mas
+            <span class="code">/finalize</span> ainda aceita a intenção final com pouca validação semântica.
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <article class="card blue">
+            <h3>Já existe</h3>
+            <ul>
+              <li><strong>Task/Feature/Agent</strong> como modelo de trabalho e dono.</li>
+              <li><strong>AgentExecution</strong> com status, output, metadata, heartbeat e eventos.</li>
+              <li><strong>ExecutionLease</strong> por projeto, runner e execution.</li>
+              <li><strong>RuntimeBinding</strong> com repo, branch base, git policy e execution mode.</li>
+            </ul>
+          </article>
+          <article class="card amber">
+            <h3>Funciona hoje</h3>
+            <ul>
+              <li><strong>claim-next</strong> filtra status e assignee, cria execution e lease.</li>
+              <li><strong>runner-go</strong> prepara worktree, executa agente, cria comentário e chama finalize.</li>
+              <li><strong>Agente configurável</strong> usa pick/claim/done status, então QA já cabe no modelo.</li>
+              <li><strong>Events</strong> já têm tabela sequencial por execution.</li>
+            </ul>
+          </article>
+          <article class="card red">
+            <h3>Falta endurecer</h3>
+            <ul>
+              <li><strong>Task.currentExecutionId</strong> não existe como lock semântico.</li>
+              <li><strong>Git snapshot</strong> mistura HEAD herdado com commits novos.</li>
+              <li><strong>Finalize</strong> não valida role, transition matrix nem evidence contract.</li>
+              <li><strong>QA_READY</strong> ainda pode ser tratado como quase final, não fila de QA real.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="contratos">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Contratos</span>
+            <h2>Quatro gates no finalize</h2>
+          </div>
+          <p>
+            O endpoint de finalize deve virar o ponto onde a intenção do agente encontra as provas do
+            sistema. O payload pode continuar rico, mas a decisão final precisa ser computada pelo backend.
+          </p>
+        </div>
+
+        <div class="flow">
+          <article class="flow-step">
+            <b>01</b>
+            <strong>Parse request</strong>
+            <span>Zod valida forma, mas não decide sucesso.</span>
+          </article>
+          <article class="flow-step">
+            <b>02</b>
+            <strong>Load context</strong>
+            <span>Execution, task, feature, agent, lease e runtime metadata.</span>
+          </article>
+          <article class="flow-step">
+            <b>03</b>
+            <strong>Protocol gate</strong>
+            <span>Route id, expectedExecutionId, currentExecutionId e terminal idempotente.</span>
+          </article>
+          <article class="flow-step">
+            <b>04</b>
+            <strong>Role gate</strong>
+            <span>Builder, reviewer, QA, orchestrator ou recovery são derivados do servidor.</span>
+          </article>
+          <article class="flow-step">
+            <b>05</b>
+            <strong>Artifact gate</strong>
+            <span>Write task success exige baseline, final HEAD, commits novos, delta e branch policy.</span>
+          </article>
+          <article class="flow-step">
+            <b>06</b>
+            <strong>QA gate</strong>
+            <span>DONE pós QA_READY exige browser evidence pack quando aplicável.</span>
+          </article>
+          <article class="flow-step">
+            <b>07</b>
+            <strong>Persist atomically</strong>
+            <span>Execution, task, currentExecution clear, lease delete, event e comment; reject não aplica transição.</span>
+          </article>
+          <article class="flow-step">
+            <b>08</b>
+            <strong>Wake next actor</strong>
+            <span>Reviewer, QA, recovery ou orchestrator da feature.</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Payload</span>
+            <h2>Finalize v2 recomendado</h2>
+          </div>
+          <p>
+            O objetivo não é abandonar o payload atual. É acrescentar campos que tornam a decisão
+            verificável e reduzem inferência espalhada no backend.
+          </p>
+        </div>
+
+        <div class="snippet-grid">
+          <pre><code>{
+  "status": "SUCCESS",
+  "expectedExecutionId": "exec-uuid",
+  "callerRoleHint": "builder",
+  "disposition": {
+    "fromStatus": "DOING",
+    "requestedNextStatus": "REVIEW",
+    "nextAssigneeAgentId": "reviewer-uuid",
+    "reason": "implementation_ready_for_review"
+  },
+  "evidence": {
+    "artifact": {
+      "workKind": "write",
+      "gitPolicy": "branch_commit_pr",
+      "baseBranch": "main",
+      "branch": "agent/task-12345678",
+      "baselineHeadSha": "abc123",
+      "finalHeadSha": "def456",
+      "newCommitShas": ["def456"],
+      "changedFiles": ["src/foo.ts"],
+      "hasVerifiableDelta": true
+    },
+    "workflow": {
+      "outputContractSource": "model",
+      "checksRun": ["npm run test -- src/foo.spec.ts"]
+    }
+  },
+  "result": { "...": "existing ExecutionResultV1" },
+  "metadata": { "...": "existing metadata" }
+}</code></pre>
+
+          <pre><code>function validateFinalize(ctx, req) {
+	  assert(req.expectedExecutionId === ctx.execution.id)
+	  assert(ctx.task.currentExecutionId === ctx.execution.id)
+	  assert(ctx.execution.status in ["CLAIMED", "RUNNING"])
+
+  const effectiveRole = deriveExecutionRole({
+    execution: ctx.execution,
+    agent: ctx.agent,
+    task: ctx.task,
+    runtimeBinding: ctx.runtimeBinding
+  })
+  // req.callerRoleHint is telemetry only. It never grants authority.
+  assertTransitionAllowed(effectiveRole, ctx.task.status, req.disposition)
+
+	  if (req.status === "SUCCESS" && requiresArtifact(ctx, effectiveRole)) {
+	    assertGitPolicy(ctx.runtimeBinding, req.evidence.artifact)
+	    assert(req.evidence.artifact.hasVerifiableDelta)
+	    assert(req.evidence.artifact.newCommitShas.length > 0)
+	    assert(req.evidence.artifact.baselineHeadSha)
+	    assert(req.evidence.artifact.finalHeadSha)
+	    assert(req.evidence.artifact.baselineHeadSha !== req.evidence.artifact.finalHeadSha)
+	  }
+
+	  if (req.disposition.blockReason) {
+	    assertBlockOperationAllowed(effectiveRole, ctx.task.status, req.disposition)
+	    assert(req.disposition.requestedNextStatus == null)
+	  }
+
+  if (movesToDoneFromQa(effectiveRole, ctx.task.status, req.disposition)) {
+    assertQaEvidence(req.evidence.qa)
+  }
+}</code></pre>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Rejected finalize</span>
+            <h2>Sem degradação silenciosa</h2>
+          </div>
+          <p>
+            Se o caller pede <span class="code">SUCCESS</span> mas falha nos gates, o kernel não deve
+            “rebaixar” como se fosse uma falha normal do agente. A intenção é rejeitada explicitamente,
+            a transição pedida não é aplicada e a auditoria mostra qual invariant falhou.
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <article class="card red">
+            <h3>MVP sem novo enum</h3>
+            <ul>
+              <li><strong>Execution</strong> não é marcada terminal quando o finalize é rejeitado.</li>
+              <li><strong>Event</strong> recebe <span class="code">finalize.validation_rejected</span> com o gate que falhou.</li>
+              <li><strong>Task</strong> não aplica <span class="code">requestedNextStatus</span>.</li>
+              <li><strong>Ownership</strong> permanece até retry válido, cancelamento explícito ou reap seguro.</li>
+            </ul>
+          </article>
+          <article class="card amber">
+            <h3>Modelo alvo</h3>
+            <ul>
+              <li><strong>VALIDATION_REJECTED</strong> para payload inválido ou evidence insuficiente.</li>
+              <li><strong>INCONSISTENT</strong> para estado impossível ou divergência sistêmica.</li>
+              <li><strong>FAILED</strong> fica reservado para execução que tentou e falhou.</li>
+            </ul>
+          </article>
+          <article class="card blue">
+            <h3>Resposta da API</h3>
+            <ul>
+              <li><strong>HTTP 409</strong> para stale execution / ownership inválido.</li>
+              <li><strong>HTTP 422</strong> para evidence ou transition inválida.</li>
+              <li><strong>Event</strong> <span class="code">finalize.validation_rejected</span> sempre persistido quando possível.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Authority</span>
+            <h2>Role nunca vem do caller</h2>
+          </div>
+          <p>
+            Esse é um ponto de segurança do desenho. O runner pode enviar um hint para debug, mas a
+            autoridade real vem da execution persistida, do agent configurado e do contexto de claim.
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <article class="card red">
+            <h3>Não fazer</h3>
+            <ul>
+              <li><strong>Não confiar</strong> em <span class="code">req.role</span>.</li>
+              <li><strong>Não permitir</strong> que uma execution se declare QA/reviewer no finalize.</li>
+              <li><strong>Não derivar</strong> permissão de texto final, prompt ou comentário.</li>
+            </ul>
+          </article>
+          <article class="card green">
+            <h3>Fonte de verdade</h3>
+            <ul>
+              <li><strong>Agent.type/config</strong> define capabilities permitidas.</li>
+              <li><strong>Execution.metadata.runRole</strong> é gravado pelo servidor no claim.</li>
+              <li><strong>Task.status + claim config</strong> restringem o papel efetivo.</li>
+            </ul>
+          </article>
+          <article class="card blue">
+            <h3>Uso do hint</h3>
+            <ul>
+              <li><strong>callerRoleHint</strong> serve para telemetria e diagnóstico.</li>
+              <li><strong>Divergência</strong> entre hint e effectiveRole vira warning/event.</li>
+              <li><strong>Policy</strong> sempre usa <span class="code">effectiveRole</span>.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="schema">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Schema</span>
+            <h2>Mudanças de dados</h2>
+          </div>
+          <p>
+            Dá para fazer em duas velocidades: primeiro metadata compatível para reduzir risco; depois
+            campos normalizados onde o backend precisa consultar, bloquear e auditar com eficiência.
+          </p>
+        </div>
+
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Camada</th>
+                <th>Mudança mínima</th>
+                <th>Mudança alvo</th>
+                <th>Por quê</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Task ownership</strong></td>
+                <td><span class="code">metadata.currentExecutionId</span> só como transição se a migration precisar esperar.</td>
+                <td><span class="code">Task.currentExecutionId</span> com FK opcional para <span class="code">AgentExecution</span> já no primeiro hardening PR.</td>
+                <td>Impede finalize, heartbeat e stage move por execução velha.</td>
+              </tr>
+              <tr>
+                <td><strong>Execution role</strong></td>
+                <td><span class="code">execution.metadata.runRole</span> gravado pelo servidor no claim.</td>
+                <td>Coluna <span class="code">runRole</span> indexada ou enum dedicado, nunca enviada como autoridade pelo caller.</td>
+                <td>Permite transition matrix sem depender só do tipo do Agent e sem role spoofing.</td>
+              </tr>
+              <tr>
+                <td><strong>Feature goal</strong></td>
+                <td><span class="code">Feature.metadata.goalRun</span> se existir campo JSON futuro.</td>
+                <td>Novo modelo <span class="code">FeatureRun</span> com status, budget, plan e outcome.</td>
+                <td>Feature vira unidade de autonomia bounded, como Codex/Hermes goals.</td>
+              </tr>
+              <tr>
+                <td><strong>Evidence</strong></td>
+                <td>Persistir em <span class="code">AgentExecution.metadata.evidence</span>.</td>
+                <td>Opcionalmente tabela <span class="code">ExecutionArtifact</span> para arquivos, traces e screenshots.</td>
+                <td>QA/browser e logs grandes não devem virar texto solto em comment.</td>
+              </tr>
+              <tr>
+                <td><strong>Recovery</strong></td>
+                <td>Eventos <span class="code">system.notice</span> e comments estruturados.</td>
+                <td>Tabela/metadata para <span class="code">RecoveryAction</span> idempotente.</td>
+                <td>Watchdog precisa lembrar que já tentou corrigir uma inconsistência.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Prisma sketch</span>
+            <h2>Modelos alvo em pseudo-schema</h2>
+          </div>
+          <span class="tag">não é patch pronto</span>
+        </div>
+
+        <div class="snippet-grid">
+          <pre><code>model Task {
+  id                 String @id @db.Uuid
+  status             TaskStatus
+  assigneeAgentId    String? @db.Uuid
+  currentExecutionId String? @map("current_execution_id") @db.Uuid
+
+  currentExecution AgentExecution? @relation(
+    "TaskCurrentExecution",
+    fields: [currentExecutionId],
+    references: [id],
+    onDelete: SetNull
+  )
+
+  @@index([currentExecutionId])
+}</code></pre>
+
+          <pre><code>model FeatureRun {
+  id                  String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId               String @map("org_id") @db.Uuid
+  projectId           String @map("project_id") @db.Uuid
+  featureId           String @map("feature_id") @db.Uuid
+  orchestratorAgentId String? @map("orchestrator_agent_id") @db.Uuid
+  status              String @default("PLANNING")
+  goal                String @db.Text
+  budget              Json @default("{}")
+  plan                Json @default("{}")
+  outcome             Json @default("{}")
+  metadata            Json @default("{}")
+  startedAt           DateTime @map("started_at") @db.Timestamptz(6)
+  finishedAt          DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  @@index([orgId, status])
+  @@index([featureId, status])
+}</code></pre>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Artifact truth</span>
+            <h2>Git snapshot v2</h2>
+          </div>
+          <p>
+            O runner precisa parar de usar uma lista genérica de commits como prova. Para escrita, a
+            diferença entre baseline, HEAD final e commits novos é a peça que fecha o falso positivo.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <article class="card red">
+            <h3>Problema atual</h3>
+            <ul>
+              <li><strong>CommitChanges</strong> retorna <span class="code">""</span> sem erro quando não há mudança.</li>
+              <li><strong>CaptureGitSnapshot</strong> pode gravar o HEAD atual em <span class="code">commitShas</span>.</li>
+              <li><strong>Finalize</strong> não sabe diferenciar HEAD herdado de commit produzido pela run.</li>
+            </ul>
+          </article>
+          <article class="card green">
+            <h3>Contrato novo</h3>
+            <ul>
+              <li><strong>baselineHeadSha</strong> capturado antes do executor.</li>
+              <li><strong>finalHeadSha</strong> capturado depois de commit/PR.</li>
+              <li><strong>newCommitShas</strong> coletado por range <span class="code">baseline..HEAD</span>.</li>
+              <li><strong>hasVerifiableDelta</strong> calculado pelo runner e revalidável pelo backend.</li>
+              <li><strong>branch/policy</strong> validado contra runtime binding: branch base, prefixo permitido e branch protegida.</li>
+            </ul>
+          </article>
+        </div>
+
+<div class="snippet-grid" style="margin-top: 14px">
+          <pre><code>type GitEvidence struct {
+  GitPolicy            string   `json:"gitPolicy"`
+  BaseBranch           string   `json:"baseBranch"`
+  Branch               string   `json:"branch"`
+  BaselineHeadSHA      string   `json:"baselineHeadSha"`
+  FinalHeadSHA         string   `json:"finalHeadSha"`
+  NewCommitSHAs        []string `json:"newCommitShas"`
+  ChangedFiles         []string `json:"changedFiles"`
+  HasVerifiableDelta   bool     `json:"hasVerifiableDelta"`
+  PolicyVerified       bool     `json:"policyVerified"`
+  VerificationErrors   []string `json:"verificationErrors"`
+}</code></pre>
+
+          <pre><code>// Rule of thumb:
+if workKind == "write" && status == "SUCCESS" {
+  require(gitEvidence.PolicyVerified)
+  require(gitEvidence.GitPolicy == runtimeBinding.GitPolicy)
+  require(gitEvidence.BaseBranch == runtimeBinding.DefaultBaseBranch)
+  require(branchAllowed(gitEvidence.Branch, runtimeBinding.AllowedBranchPrefix))
+  require(!isProtectedBranch(gitEvidence.Branch, gitEvidence.BaseBranch))
+  require(gitEvidence.HasVerifiableDelta)
+  require(len(gitEvidence.NewCommitSHAs) > 0)
+  require(gitEvidence.BaselineHeadSHA != gitEvidence.FinalHeadSHA)
+}
+
+// changedFiles remains useful for diagnosis,
+// but it is not enough for final SUCCESS.</code></pre>
+        </div>
+      </section>
+
+      <section class="section" id="qa">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">QA runner</span>
+            <h2>Como encaixar browser QA sem quebrar o board</h2>
+          </div>
+          <p>
+            A pergunta do handoff fica simples se <span class="code">QA_READY</span> deixar de ser
+            “pronto para done” e virar “pronto para ser claimado por QA”. O status depois é
+            <span class="code">DONE</span> somente quando a QA execution passa. Na primeira versão, a task
+            permanece em <span class="code">QA_READY</span> durante a execução; quem indica “QA em andamento”
+            é <span class="code">currentExecutionId</span> + execution status, não um novo status.
+          </p>
+        </div>
+
+        <div class="diagram">
+          <article class="rail">
+            <h3>Configuração de agentes</h3>
+            <div class="pill" style="--accent: var(--green)">
+              <strong>Builder</strong>
+              <span><span class="code">pick=TODO</span>, <span class="code">claim=DOING</span>, <span class="code">done=REVIEW</span>.</span>
+            </div>
+            <div class="pill" style="--accent: var(--amber)">
+              <strong>Reviewer</strong>
+              <span><span class="code">pick=REVIEW</span>, <span class="code">claim=REVIEW</span>, <span class="code">done=QA_READY</span>, nextAssignee=QA.</span>
+            </div>
+            <div class="pill" style="--accent: var(--cyan)">
+              <strong>QA browser</strong>
+              <span><span class="code">pick=QA_READY</span>, <span class="code">claim=QA_READY</span>, <span class="code">done=DONE</span>.</span>
+            </div>
+          </article>
+
+          <article class="rail">
+            <h3>QA execution</h3>
+            <div class="pill" style="--accent: var(--blue)">
+              <strong>Boot app</strong>
+              <span>Runner inicia dev server ou usa URL deploy/preview definida pelo runtime binding.</span>
+            </div>
+            <div class="pill" style="--accent: var(--cyan)">
+              <strong>Browser tool</strong>
+              <span>Adapter usa Chrome DevTools MCP, Playwright ou browser-use via provider configurado.</span>
+            </div>
+            <div class="pill" style="--accent: var(--rose)">
+              <strong>Scenario pack</strong>
+              <span>Critérios vêm da task/feature, reviewer handoff e smoke suite padrão do projeto.</span>
+            </div>
+            <div class="pill" style="--accent: var(--green)">
+              <strong>Evidence pack</strong>
+              <span>Passos, screenshots, traces, console errors, network failures e pass/fail por critério.</span>
+            </div>
+          </article>
+
+          <article class="rail">
+            <h3>Disposição</h3>
+            <div class="pill" style="--accent: var(--green)">
+              <strong>Pass</strong>
+              <span>Finalize com <span class="code">nextStatus=DONE</span> e evidência de QA anexada.</span>
+            </div>
+            <div class="pill" style="--accent: var(--amber)">
+              <strong>Ambíguo</strong>
+              <span>Volta para <span class="code">REVIEW</span> com pergunta objetiva e artefatos.</span>
+            </div>
+            <div class="pill" style="--accent: var(--red)">
+              <strong>Bug reproduzível</strong>
+              <span>Volta para <span class="code">DOING</span> ou cria BUG vinculado, com repro steps.</span>
+            </div>
+            <div class="pill" style="--accent: var(--red)">
+              <strong>Ambiente quebrado</strong>
+              <span>Bloqueia com razão: credencial, seed, URL, serviço externo ou setup.</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="snippet-grid" style="margin-top: 14px">
+          <pre><code>{
+  "evidence": {
+    "qa": {
+      "provider": "chrome-devtools-mcp",
+      "urlUnderTest": "http://localhost:3005",
+      "browser": "chromium",
+      "viewport": "1440x1000",
+      "passed": false,
+      "checks": [
+        {
+          "name": "create task flow",
+          "status": "failed",
+          "failureKind": "ui_regression",
+          "reproSteps": ["open feature", "create task", "save"]
+        }
+      ],
+      "consoleErrors": [],
+      "networkFailures": [],
+      "screenshots": [{ "artifactRef": "qa/exec-uuid/create-task.png" }],
+      "traceRef": "qa/exec-uuid/trace.zip"
+    }
+  }
+}</code></pre>
+
+<pre><code>QA pass rule:
+  task.status == QA_READY
+  effectiveRole == qa
+  task.currentExecutionId == execution.id
+  requestedNextStatus == DONE
+  qa.passed == true
+  qa.checks.length > 0
+  no critical console/network failures
+
+QA fail rule:
+  effectiveRole == qa
+  task.currentExecutionId == execution.id
+  requestedNextStatus in [DOING, REVIEW]
+  comment includes repro steps
+  evidence.qa.passed == false</code></pre>
+        </div>
+      </section>
+
+      <section class="section" id="feature-run">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Feature run</span>
+            <h2>CEO agent como orquestrador bounded</h2>
+          </div>
+          <p>
+            O CEO não deve ser “um chefe geral sempre acordado”. Ele deve ser uma execution de feature
+            com objetivo e limites. Ele decide a próxima tentativa, mas não substitui builder, reviewer,
+            QA nem finalize gates.
+          </p>
+        </div>
+
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Responsabilidade</th>
+                <th>Permitido</th>
+                <th>Proibido</th>
+                <th>Sinal de parada</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Planning</strong></td>
+                <td>Quebrar feature em tasks pequenas, ordenar risco e escolher primeiro agente.</td>
+                <td>Criar escopo novo fora da feature sem aprovação humana.</td>
+                <td>Escopo ambíguo, critério de aceite ausente ou conflito de prioridade.</td>
+              </tr>
+              <tr>
+                <td><strong>Coordination</strong></td>
+                <td>Reagir a finalize events e acordar builder/reviewer/QA/recovery.</td>
+                <td>Marcar task ou feature como done por narrativa própria.</td>
+                <td>Mesmo erro N vezes, custo estourado ou task sem dono válido.</td>
+              </tr>
+              <tr>
+                <td><strong>Quality pressure</strong></td>
+                <td>Exigir checks, QA, screenshots e handoff estruturado.</td>
+                <td>Diminuir gate para fazer a feature andar.</td>
+                <td>QA bloqueado por ambiente, credencial ou dado não disponível.</td>
+              </tr>
+              <tr>
+                <td><strong>Feature closure</strong></td>
+                <td>Propor encerramento quando todas as tasks críticas estão DONE e DoD passou.</td>
+                <td>Fechar feature com tasks ativas, blocked ou sem QA exigido.</td>
+                <td>Definition of done não verificável.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-2" style="margin-top: 14px">
+          <article class="card blue">
+            <h3>FeatureRun state machine</h3>
+            <ul>
+              <li><strong>PLANNING</strong>: cria plano inicial e budgets.</li>
+              <li><strong>RUNNING</strong>: coordena task runs e observa eventos.</li>
+              <li><strong>WAITING</strong>: aguarda humano, ambiente ou dependência externa.</li>
+              <li><strong>BLOCKED</strong>: não consegue avançar sem intervenção.</li>
+              <li><strong>DONE</strong>: DoD passou e não há trabalho ativo relevante.</li>
+            </ul>
+          </article>
+          <article class="card rose">
+            <h3>Budgets anti-slop</h3>
+            <ul>
+              <li><strong>maxTaskRuns</strong>: limite de tentativas por feature.</li>
+              <li><strong>maxRetriesPerTask</strong>: evita bater cabeça no mesmo bug.</li>
+              <li><strong>maxWallClockMinutes</strong>: corta feature run longa demais.</li>
+              <li><strong>maxOpenQuestions</strong>: força humano quando o contexto ficou difuso.</li>
+              <li><strong>requiresQa</strong>: define quando browser QA é obrigatório.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Transition matrix</span>
+            <h2>Quem pode mover o quê</h2>
+          </div>
+          <p>
+            Essa matriz é o ponto onde Paperclip entra mais forte. Não basta ter status; cada papel tem
+            um conjunto pequeno de transições válidas.
+          </p>
+        </div>
+
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Effective role</th>
+                <th>From</th>
+                <th>To permitido</th>
+                <th>Evidência exigida</th>
+                <th>Observação</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>orchestrator</strong></td>
+                <td>feature active</td>
+                <td>assign task, create task, block feature, request human</td>
+                <td>plan diff, reason, budget state</td>
+                <td>Não finaliza task nem feature sozinho.</td>
+              </tr>
+	              <tr>
+	                <td><strong>builder</strong></td>
+	                <td>TODO/DOING</td>
+	                <td>REVIEW, block(reason), TODO retry</td>
+	                <td>git evidence para write; summary/checks para no_write</td>
+	                <td>Não deve mandar direto para DONE em write flow.</td>
+	              </tr>
+	              <tr>
+	                <td><strong>reviewer</strong></td>
+	                <td>REVIEW</td>
+	                <td>QA_READY, DOING/TODO changes, block(reason)</td>
+	                <td>builder evidence + review findings</td>
+	                <td>Não inventa evidência quando builder não entregou.</td>
+	              </tr>
+	              <tr>
+	                <td><strong>qa</strong></td>
+	                <td>QA_READY</td>
+	                <td>DONE, REVIEW, DOING, block(reason)</td>
+	                <td>browser evidence pack</td>
+	                <td>DONE é resultado de QA pass, não default.</td>
+	              </tr>
+	              <tr>
+	                <td><strong>recovery</strong></td>
+	                <td>inconsistent</td>
+	                <td>block(reason), TODO/REVIEW/QA_READY with notice</td>
+	                <td>source execution, inconsistency reason</td>
+	                <td>Corrige workflow, não fabrica artifact truth.</td>
+	              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">API / Runner</span>
+            <h2>Mudanças por componente</h2>
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <article class="card cyan">
+            <h3>Agent API</h3>
+            <ul>
+	              <li><strong>claim-next</strong> seta current execution na task.</li>
+	              <li><strong>heartbeat</strong> valida expected execution e renova lease antes do evento.</li>
+	              <li><strong>finalize</strong> deriva effectiveRole e rejeita transições inválidas explicitamente.</li>
+	              <li><strong>reap-stale</strong> limpa current execution com compare-and-clear por execution id.</li>
+	              <li><strong>events</strong> recebem system notices e validation failures.</li>
+            </ul>
+          </article>
+          <article class="card green">
+            <h3>runner-go</h3>
+            <ul>
+              <li><strong>GitEvidence v2</strong> captura baseline antes e final depois.</li>
+              <li><strong>NoChanges</strong> vira condição explícita, não sucesso silencioso.</li>
+              <li><strong>Finalize v2</strong> manda expectedExecutionId, callerRoleHint e evidence.</li>
+              <li><strong>QA adapter</strong> roda browser provider e persiste artifacts.</li>
+            </ul>
+          </article>
+          <article class="card amber">
+            <h3>Web / PM</h3>
+            <ul>
+              <li><strong>FeatureRun view</strong> mostra goal, plan, attempts e stop conditions.</li>
+              <li><strong>Task detail</strong> mostra evidence pack, não só comentário.</li>
+              <li><strong>QA column</strong> deixa claro que QA_READY é fila ativa.</li>
+              <li><strong>Recovery notices</strong> aparecem como ação requerida.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="rollout">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Rollout</span>
+            <h2>Ordem para chegar lá sem quebrar tudo</h2>
+          </div>
+          <p>
+            Eu evitaria começar pelo CEO agent. Primeiro fecha protocol truth + artifact truth no mesmo
+            corte de hardening; depois QA; depois feature run. Assim a camada de orquestração já nasce
+            em cima de trilhos sólidos.
+          </p>
+        </div>
+
+        <div class="checklist">
+          <article class="phase">
+            <b>Fase 0</b>
+            <strong>Configurar QA com o que já existe</strong>
+            <ul>
+              <li>Agent QA como <span class="code">CUSTOM</span> ou tipo novo.</li>
+              <li><span class="code">pickStatus=QA_READY</span>, <span class="code">claimStatus=QA_READY</span>, <span class="code">doneStatus=DONE</span>.</li>
+              <li>Reviewer aponta <span class="code">nextAssigneeAgentId</span> para QA.</li>
+              <li>Sem enforcement forte ainda, só prova de fluxo.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 1</b>
+            <strong>Protocol + artifact gate</strong>
+            <ul>
+	              <li><span class="code">currentExecutionId</span> na task e set no claim.</li>
+	              <li><span class="code">expectedExecutionId</span> em finalize, heartbeat, events, comments e stage move.</li>
+	              <li><span class="code">finalize/reap-stale</span> limpam ownership somente quando ainda aponta para a execution.</li>
+	              <li><span class="code">effectiveRole</span> gravado pelo servidor no claim.</li>
+	              <li>GitEvidence v2 no runner.</li>
+	              <li>QA runner envia <span class="code">evidence.qa</span> mínimo; browser pack entra como upgrade.</li>
+	              <li><span class="code">hasVerifiableDelta</span> obrigatório para write success.</li>
+	              <li>Finalize rejeita falso success sem marcar execução como terminal.</li>
+              <li>Tests em runner-go e rotas agent críticas.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 2</b>
+            <strong>Protocol hardening completo</strong>
+            <ul>
+	              <li>Enum/status explícito para <span class="code">VALIDATION_REJECTED</span> se o produto quiser terminalizar rejeição.</li>
+	              <li>Run stale recebe evento próprio quando tenta mutação fora do owner.</li>
+	              <li>Lease cleanup consolida ownership de execuções órfãs e em estado inconsistente.</li>
+	              <li>Transition matrix completa passa a diferenciar status change de block/unblock.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 3</b>
+            <strong>QA browser evidence</strong>
+            <ul>
+              <li>Adapter browser provider.</li>
+              <li>Evidence pack schema com screenshots/traces reais.</li>
+              <li>DONE continua exigindo QA pass quando effectiveRole=qa.</li>
+              <li>Falha volta com repro steps.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 4</b>
+            <strong>FeatureRun / CEO bounded</strong>
+            <ul>
+              <li>Modelo FeatureRun.</li>
+              <li>Orchestrator claim/wakeup por feature.</li>
+              <li>Budgets e stop conditions.</li>
+              <li>Event-driven next action após finalize.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 5</b>
+            <strong>Recovery watchdog</strong>
+            <ul>
+              <li>successful run missing disposition.</li>
+              <li>system notices idempotentes.</li>
+              <li>diagnostics para stale/missing evidence.</li>
+              <li>circuit breaker por falhas repetidas.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 6</b>
+            <strong>Observabilidade pesada</strong>
+            <ul>
+              <li>Full logs + excerpts.</li>
+              <li>Artifact refs para QA e traces.</li>
+              <li>FeatureRun dashboard.</li>
+              <li>Review isolado para PR não confiável.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <b>Fase 7</b>
+            <strong>Policy hardening</strong>
+            <ul>
+              <li>Transition matrix declarativa.</li>
+              <li>Signoff policy por projeto.</li>
+              <li>Escalation rules para humano.</li>
+              <li>Métricas de quality drift.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Primeiro PR bom</span>
+            <h2>Menor corte que muda o jogo</h2>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>Eu começaria aqui:</strong>
+          adicionar <span class="code">Task.currentExecutionId</span>, gravar esse campo no
+          <span class="code">claim-next</span>, enviar <span class="code">expectedExecutionId</span> no
+          finalize, adicionar GitEvidence v2 no runner e fazer <span class="code">/finalize</span>
+          rejeitar <span class="code">SUCCESS</span> de write task sem ownership válido, branch policy
+          válida e <span class="code">hasVerifiableDelta</span>. Isso fecha protocol truth e artifact
+          truth antes de introduzir CEO agent, QA browser ou FeatureRun.
+        </div>
+        <p class="note">
+          Depois desse corte, QA runner fica bem natural: é “só” mais um role claimando
+          <span class="code">QA_READY</span>, mas com evidence pack próprio.
+        </p>
+      </section>
+
+      <footer class="footer">
+        <span>FluXo / jt-kill technical architecture draft</span>
+        <span>Companion page for <span class="code">runner-architecture-map.html</span></span>
+      </footer>
+    </main>
+  </body>
+</html>

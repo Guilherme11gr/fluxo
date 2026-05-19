@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockFindPageByExecutionId,
+  mockCreateMany,
   mockFindById,
+  mockFindTaskById,
   mockExtractAgentAuth,
 } = vi.hoisted(() => ({
   mockFindPageByExecutionId: vi.fn(),
+  mockCreateMany: vi.fn(),
   mockFindById: vi.fn(),
+  mockFindTaskById: vi.fn(),
   mockExtractAgentAuth: vi.fn(),
 }));
 
@@ -17,13 +21,17 @@ vi.mock('@/shared/http/agent-auth', () => ({
 vi.mock('@/infra/adapters/prisma', () => ({
   agentExecutionEventRepository: {
     findPageByExecutionId: mockFindPageByExecutionId,
+    createMany: mockCreateMany,
   },
   agentExecutionRepository: {
     findById: mockFindById,
   },
+  taskRepository: {
+    findById: mockFindTaskById,
+  },
 }));
 
-import { GET } from './route';
+import { GET, POST } from './route';
 
 describe('GET /api/agent/executions/[id]/events', () => {
   beforeEach(() => {
@@ -37,7 +45,17 @@ describe('GET /api/agent/executions/[id]/events', () => {
       authMethod: 'tenant_api_key',
       keyId: 'key-1',
     });
-    mockFindById.mockResolvedValue({ id: 'exec-1', orgId: 'org-1' });
+    mockFindById.mockResolvedValue({
+      id: 'exec-1',
+      orgId: 'org-1',
+      taskId: 'task-1',
+      status: 'RUNNING',
+    });
+    mockFindTaskById.mockResolvedValue({
+      id: 'task-1',
+      currentExecutionId: 'exec-1',
+    });
+    mockCreateMany.mockResolvedValue(1);
   });
 
   it('returns metadata in meta with lastSeq, nextAfterSeq, hasMore', async () => {
@@ -129,5 +147,44 @@ describe('GET /api/agent/executions/[id]/events', () => {
     const body = await response.json();
     expect(body.data[0].seq).toBe(1);
     expect(body.data[1].seq).toBe(2);
+  });
+
+  it('creates events when expectedExecutionId matches the active owner', async () => {
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedExecutionId: 'exec-1',
+          events: [{ seq: 1, kind: 'log', content: 'hello' }],
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCreateMany).toHaveBeenCalledWith('exec-1', [{ seq: 1, kind: 'log', content: 'hello' }]);
+  });
+
+  it('rejects event append when the task is owned by another execution', async () => {
+    mockFindTaskById.mockResolvedValueOnce({
+      id: 'task-1',
+      currentExecutionId: 'exec-other',
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedExecutionId: 'exec-1',
+          events: [{ seq: 1, kind: 'log', content: 'hello' }],
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(mockCreateMany).not.toHaveBeenCalled();
   });
 });

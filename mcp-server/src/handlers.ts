@@ -34,7 +34,7 @@ export async function handleListTasks(args: ToolArgs): Promise<string> {
       search: args.search as string,
       limit: args.limit as number,
     });
-    
+
     const tasks = response.data as Array<{ readableId: string; title: string; status: string }>;
     const summary = `✅ Found ${response.meta?.total || tasks.length} tasks`;
     return formatResponse(response.data, summary);
@@ -80,12 +80,12 @@ export async function handleUpdateTask(args: ToolArgs): Promise<string> {
     const id = await resolveTaskId(args.id as string);
     const { changeReason, ...updateFields } = args;
     delete updateFields.id;
-    
+
     const body = {
       ...updateFields,
       _metadata: { changeReason: changeReason || 'Updated via MCP' },
     };
-    
+
     const response = await apiRequest('PATCH', `/tasks/${id}`, body);
     const task = response.data as { readableId: string; title: string; status: string };
     return formatResponse(response.data, `✅ Task ${task.readableId} updated: "${task.title}" → ${task.status}`);

@@ -50,6 +50,38 @@ func TestBuildBranchName(t *testing.T) {
 	}
 }
 
+func TestBuildTaskBranchNameUsesReadableTaskKeyAndTitle(t *testing.T) {
+	got := BuildTaskBranchName(
+		"74aec692-804e-49cb-857f-196361e559e3",
+		"TASK",
+		"codex-updated-runner-smoke",
+		"agent/",
+		387,
+		"FLXO",
+		"Runner worktree fix validation",
+	)
+	want := "agent/codex-updated-runner-smoke/task-flxo-387-runner-worktree-fix-validation"
+	if got != want {
+		t.Fatalf("BuildTaskBranchName() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildTaskBranchNameFallsBackToLegacyWhenLocalIDMissing(t *testing.T) {
+	got := BuildTaskBranchName(
+		"74aec692-804e-49cb-857f-196361e559e3",
+		"TASK",
+		"codex-updated-runner-smoke",
+		"agent/",
+		0,
+		"FLXO",
+		"Runner worktree fix validation",
+	)
+	want := "agent/task-74aec692"
+	if got != want {
+		t.Fatalf("BuildTaskBranchName() = %q, want %q", got, want)
+	}
+}
+
 func TestParseGitPolicy(t *testing.T) {
 	if got := ParseGitPolicy("branch_commit_pr"); got != GitPolicyBranchCommitPR {
 		t.Fatalf("expected branch_commit_pr, got %q", got)
@@ -503,4 +535,226 @@ func initTestGitRepoWithRemote(t *testing.T) string {
 		t.Fatalf("push main: %v", err)
 	}
 	return repoDir
+}
+
+func TestResolveCanonicalBranch(t *testing.T) {
+	tests := []struct {
+		name          string
+		featureID     string
+		taskID        string
+		taskType      string
+		agentName     string
+		allowedPrefix string
+		want          string
+	}{
+		{
+			name:          "uses feature ID when available",
+			featureID:     "feat-abc123",
+			taskID:        "task-xyz789",
+			taskType:      "TASK",
+			agentName:     "builder",
+			allowedPrefix: "agent/",
+			want:          "agent/task-feat-abc",
+		},
+		{
+			name:          "falls back to task ID when no feature ID",
+			featureID:     "",
+			taskID:        "task-xyz789",
+			taskType:      "TASK",
+			agentName:     "builder",
+			allowedPrefix: "agent/",
+			want:          "agent/task-task-xyz",
+		},
+		{
+			name:          "short feature ID preserved",
+			featureID:     "abc",
+			taskID:        "task-xyz789",
+			taskType:      "BUG",
+			agentName:     "reviewer",
+			allowedPrefix: "",
+			want:          "reviewer/bug-abc",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveCanonicalBranch(tt.featureID, tt.taskID, tt.taskType, tt.agentName, tt.allowedPrefix)
+			if got != tt.want {
+				t.Fatalf("ResolveCanonicalBranch() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveTaskBranch(t *testing.T) {
+	got := ResolveTaskBranch(
+		"task-xyz789",
+		"TASK",
+		"builder-agent",
+		"agent/",
+		378,
+		"FLXO",
+		"Create simple landing page",
+	)
+	want := "agent/builder-agent/task-flxo-378-create-simple-landing-page"
+	if got != want {
+		t.Fatalf("ResolveTaskBranch() = %q, want %q", got, want)
+	}
+}
+
+func TestRemoteBranchExistsReturnsFalseForNonExistent(t *testing.T) {
+	repo := initTestGitRepoWithRemote(t)
+	defer os.RemoveAll(repo)
+
+	exists, err := RemoteBranchExists(repo, "nonexistent-branch")
+	if err != nil {
+		t.Fatalf("RemoteBranchExists should not error for non-existent branch, got: %v", err)
+	}
+	if exists {
+		t.Fatal("expected RemoteBranchExists=false for non-existent branch")
+	}
+}
+
+func TestRemoteBranchExistsReturnsTrueForExisting(t *testing.T) {
+	repo := initTestGitRepoWithRemote(t)
+	defer os.RemoveAll(repo)
+
+	branch := "agent/task-test-remote"
+	if _, err := PrepareGitBranch(repo, GitPolicyBranchOnly, branch, "main", "agent/"); err != nil {
+		t.Fatalf("PrepareGitBranch failed: %v", err)
+	}
+	if err := PushBranch(repo, branch); err != nil {
+		t.Fatalf("PushBranch failed: %v", err)
+	}
+
+	exists, err := RemoteBranchExists(repo, branch)
+	if err != nil {
+		t.Fatalf("RemoteBranchExists should not error for existing branch, got: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected RemoteBranchExists=true for pushed branch")
+	}
+}
+
+func TestSwitchToTaskBranchFromRemoteUsesBaseWhenBranchNotRemote(t *testing.T) {
+	baseRepo := initTestGitRepoWithRemote(t)
+	worktreesRoot := filepath.Join(t.TempDir(), "worktrees")
+	worktreePath, err := CreateExecutionWorktree(baseRepo, worktreesRoot, "exec-base-fallback", "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree failed: %v", err)
+	}
+
+	branch := "agent/task-new-feature"
+	if err := SwitchToTaskBranchFromRemote(worktreePath, branch, "main", "agent/", baseRepo); err != nil {
+		t.Fatalf("SwitchToTaskBranchFromRemote failed: %v", err)
+	}
+
+	currentBranch, err := gitCommand(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatalf("read current branch: %v", err)
+	}
+	if currentBranch != branch {
+		t.Fatalf("expected branch %q, got %q", branch, currentBranch)
+	}
+}
+
+func TestSequentialExecutionOnSameFeatureSyncsFromRemote(t *testing.T) {
+	baseRepo := initTestGitRepoWithRemote(t)
+	worktreesRoot := filepath.Join(t.TempDir(), "worktrees")
+
+	branch := "agent/task-sequential"
+
+	firstExecID := "exec-first"
+	firstWorktree, err := CreateExecutionWorktree(baseRepo, worktreesRoot, firstExecID, "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree (first) failed: %v", err)
+	}
+
+	if err := SwitchToTaskBranchFromRemote(firstWorktree, branch, "main", "agent/", baseRepo); err != nil {
+		t.Fatalf("SwitchToTaskBranchFromRemote (first) failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(firstWorktree, "first-change.txt"), []byte("first execution"), 0644); err != nil {
+		t.Fatalf("write first file: %v", err)
+	}
+	if _, err := CommitChanges(firstWorktree, branch, "task-1", "First execution"); err != nil {
+		t.Fatalf("CommitChanges (first) failed: %v", err)
+	}
+	if err := PushBranch(firstWorktree, branch); err != nil {
+		t.Fatalf("PushBranch (first) failed: %v", err)
+	}
+
+	firstHead, err := gitCommand(firstWorktree, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("read first HEAD: %v", err)
+	}
+
+	if err := RemoveExecutionWorktree(baseRepo, firstWorktree, branch); err != nil {
+		t.Fatalf("RemoveExecutionWorktree (first) failed: %v", err)
+	}
+
+	secondExecID := "exec-second"
+	secondWorktree, err := CreateExecutionWorktree(baseRepo, worktreesRoot, secondExecID, "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree (second) failed: %v", err)
+	}
+
+	if err := SwitchToTaskBranchFromRemote(secondWorktree, branch, "main", "agent/", baseRepo); err != nil {
+		t.Fatalf("SwitchToTaskBranchFromRemote (second) failed: %v", err)
+	}
+
+	secondHead, err := gitCommand(secondWorktree, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("read second HEAD: %v", err)
+	}
+
+	if firstHead != secondHead {
+		t.Fatalf("expected second execution to start from first execution HEAD: first=%s second=%s", firstHead[:8], secondHead[:8])
+	}
+
+	if err := os.WriteFile(filepath.Join(secondWorktree, "second-change.txt"), []byte("second execution"), 0644); err != nil {
+		t.Fatalf("write second file: %v", err)
+	}
+	if _, err := CommitChanges(secondWorktree, branch, "task-2", "Second execution"); err != nil {
+		t.Fatalf("CommitChanges (second) failed: %v", err)
+	}
+
+	if err := PushBranch(secondWorktree, branch); err != nil {
+		t.Fatalf("PushBranch (second) failed: %v", err)
+	}
+
+	secondAfterCommit, err := gitCommand(secondWorktree, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("read second HEAD after commit: %v", err)
+	}
+
+	if err := RemoveExecutionWorktree(baseRepo, secondWorktree, branch); err != nil {
+		t.Fatalf("RemoveExecutionWorktree (second) failed: %v", err)
+	}
+
+	thirdExecID := "exec-third"
+	thirdWorktree, err := CreateExecutionWorktree(baseRepo, worktreesRoot, thirdExecID, "main")
+	if err != nil {
+		t.Fatalf("CreateExecutionWorktree (third) failed: %v", err)
+	}
+
+	if err := SwitchToTaskBranchFromRemote(thirdWorktree, branch, "main", "agent/", baseRepo); err != nil {
+		t.Fatalf("SwitchToTaskBranchFromRemote (third) failed: %v", err)
+	}
+
+	thirdHead, err := gitCommand(thirdWorktree, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("read third HEAD: %v", err)
+	}
+
+	if secondAfterCommit != thirdHead {
+		t.Fatalf("expected third execution to start from second execution HEAD: second=%s third=%s", secondAfterCommit[:8], thirdHead[:8])
+	}
+
+	if _, err := os.Stat(filepath.Join(thirdWorktree, "first-change.txt")); os.IsNotExist(err) {
+		t.Fatal("expected first-change.txt to be present in third worktree")
+	}
+	if _, err := os.Stat(filepath.Join(thirdWorktree, "second-change.txt")); os.IsNotExist(err) {
+		t.Fatal("expected second-change.txt to be present in third worktree")
+	}
 }

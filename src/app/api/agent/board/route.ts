@@ -1,6 +1,6 @@
 /**
  * Agent API - Personal Board
- * 
+ *
  * GET /api/agent/board - Get full personal board (columns + items)
  */
 

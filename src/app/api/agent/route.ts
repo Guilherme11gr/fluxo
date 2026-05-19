@@ -1,11 +1,11 @@
 /**
  * Agent API Documentation Endpoint
- * 
+ *
  * GET /api/agent
- * 
+ *
  * Returns self-describing JSON documentation for agents to understand
  * all available endpoints, methods, parameters, and response formats.
- * 
+ *
  * No authentication required for docs endpoint.
  */
 
