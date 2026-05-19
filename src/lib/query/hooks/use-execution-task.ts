@@ -4,8 +4,9 @@ import { CACHE_TIMES } from '../cache-config';
 import { queryKeys } from '../query-keys';
 import type { TaskWithReadableId } from '@/shared/types';
 
-async function fetchTaskById(id: string): Promise<TaskWithReadableId> {
+async function fetchTaskById(id: string): Promise<TaskWithReadableId | null> {
   const res = await fetch(`/api/tasks/${id}`);
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to fetch task ${id}`);
   const json = await res.json();
   return json.data;

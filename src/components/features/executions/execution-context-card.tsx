@@ -49,7 +49,7 @@ export function ExecutionContextCard({ taskId, task, isLoading }: ExecutionConte
   if (!task) {
     return (
       <div className="text-xs text-muted-foreground py-2">
-        Task <span className="font-mono">{taskId.slice(0, 8)}...</span> não encontrada
+        Task <span className="font-mono">{taskId.slice(0, 8)}...</span> não disponível neste tenant ou removida
       </div>
     );
   }
