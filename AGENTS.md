@@ -62,3 +62,6 @@ npm run lint        # next lint
 ## Env Gotcha
 
 - `.env.example` still shows `NEXT_PUBLIC_APP_URL=http://localhost:3000`, but the actual dev server is `:3005`. For auth, GitHub install, or local callback work, use `http://localhost:3005` for app/auth URLs.
+
+## Smoke Test
+- Smoke marker added 2026-05-20T01:29:17.065Z — harmless no-op change for runner contract verification.
