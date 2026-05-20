@@ -82,10 +82,43 @@ ensure_agent_api_keys_schema() {
   echo "Applying agent API key schema migration"
   docker exec -i "${postgres_container}" \
     psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
-    < "${migration_file}"
+      < "${migration_file}"
+}
+
+ensure_project_runtime_bindings_schema() {
+  local migration_file="${STACK_DIR}/../../prisma/migrations/20260514_add_project_runtime_bindings/migration.sql"
+  local postgres_container="${FLUXO_POSTGRES_CONTAINER_NAME:-fluxo-postgres}"
+
+  : "${POSTGRES_USER:?POSTGRES_USER must be set in ${ENV_FILE}}"
+  : "${POSTGRES_DB:?POSTGRES_DB must be set in ${ENV_FILE}}"
+
+  if [[ ! -f "${migration_file}" ]]; then
+    echo "Project runtime binding migration file not found at ${migration_file}" >&2
+    exit 1
+  fi
+
+  local table_exists
+  table_exists="$(docker exec -i "${postgres_container}" \
+    psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atqc \
+    "SELECT to_regclass('public.project_runtime_bindings') IS NOT NULL")"
+
+  if [[ "${table_exists}" == "t" ]]; then
+    echo "Project runtime binding schema already present"
+  else
+    echo "Applying project runtime binding schema migration"
+    docker exec -i "${postgres_container}" \
+      psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
+      < "${migration_file}"
+  fi
+
+  echo "Ensuring project runtime binding provision columns"
+  docker exec -i "${postgres_container}" \
+    psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
+    -c "ALTER TABLE public.project_runtime_bindings ADD COLUMN IF NOT EXISTS provision_command text, ADD COLUMN IF NOT EXISTS provision_cache_key text;"
 }
 
 ensure_agent_api_keys_schema
+ensure_project_runtime_bindings_schema
 
 if [[ -n "${APP_IMAGE}" ]]; then
   if [[ -z "${REGISTRY}" ]]; then

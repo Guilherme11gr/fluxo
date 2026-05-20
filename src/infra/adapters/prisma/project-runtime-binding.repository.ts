@@ -21,6 +21,19 @@ export interface ProjectRuntimeBindingRecord {
   updatedAt: Date;
 }
 
+export interface UpdateProjectRuntimeBindingInput {
+  repoPath?: string;
+  defaultBaseBranch?: string;
+  allowedBranchPrefix?: string | null;
+  executionMode?: string;
+  gitProvider?: string | null;
+  prPolicy?: string;
+  gitPolicy?: string;
+  provisionCommand?: string | null;
+  provisionCacheKey?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
 function mapRecord(record: any): ProjectRuntimeBindingRecord {
   return {
     id: record.id,
@@ -97,5 +110,39 @@ export class ProjectRuntimeBindingRepository {
     });
 
     return records.map(mapRecord);
+  }
+
+  async findBySelector(input: {
+    orgId: string;
+    projectId: string;
+    runnerProfile: string;
+    hostOs: string;
+  }): Promise<ProjectRuntimeBindingRecord | null> {
+    const record = await this.client.projectRuntimeBinding.findFirst({
+      where: {
+        orgId: input.orgId,
+        projectId: input.projectId,
+        runnerProfile: input.runnerProfile,
+        hostOs: input.hostOs,
+      },
+    });
+
+    return record ? mapRecord(record) : null;
+  }
+
+  async update(
+    id: string,
+    data: UpdateProjectRuntimeBindingInput,
+  ): Promise<ProjectRuntimeBindingRecord> {
+    const updateData = Object.fromEntries(
+      Object.entries(data).filter(([, value]) => value !== undefined),
+    );
+
+    const record = await this.client.projectRuntimeBinding.update({
+      where: { id },
+      data: updateData,
+    });
+
+    return mapRecord(record);
   }
 }

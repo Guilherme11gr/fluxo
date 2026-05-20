@@ -311,7 +311,7 @@ func buildOutputSchemaExample(version string) string {
   "decisions": [],
   "risks": [],
   "checksRun": [
-    { "name": "name of a check", "status": "passed", "details": null }
+    { "name": "npm run test", "status": "passed", "details": null, "observed": false }
   ],
   "filesTouched": [],
   "git": {
@@ -319,8 +319,13 @@ func buildOutputSchemaExample(version string) string {
     "baseBranch": null,
     "branch": null,
     "commitShas": [],
+    "newCommitShas": [],
+    "changedFiles": [],
+    "hasVerifiableDelta": false,
+    "policyVerified": false,
     "prUrl": null,
-    "prNumber": null
+    "prNumber": null,
+    "links": {}
   },
   "followups": [],
   "memoryCandidates": [],

@@ -70,6 +70,24 @@ describe("buildDeterministicBranchName", () => {
     );
   });
 
+  it("uses projectKey in semantic task branches for PRD claims", () => {
+    const name = buildDeterministicBranchName(
+      "38800000-804e-49cb-857f-196361e559e3",
+      "TASK",
+      "codex-updated-runner-smoke",
+      "agent/",
+      {
+        localId: 388,
+        projectKey: "FLXO",
+        title: "Validate runner contract",
+      },
+    );
+
+    expect(name).toBe(
+      "agent/codex-updated-runner-smoke/task-flxo-388-validate-runner-contract",
+    );
+  });
+
   it("strips special characters from agent name", () => {
     const name = buildDeterministicBranchName(
       "shortid",

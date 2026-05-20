@@ -13,6 +13,7 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/logging"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 	agentsync "github.com/fluxo-app/fluxo-runner/internal/sync"
+	"github.com/fluxo-app/fluxo-runner/internal/version"
 )
 
 type RunnerManager struct {
@@ -52,10 +53,11 @@ func (m *RunnerManager) Register(ctx context.Context) error {
 	hostname, _ := os.Hostname()
 	runnerProfile := hostname
 	logging.Debugf("register runner hostname=%s profile=%s hostOS=%s", hostname, runnerProfile, runtime.GOOS)
+	versionMetadata := version.Metadata()
 	runnerID, err := api.RegisterRunner(api.NewClient(m.apiURL, m.apiKey, "runner"), api.RegisterRunnerParams{
 		Hostname: hostname,
 		PID:      os.Getpid(),
-		Version:  "0.3.0",
+		Version:  version.String(),
 		Capabilities: map[string]interface{}{
 			"streaming":        true,
 			"claim_next":       true,
@@ -63,10 +65,12 @@ func (m *RunnerManager) Register(ctx context.Context) error {
 			"host_os":          runtime.GOOS,
 			"runner_profile":   runnerProfile,
 			"available_models": m.availableModels,
+			"version":          version.String(),
 		},
 		Metadata: map[string]interface{}{
 			"hostOs":        runtime.GOOS,
 			"runnerProfile": runnerProfile,
+			"version":       versionMetadata,
 		},
 	})
 	if err != nil {
@@ -208,9 +212,11 @@ func (m *RunnerManager) heartbeatLoop(ctx context.Context) {
 				Capabilities: map[string]interface{}{
 					"host_os":          runtime.GOOS,
 					"available_models": m.availableModels,
+					"version":          version.String(),
 				},
 				Metadata: map[string]interface{}{
-					"hostOs": runtime.GOOS,
+					"hostOs":  runtime.GOOS,
+					"version": version.Metadata(),
 				},
 			})
 			if err != nil {

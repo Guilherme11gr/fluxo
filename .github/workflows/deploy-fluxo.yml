@@ -43,6 +43,40 @@ jobs:
           HUSKY: 0
         run: npm ci
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test root app
+        run: npm run test -- --run
+
+      - name: Build root app
+        run: npm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: runner-go/go.mod
+          cache-dependency-path: runner-go/go.sum
+
+      - name: Test runner-go
+        working-directory: runner-go
+        run: go test ./...
+
+      - name: Build versioned runner binaries
+        working-directory: runner-go
+        run: |
+          mkdir -p dist
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-X github.com/fluxo-app/fluxo-runner/internal/version.Commit=${GITHUB_SHA} -X github.com/fluxo-app/fluxo-runner/internal/version.BuildDate=${BUILD_DATE}"
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/fluxo-runner-linux-amd64 .
+          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/fluxo-runner-windows-amd64.exe .
+
+      - name: Upload runner artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxo-runner-${{ github.sha }}
+          path: runner-go/dist/*
+
   deploy:
     name: Deploy to VPS
     needs:

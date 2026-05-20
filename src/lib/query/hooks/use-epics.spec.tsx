@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
@@ -5,6 +6,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCreateEpic, useUpdateEpic, useDeleteEpic } from './use-epics';
 import { queryKeys } from '../query-keys';
 import type { ReactNode } from 'react';
+
+vi.mock('./use-org-id', () => ({
+  useCurrentOrgId: () => 'org-123',
+}));
+
+vi.mock('@/hooks/use-realtime-status', () => ({
+  useRealtimeActive: () => false,
+}));
+
+vi.mock('../helpers', () => ({
+  smartInvalidate: (queryClient: QueryClient, queryKey: readonly unknown[]) => (
+    queryClient.invalidateQueries({ queryKey })
+  ),
+}));
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -144,7 +159,7 @@ describe('use-epics: Cache Invalidation', () => {
   });
 
   describe('useUpdateEpic', () => {
-    it('should invalidate epic detail after update', async () => {
+    it('should update epic detail cache after update', async () => {
       const epicId = 'epic-123';
       const updatedEpic = {
         id: epicId,
@@ -158,8 +173,6 @@ describe('use-epics: Cache Invalidation', () => {
         json: async () => ({ data: updatedEpic }),
       });
 
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-
       const { result } = renderHook(() => useUpdateEpic(), { wrapper });
 
       result.current.mutate({
@@ -169,10 +182,7 @@ describe('use-epics: Cache Invalidation', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      // Assert: should invalidate epic detail
-      expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.epics.detail(orgId, epicId),
-      });
+      expect(queryClient.getQueryData(queryKeys.epics.detail(orgId, epicId))).toEqual(updatedEpic);
     });
 
     it('should invalidate epic lists after update', async () => {
@@ -289,9 +299,12 @@ describe('use-epics: Cache Invalidation', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      // Assert: should invalidate all epic queries
+      // Assert: should invalidate all epic list queries
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.epics.all(orgId),
+        queryKey: queryKeys.epics.lists(orgId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.epics.allList(orgId),
       });
     });
 

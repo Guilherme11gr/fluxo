@@ -33,6 +33,117 @@ func TestFormatExecutionEventFormatsToolResult(t *testing.T) {
 	}
 }
 
+func TestExtractObservedChecksFromShellToolEvents(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"bash","callID":"call_test","state":{"input":{"command":"npm run test -- src/foo.spec.ts"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","callID":"call_test","state":{"status":"completed","output":{"exitCode":0,"stdout":"pass","durationMs":1234}}}}`,
+		`{"type":"tool_use","part":{"tool":"bash","callID":"call_type","state":{"input":{"command":"npm run typecheck"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","callID":"call_type","state":{"status":"completed","output":{"exitCode":0,"stdout":"ok"}}}}`,
+	}, "\n")
+
+	checks := ExtractObservedChecks(raw)
+	if len(checks) != 2 {
+		t.Fatalf("expected two observed checks, got %#v", checks)
+	}
+	if checks[0].Name != "npm run test -- src/foo.spec.ts" || checks[0].Status != "passed" || !checks[0].Observed {
+		t.Fatalf("unexpected first check: %#v", checks[0])
+	}
+	if checks[0].ExitCode == nil || *checks[0].ExitCode != 0 {
+		t.Fatalf("expected exitCode=0, got %#v", checks[0].ExitCode)
+	}
+	if checks[0].DurationMs == nil || *checks[0].DurationMs != 1234 {
+		t.Fatalf("expected durationMs=1234, got %#v", checks[0].DurationMs)
+	}
+}
+
+func TestExtractObservedChecksMarksCriticalFailure(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"npm run lint"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","state":{"status":"completed","output":{"exitCode":1,"stderr":"lint failed"}}}}`,
+	}, "\n")
+
+	checks := ExtractObservedChecks(raw)
+	if len(checks) != 1 {
+		t.Fatalf("expected one observed check, got %#v", checks)
+	}
+	if checks[0].Status != "failed" {
+		t.Fatalf("expected failed status, got %#v", checks[0])
+	}
+	if !HasFailedCriticalCheck(checks) {
+		t.Fatalf("expected failed critical check for %#v", checks)
+	}
+	if summary := FailedCriticalCheckSummary(checks); !strings.Contains(summary, "npm run lint") {
+		t.Fatalf("expected failed command in summary, got %q", summary)
+	}
+}
+
+func TestExtractObservedChecksDetectsEchoedExitCode(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"bash","callID":"call_smoke","state":{"input":{"command":"npx tsc --noEmit --definitely-invalid-option 2>&1; echo \"EXIT_CODE=$LASTEXITCODE\""}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","callID":"call_smoke","state":{"status":"completed","output":{"stdout":"error TS5023: Unknown compiler option '--definitely-invalid-option'.\nEXIT_CODE=1"}}}}`,
+	}, "\n")
+
+	checks := ExtractObservedChecks(raw)
+	if len(checks) != 1 {
+		t.Fatalf("expected one observed check, got %#v", checks)
+	}
+	if checks[0].Status != "failed" {
+		t.Fatalf("expected failed status from echoed exit code, got %#v", checks[0])
+	}
+	if checks[0].ExitCode == nil || *checks[0].ExitCode != 1 {
+		t.Fatalf("expected exitCode=1, got %#v", checks[0].ExitCode)
+	}
+	if !HasFailedCriticalCheck(checks) {
+		t.Fatalf("expected failed critical check for %#v", checks)
+	}
+}
+
+func TestExtractObservedChecksPromotesRepeatedCommandFailure(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"type":"tool_use","part":{"tool":"bash","callID":"call_tsc_1","state":{"input":{"command":"npx tsc --noEmit --definitely-invalid-option 2>&1"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","callID":"call_tsc_1","state":{"status":"completed","output":{"stdout":"\u001b[41m..."}}}}`,
+		`{"type":"tool_use","part":{"tool":"bash","callID":"call_tsc_2","state":{"input":{"command":"npx tsc --noEmit --definitely-invalid-option 2>&1"}}}}`,
+		`{"type":"tool_result","part":{"tool":"bash","callID":"call_tsc_2","state":{"status":"completed","output":{"stdout":"error TS5023: Unknown compiler option '--definitely-invalid-option'."}}}}`,
+	}, "\n")
+
+	checks := ExtractObservedChecks(raw)
+	if len(checks) != 1 {
+		t.Fatalf("expected deduplicated observed check, got %#v", checks)
+	}
+	if checks[0].Status != "failed" {
+		t.Fatalf("expected repeated command to be promoted to failed, got %#v", checks[0])
+	}
+	if !HasFailedCriticalCheck(checks) {
+		t.Fatalf("expected failed critical check for %#v", checks)
+	}
+}
+
+func TestBuildExecutionResultMergesObservedChecksAheadOfAgentChecks(t *testing.T) {
+	raw := strings.Join([]string{
+		ResultStartMarker,
+		`{"schemaVersion":"v1","status":"success","summary":"Done","whatChanged":[],"decisions":[],"risks":[],"checksRun":[{"name":"agent check","status":"passed"}],"filesTouched":[],"git":{"mode":"manual","baseBranch":null,"branch":null,"commitShas":[],"prUrl":null,"prNumber":null},"followups":[],"memoryCandidates":[],"skillCandidates":[]}`,
+		ResultEndMarker,
+	}, "\n")
+
+	result := BuildExecutionResultV1WithContext(true, raw, 0, ExecutionResultDerivedContext{
+		ChecksRun: []ExecutionResultCheck{{
+			Name:     "npm run test",
+			Status:   "passed",
+			Command:  "npm run test",
+			Observed: true,
+		}},
+	})
+
+	checks, ok := result["checksRun"].([]interface{})
+	if !ok || len(checks) != 2 {
+		t.Fatalf("expected observed + agent checks, got %#v", result["checksRun"])
+	}
+	first, _ := checks[0].(map[string]interface{})
+	if first["name"] != "npm run test" || first["observed"] != true {
+		t.Fatalf("expected observed check first, got %#v", first)
+	}
+}
+
 func TestFormatExecutionEventPassthroughNonJSON(t *testing.T) {
 	result := FormatExecutionEvent("stdout", "just plain text")
 	if result != "just plain text" {
@@ -307,9 +418,9 @@ func TestTruncateString(t *testing.T) {
 
 func TestFormatToolInputEdit(t *testing.T) {
 	input := map[string]interface{}{
-		"file":        "src/main.go",
-		"old_string":  "func old()",
-		"new_string":  "func new()",
+		"file":       "src/main.go",
+		"old_string": "func old()",
+		"new_string": "func new()",
 	}
 	result := formatToolInput("edit", input)
 	if !strings.Contains(result, "src/main.go") {
@@ -1444,20 +1555,20 @@ func TestFormatStreamReadableToolResultWithStatusOnly(t *testing.T) {
 		`{"type":"tool_result","part":{"tool":"bash","state":{"status":"running"}}}`,
 	}, "\n")
 
- 	result := FormatStreamReadable(raw)
- 	if !strings.Contains(result, "▸ bash") {
- 		t.Fatalf("expected tool use, got %q", result)
- 	}
- 	if !strings.Contains(result, "bash") {
- 		t.Fatalf("expected tool name in result, got %q", result)
- 	}
+	result := FormatStreamReadable(raw)
+	if !strings.Contains(result, "▸ bash") {
+		t.Fatalf("expected tool use, got %q", result)
+	}
+	if !strings.Contains(result, "bash") {
+		t.Fatalf("expected tool name in result, got %q", result)
+	}
 }
 
 func TestFormatToolInputTaskTool(t *testing.T) {
 	input := map[string]interface{}{
-		"description":     "Explore codebase structure",
-		"subagent_type":   "explore",
-		"prompt":          "Explore the codebase at D:\\... (very long prompt)",
+		"description":   "Explore codebase structure",
+		"subagent_type": "explore",
+		"prompt":        "Explore the codebase at D:\\... (very long prompt)",
 	}
 	result := formatToolInput("task", input)
 	if !strings.Contains(result, "Explore codebase structure") {
@@ -1567,8 +1678,8 @@ func TestFormatToolUseEventWithEmbeddedResult(t *testing.T) {
 		"state": map[string]interface{}{
 			"status": "completed",
 			"input": map[string]interface{}{
-				"description":     "Explore codebase",
-				"subagent_type":   "explore",
+				"description":   "Explore codebase",
+				"subagent_type": "explore",
 			},
 			"output": "task_id: ses_abc123\n\n<task_result>\nProject uses Go with a runner architecture.\n</task_result>",
 		},
@@ -1656,9 +1767,9 @@ func TestFormatStreamReadableWithTaskTool(t *testing.T) {
 
 func TestFirstNonEmptyStr(t *testing.T) {
 	m := map[string]interface{}{
-		"file":     "",
+		"file":      "",
 		"file_path": "src/app.ts",
-		"path":     "fallback",
+		"path":      "fallback",
 	}
 	result := firstNonEmptyStr(m, "file", "file_path", "path")
 	if result != "src/app.ts" {

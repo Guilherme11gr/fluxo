@@ -95,25 +95,62 @@ func boolRef(value bool) *bool {
 	return &value
 }
 
-func finalizeEvidence(agent config.AgentConfig, snapshot runner.GitSnapshot, qaPassed *bool) map[string]interface{} {
+func finalizeEvidence(agent config.AgentConfig, snapshot runner.GitSnapshot, qaPassed *bool, checks []runner.ExecutionResultCheck) map[string]interface{} {
 	evidence := map[string]interface{}{
 		"artifact": runner.GitEvidenceMap(snapshot),
+		"git":      runner.GitEvidenceMap(snapshot),
 	}
 
-	if strings.EqualFold(finalizeCallerRoleHint(agent), "qa") && qaPassed != nil {
+	if qaPassed != nil || len(checks) > 0 || strings.EqualFold(finalizeCallerRoleHint(agent), "qa") {
 		check := "runner_execution_failed"
-		if *qaPassed {
+		passed := false
+		if qaPassed != nil {
+			passed = *qaPassed
+		} else if len(checks) > 0 {
+			passed = !runner.HasFailedCriticalCheck(checks)
+		}
+		if passed {
 			check = "runner_execution_success"
 		}
 		evidence["qa"] = map[string]interface{}{
-			"passed":   *qaPassed,
-			"checks":   []string{check},
-			"provider": "runner",
-			"mode":     "agent_report",
+			"required":  true,
+			"passed":    passed,
+			"checks":    []string{check},
+			"checksRun": executionChecksEvidence(checks),
+			"provider":  "runner",
+			"mode":      "observed",
 		}
 	}
 
 	return evidence
+}
+
+func executionChecksEvidence(checks []runner.ExecutionResultCheck) []map[string]interface{} {
+	if len(checks) == 0 {
+		return []map[string]interface{}{}
+	}
+	out := make([]map[string]interface{}, 0, len(checks))
+	for _, check := range checks {
+		item := map[string]interface{}{
+			"name":     check.Name,
+			"status":   check.Status,
+			"observed": check.Observed,
+		}
+		if check.Details != nil {
+			item["details"] = *check.Details
+		}
+		if strings.TrimSpace(check.Command) != "" {
+			item["command"] = check.Command
+		}
+		if check.ExitCode != nil {
+			item["exitCode"] = *check.ExitCode
+		}
+		if check.DurationMs != nil {
+			item["durationMs"] = *check.DurationMs
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func finalizeSetupFailure(client *api.Client, executionID string, agent config.AgentConfig, gitPolicy runner.GitPolicy, gitSnapshot runner.GitSnapshot, binding api.ClaimedTaskResponse, errorMessage string) {
@@ -122,7 +159,7 @@ func finalizeSetupFailure(client *api.Client, executionID string, agent config.A
 	_, _ = api.FinalizeExecution(client, executionID, api.FinalizeExecutionParams{
 		Status:         "FAILED",
 		CallerRoleHint: finalizeCallerRoleHint(agent),
-		Evidence:       finalizeEvidence(agent, gitSnapshot, boolRef(false)),
+		Evidence:       finalizeEvidence(agent, gitSnapshot, boolRef(false), nil),
 		Output:         persistedOutput,
 		ResultSummary:  truncate(errorMessage, 500),
 		Result:         structuredResult,
@@ -179,6 +216,53 @@ func provisionExecutionWorkspace(ctx context.Context, workdir, cacheRoot, hostOS
 func cleanupExecutionWorktree(baseRepoPath, worktreePath, branch string, agent config.AgentConfig) {
 	if err := runner.RemoveExecutionWorktree(baseRepoPath, worktreePath, branch); err != nil {
 		fmt.Printf("[%s] cleanup worktree error: %v\n", agent.Name, err)
+	}
+}
+
+func cleanupLocalRunnerState(client *api.Client, baseRepoPath string, agent config.AgentConfig) {
+	baseRepoPath = strings.TrimSpace(baseRepoPath)
+	if baseRepoPath == "" {
+		return
+	}
+
+	locks, err := featurelock.ListLocks(baseRepoPath)
+	if err != nil {
+		fmt.Printf("[%s] local janitor warning: list locks failed: %v\n", agent.Name, err)
+		return
+	}
+
+	for _, lock := range locks {
+		executionID := strings.TrimSpace(lock.Info.ExecutionID)
+		if executionID == "" {
+			continue
+		}
+		execution, err := api.GetExecution(client, executionID)
+		if err != nil {
+			fmt.Printf("[%s] local janitor warning: execution %s lookup failed: %v\n", agent.Name, executionID, err)
+			continue
+		}
+		if execution == nil || !isTerminalExecutionStatus(execution.Status) {
+			continue
+		}
+		if err := featurelock.RemoveLockRecord(lock); err != nil {
+			fmt.Printf("[%s] local janitor warning: remove lock for execution %s failed: %v\n", agent.Name, executionID, err)
+		}
+
+		worktreePath := filepath.Join(runner.WorktreesRootForRepo(baseRepoPath), executionID)
+		if _, statErr := os.Stat(worktreePath); statErr == nil {
+			if err := runner.RemoveExecutionWorktree(baseRepoPath, worktreePath, ""); err != nil {
+				fmt.Printf("[%s] local janitor warning: remove worktree for execution %s failed: %v\n", agent.Name, executionID, err)
+			}
+		}
+	}
+}
+
+func isTerminalExecutionStatus(status string) bool {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -316,6 +400,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	)
 
 	if gitPolicy != runner.GitPolicyNoWrite && baseRepoPath != "" {
+		cleanupLocalRunnerState(client, baseRepoPath, agent)
 		lock, lockErr := featurelock.AcquireLock(baseRepoPath, featureID, claimed.Execution.ID, agent.Name)
 		if lockErr != nil {
 			finalizeSetupFailure(client, claimed.Execution.ID, agent, gitPolicy, runner.GitSnapshot{Mode: string(gitPolicy), Branch: gitBranch, BaseBranch: gitBaseBranch}, *claimed, fmt.Sprintf("Failed to acquire feature write lock: %v", lockErr))
@@ -363,7 +448,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 			Status:         "FAILED",
 			CallerRoleHint: finalizeCallerRoleHint(agent),
-			Evidence:       finalizeEvidence(agent, gitSnapshot, boolRef(false)),
+			Evidence:       finalizeEvidence(agent, gitSnapshot, boolRef(false), nil),
 			Output:         persistedOutput,
 			ResultSummary:  truncate(errorMessage, 500),
 			Result:         structuredResult,
@@ -423,7 +508,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 			Status:         "FAILED",
 			CallerRoleHint: finalizeCallerRoleHint(agent),
-			Evidence:       finalizeEvidence(agent, failedGitSnapshot, boolRef(false)),
+			Evidence:       finalizeEvidence(agent, failedGitSnapshot, boolRef(false), nil),
 			Output:         persistedOutput,
 			ResultSummary:  truncate(errorMessage, 500),
 			Result:         structuredResult,
@@ -474,7 +559,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		_, _ = api.FinalizeExecution(client, claimed.Execution.ID, api.FinalizeExecutionParams{
 			Status:         "FAILED",
 			CallerRoleHint: finalizeCallerRoleHint(agent),
-			Evidence:       finalizeEvidence(agent, failedGitSnapshot, boolRef(false)),
+			Evidence:       finalizeEvidence(agent, failedGitSnapshot, boolRef(false), nil),
 			Output:         persistedOutput,
 			ResultSummary:  truncate(errorMessage, 500),
 			Result:         structuredResult,
@@ -685,7 +770,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	if !result.Success {
 		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, blockAwareOutput, timeout)
 	}
-	failExecutionWithGitError := func(message string) {
+	failExecutionWithProtocolError := func(message string) {
 		retainWorktreeForRecovery = true
 		result.Success = false
 		if result.ExitCode == 0 {
@@ -700,6 +785,14 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 		blockAwareOutput = appendStructuredBlocks(readableOutput, rawOutput)
 		strippedOutput = runner.StripStructuredResultBlock(blockAwareOutput)
 		structuredOutput, failureHeadline, errorMessage, blockReason = buildFailureExecutionDetails(agent.Name, agent.Tool, result, blockAwareOutput, timeout)
+	}
+	failExecutionWithGitError := func(message string) {
+		failExecutionWithProtocolError(message)
+	}
+
+	observedChecks := runner.ExtractObservedChecks(rawOutput)
+	if result.Success && runner.HasFailedCriticalCheck(observedChecks) {
+		failExecutionWithProtocolError(runner.FailedCriticalCheckSummary(observedChecks))
 	}
 
 	gitSnapshot := runner.CaptureGitSnapshot(workdir, preparedGit)
@@ -761,6 +854,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 
 	structuredResult, resultMeta := runner.BuildExecutionResultV1WithContextAndMeta(result.Success, structuredOutput, result.ExitCode, runner.ExecutionResultDerivedContext{
 		FilesTouched: filesTouched,
+		ChecksRun:    observedChecks,
 	})
 	extractorMeta := map[string]interface{}{
 		"attempted": false,
@@ -779,6 +873,12 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 			if err != nil {
 				logging.Debugf("worker[%s] extractor failed: %v", agent.Name, err)
 			}
+		}
+	}
+	if len(observedChecks) > 0 {
+		if parsed, err := runner.ParseExecutionResultV1Map(structuredResult); err == nil && parsed != nil {
+			parsed.ChecksRun = runner.MergeExecutionChecks(observedChecks, parsed.ChecksRun)
+			structuredResult = parsed.ToMap()
 		}
 	}
 
@@ -853,7 +953,7 @@ func (w *AgentWorker) runOnce(ctx context.Context) {
 	finalizeParams := api.FinalizeExecutionParams{
 		Status:              status,
 		CallerRoleHint:      finalizeCallerRoleHint(agent),
-		Evidence:            finalizeEvidence(agent, gitSnapshot, qaPassed),
+		Evidence:            finalizeEvidence(agent, gitSnapshot, qaPassed, observedChecks),
 		Output:              persistedOutput,
 		ResultSummary:       truncate(defaultStr(structuredSummary, strippedOutput), 500),
 		Result:              structuredResult,

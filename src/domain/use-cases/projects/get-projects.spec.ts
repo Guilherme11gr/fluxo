@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getProjects } from './get-projects';
 import type { ProjectRepository } from '@/infra/adapters/prisma';
-import type { Project } from '@/shared/types';
 
 describe('getProjects', () => {
   const mockRepo = {
     create: vi.fn(),
     findById: vi.fn(),
     findMany: vi.fn(),
+    findManyWithAnalytics: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
   } as unknown as ProjectRepository;
@@ -18,7 +18,7 @@ describe('getProjects', () => {
 
   it('should return projects for the organization', async () => {
     const orgId = 'org-1';
-    const expectedProjects: (Project & { _count: { epics: number; tasks: number } })[] = [
+    const expectedProjects: any[] = [
       {
         id: 'proj-1',
         orgId,
@@ -32,6 +32,11 @@ describe('getProjects', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
         _count: { epics: 0, tasks: 0 },
+        progress: 0,
+        activeCount: 0,
+        blockedCount: 0,
+        recentAssignees: [],
+        tasks: [],
       },
       {
         id: 'proj-2',
@@ -46,14 +51,19 @@ describe('getProjects', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
         _count: { epics: 0, tasks: 0 },
+        progress: 0,
+        activeCount: 0,
+        blockedCount: 0,
+        recentAssignees: [],
+        tasks: [],
       },
     ];
 
-    vi.mocked(mockRepo.findMany).mockResolvedValue(expectedProjects);
+    vi.mocked(mockRepo.findManyWithAnalytics).mockResolvedValue(expectedProjects);
 
     const result = await getProjects(orgId, { projectRepository: mockRepo });
 
     expect(result).toEqual(expectedProjects);
-    expect(mockRepo.findMany).toHaveBeenCalledWith(orgId);
+    expect(mockRepo.findManyWithAnalytics).toHaveBeenCalledWith(orgId);
   });
 });

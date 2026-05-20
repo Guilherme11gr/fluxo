@@ -594,7 +594,13 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
       expect.objectContaining({
         status: 'SUCCESS',
         metadata: expect.objectContaining({
-          evidence,
+          evidence: expect.objectContaining({
+            artifact: evidence.artifact,
+            git: expect.objectContaining({
+              prUrl: 'https://github.com/fluxo-app/fluxo/pull/42',
+              prNumber: 42,
+            }),
+          }),
         }),
       })
     );
@@ -604,6 +610,45 @@ describe('POST /api/agent/executions/[id]/finalize', () => {
       githubPrStatus: 'open',
     });
     expect(mockClearCurrentExecution).toHaveBeenCalledWith('task-1', 'org-1', 'exec-1');
+  });
+
+  it('rejects successful finalize when QA evidence contains a failed observed check', async () => {
+    const response = await POST(
+      new Request('http://localhost/api/agent/executions/exec-1/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'SUCCESS',
+          expectedExecutionId: 'exec-1',
+          evidence: {
+            qa: {
+              required: true,
+              passed: false,
+              checksRun: [
+                {
+                  name: 'npm run test',
+                  status: 'failed',
+                  observed: true,
+                  command: 'npm run test',
+                },
+              ],
+            },
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: 'exec-1' }) }
+    );
+
+    expect(response.status).toBe(422);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+    expect(mockClearCurrentExecution).not.toHaveBeenCalled();
+    expect(mockCreateExecutionEvents).toHaveBeenCalledWith('exec-1', [
+      expect.objectContaining({
+        seq: 1,
+        kind: 'finalize.validation_rejected',
+        metadata: expect.objectContaining({ gate: 'qa' }),
+      }),
+    ]);
   });
 
   it('retries memory ingestion for already-terminal successful executions when ingestion is not completed', async () => {

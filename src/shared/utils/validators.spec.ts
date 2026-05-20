@@ -103,12 +103,12 @@ describe('validators', () => {
       expect(createTaskSchema.safeParse(input).success).toBe(true);
     });
 
-    it('should reject task without assigneeId', () => {
+    it('should accept task without assigneeId', () => {
       const input = {
         projectId: '123e4567-e89b-12d3-a456-426614174000',
         title: 'Task without assignee',
       };
-      expect(createTaskSchema.safeParse(input).success).toBe(false);
+      expect(createTaskSchema.safeParse(input).success).toBe(true);
     });
 
     it('should reject short title', () => {

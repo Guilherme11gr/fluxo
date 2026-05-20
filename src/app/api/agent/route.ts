@@ -204,7 +204,7 @@ const API_DOCS = {
       response: { data: 'Epic' },
     },
 
-    // ============ PROJECTS (Read-only) ============
+    // ============ PROJECTS ============
     {
       method: 'GET',
       path: '/api/agent/projects',
@@ -214,6 +214,37 @@ const API_DOCS = {
         limit: { type: 'number', default: 50, max: 100 },
       },
       response: { data: '[Project]', meta: '{ total: number }' },
+    },
+    {
+      method: 'GET',
+      path: '/api/agent/projects/:id/runtime-bindings',
+      description: 'List project runtime bindings, optionally filtered by runnerProfile and hostOs',
+      auth: true,
+      params: { id: { type: 'uuid', required: true } },
+      query: {
+        runnerProfile: { type: 'string', required: false },
+        hostOs: { type: 'string', required: false },
+      },
+      response: { data: '[ProjectRuntimeBinding]', meta: '{ total: number }' },
+    },
+    {
+      method: 'PATCH',
+      path: '/api/agent/projects/:id/runtime-bindings',
+      description: 'Update an existing project runtime binding policy by runnerProfile and hostOs',
+      auth: true,
+      params: { id: { type: 'uuid', required: true } },
+      body: {
+        runnerProfile: { type: 'string', required: true },
+        hostOs: { type: 'string', required: true },
+        gitPolicy: { type: 'enum', values: ['no_write', 'branch_only', 'branch_commit_pr'], required: false },
+        prPolicy: { type: 'enum', values: ['disabled', 'draft', 'ready'], required: false },
+        gitProvider: { type: 'enum', values: ['github', null], required: false },
+        executionMode: { type: 'enum', values: ['shared_project', 'branch_per_task', 'local'], required: false },
+        defaultBaseBranch: { type: 'string', required: false },
+        allowedBranchPrefix: { type: 'string | null', required: false },
+        reason: { type: 'string', required: true, description: 'Audit reason for the policy change' },
+      },
+      response: { data: 'ProjectRuntimeBinding' },
     },
 
     // ============ DOCS (Markdown) ============
@@ -495,6 +526,24 @@ const API_DOCS = {
       name: 'string',
       key: 'string (short identifier)',
       description: 'string | null',
+      createdAt: 'ISO 8601 datetime',
+      updatedAt: 'ISO 8601 datetime',
+    },
+    ProjectRuntimeBinding: {
+      id: 'uuid',
+      projectId: 'uuid',
+      runnerProfile: 'string',
+      hostOs: 'string',
+      repoPath: 'string',
+      defaultBaseBranch: 'string',
+      allowedBranchPrefix: 'string | null',
+      executionMode: 'shared_project | branch_per_task | local',
+      gitProvider: 'github | null',
+      prPolicy: 'disabled | draft | ready',
+      gitPolicy: 'no_write | branch_only | branch_commit_pr',
+      provisionCommand: 'string | null',
+      provisionCacheKey: 'string | null',
+      metadata: 'object',
       createdAt: 'ISO 8601 datetime',
       updatedAt: 'ISO 8601 datetime',
     },

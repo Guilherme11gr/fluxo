@@ -37,6 +37,7 @@ describe('POST /api/agent/tasks/claim-next', () => {
         id: 'task-1',
         orgId: 'org-1',
         projectId: 'project-1',
+        projectKey: 'FLXO',
         featureId: 'feature-1',
         localId: 10,
         title: 'Implement runtime binding',
@@ -148,6 +149,7 @@ describe('POST /api/agent/tasks/claim-next', () => {
     );
 
     const json = await response.json();
+    expect(json.data.task.projectKey).toBe('FLXO');
     expect(json.data.runtimeBinding).toEqual(
       expect.objectContaining({
         id: 'binding-1',

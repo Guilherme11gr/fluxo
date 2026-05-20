@@ -1,46 +1,71 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ForbiddenError, UnauthorizedError } from '@/shared/errors';
+
+const {
+  mockCookies,
+  mockGetUser,
+  mockHeaders,
+  mockQueryRaw,
+} = vi.hoisted(() => ({
+  mockCookies: vi.fn(),
+  mockGetUser: vi.fn(),
+  mockHeaders: vi.fn(),
+  mockQueryRaw: vi.fn(),
+}));
+
+vi.mock('next/headers', () => ({
+  cookies: mockCookies,
+  headers: mockHeaders,
+}));
+
+vi.mock('@/infra/adapters/prisma', () => ({
+  prisma: {
+    $queryRaw: mockQueryRaw,
+  },
+}));
+
+import { membershipCache } from '@/shared/cache/membership-cache';
 import { extractAuthenticatedTenant, requireRole } from './auth.helpers';
-import { UnauthorizedError, ForbiddenError } from '@/shared/errors';
 
 describe('Auth Helpers', () => {
-  const mockSingle = vi.fn();
-  const mockEq = vi.fn(() => ({ single: mockSingle }));
-  const mockSelect = vi.fn(() => ({ eq: mockEq }));
-  const mockFrom = vi.fn(() => ({ select: mockSelect }));
-  const mockGetUser = vi.fn();
-
   const mockSupabase = {
     auth: { getUser: mockGetUser },
-    from: mockFrom,
   } as any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset env var if needed, though we can't easily change process.env in vitest without setup
-    // Assuming DEV_MOCK_AUTH is false by default or we can mock it if we could.
-    // Since the code reads process.env.DEV_MOCK_AUTH at module level, it's hard to change it dynamically 
-    // without reloading the module. We will assume it is false for these tests.
+    membershipCache.clear();
+    mockHeaders.mockResolvedValue({ get: () => null });
+    mockCookies.mockResolvedValue({ get: () => undefined });
   });
 
   describe('extractAuthenticatedTenant', () => {
-    it('should return userId and tenantId when authenticated and has profile', async () => {
-      const mockUser = { id: 'user-123' };
-      const mockProfile = { org_id: 'org-456' };
-
-      mockGetUser.mockResolvedValue({ data: { user: mockUser }, error: null });
-      mockSingle.mockResolvedValue({ data: mockProfile, error: null });
+    it('should return userId and tenantId when authenticated and has membership', async () => {
+      mockGetUser.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null });
+      mockQueryRaw.mockResolvedValue([
+        {
+          orgId: 'org-456',
+          role: 'ADMIN',
+          isDefault: true,
+          orgName: 'Main Org',
+          orgSlug: 'main-org',
+        },
+      ]);
 
       const result = await extractAuthenticatedTenant(mockSupabase);
 
-      expect(result).toEqual({
-        userId: 'user-123',
-        tenantId: 'org-456',
-      });
-
-      expect(mockGetUser).toHaveBeenCalled();
-      expect(mockFrom).toHaveBeenCalledWith('user_profiles');
-      expect(mockSelect).toHaveBeenCalledWith('org_id');
-      expect(mockEq).toHaveBeenCalledWith('id', 'user-123');
+      expect(result.userId).toBe('user-123');
+      expect(result.tenantId).toBe('org-456');
+      expect(result.memberships).toEqual([
+        {
+          orgId: 'org-456',
+          role: 'ADMIN',
+          isDefault: true,
+          orgName: 'Main Org',
+          orgSlug: 'main-org',
+        },
+      ]);
+      expect(mockQueryRaw).toHaveBeenCalled();
     });
 
     it('should throw UnauthorizedError when getUser fails', async () => {
@@ -57,19 +82,9 @@ describe('Auth Helpers', () => {
         .rejects.toThrow(UnauthorizedError);
     });
 
-    it('should throw ForbiddenError when profile fetch fails', async () => {
-      const mockUser = { id: 'user-123' };
-      mockGetUser.mockResolvedValue({ data: { user: mockUser }, error: null });
-      mockSingle.mockResolvedValue({ data: null, error: { message: 'Profile error' } });
-
-      await expect(extractAuthenticatedTenant(mockSupabase))
-        .rejects.toThrow(ForbiddenError);
-    });
-
-    it('should throw ForbiddenError when profile is null', async () => {
-      const mockUser = { id: 'user-123' };
-      mockGetUser.mockResolvedValue({ data: { user: mockUser }, error: null });
-      mockSingle.mockResolvedValue({ data: null, error: null });
+    it('should throw ForbiddenError when user has no memberships', async () => {
+      mockGetUser.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null });
+      mockQueryRaw.mockResolvedValue([]);
 
       await expect(extractAuthenticatedTenant(mockSupabase))
         .rejects.toThrow(ForbiddenError);
@@ -78,29 +93,25 @@ describe('Auth Helpers', () => {
 
   describe('requireRole', () => {
     it('should resolve when user has allowed role', async () => {
-      const mockProfile = { role: 'ADMIN' };
-      mockSingle.mockResolvedValue({ data: mockProfile, error: null });
+      mockQueryRaw.mockResolvedValue([{ role: 'ADMIN' }]);
 
-      await expect(requireRole(mockSupabase, 'user-123', ['ADMIN', 'OWNER']))
+      await expect(requireRole(mockSupabase, 'user-123', ['ADMIN', 'OWNER'], 'org-456'))
         .resolves.not.toThrow();
-      
-      expect(mockFrom).toHaveBeenCalledWith('user_profiles');
-      expect(mockSelect).toHaveBeenCalledWith('role');
-      expect(mockEq).toHaveBeenCalledWith('id', 'user-123');
+
+      expect(mockQueryRaw).toHaveBeenCalled();
     });
 
     it('should throw ForbiddenError when user does not have allowed role', async () => {
-      const mockProfile = { role: 'MEMBER' };
-      mockSingle.mockResolvedValue({ data: mockProfile, error: null });
+      mockQueryRaw.mockResolvedValue([{ role: 'MEMBER' }]);
 
-      await expect(requireRole(mockSupabase, 'user-123', ['ADMIN', 'OWNER']))
+      await expect(requireRole(mockSupabase, 'user-123', ['ADMIN', 'OWNER'], 'org-456'))
         .rejects.toThrow(ForbiddenError);
     });
 
-    it('should throw ForbiddenError when profile not found', async () => {
-      mockSingle.mockResolvedValue({ data: null, error: { message: 'Not found' } });
+    it('should throw ForbiddenError when membership is not found', async () => {
+      mockQueryRaw.mockResolvedValue([]);
 
-      await expect(requireRole(mockSupabase, 'user-123', ['ADMIN']))
+      await expect(requireRole(mockSupabase, 'user-123', ['ADMIN'], 'org-456'))
         .rejects.toThrow(ForbiddenError);
     });
   });

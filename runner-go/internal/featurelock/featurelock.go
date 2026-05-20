@@ -47,6 +47,11 @@ type FeatureLock struct {
 	info     LockInfo
 }
 
+type LockRecord struct {
+	Path string
+	Info LockInfo
+}
+
 func lockDirForRepo(repoPath string) string {
 	trimmed := strings.TrimSpace(repoPath)
 	cacheDir, err := os.UserCacheDir()
@@ -219,6 +224,38 @@ func IsLocked(repoPath, featureID string) bool {
 	path := lockFilePath(repoPath, featureID)
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func ListLocks(repoPath string) ([]LockRecord, error) {
+	dir := lockDirForRepo(repoPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []LockRecord{}, nil
+		}
+		return nil, err
+	}
+
+	records := []LockRecord{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), lockFileExt) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		info, err := readLockInfo(path)
+		if err != nil {
+			continue
+		}
+		records = append(records, LockRecord{Path: path, Info: *info})
+	}
+	return records, nil
+}
+
+func RemoveLockRecord(record LockRecord) error {
+	if strings.TrimSpace(record.Path) == "" {
+		return nil
+	}
+	return forceRemoveLock(record.Path)
 }
 
 func readLockInfo(path string) (*LockInfo, error) {

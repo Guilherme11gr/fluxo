@@ -67,6 +67,9 @@ const GIT_MODE_LABELS: Record<string, string> = {
   manual: 'Manual',
   'branch-push': 'Branch Push',
   pr: 'Pull Request',
+  no_write: 'Somente leitura',
+  branch_only: 'Branch',
+  branch_commit_pr: 'Branch + PR',
 };
 
 function FullLogView({ result }: { result: StructuredResultV1 }) {
@@ -155,10 +158,30 @@ function FullLogView({ result }: { result: StructuredResultV1 }) {
                   <CheckStatusIcon status={check.status} />
                   <div className="flex-1 min-w-0">
                     <span className="text-foreground">{check.name}</span>
+                    {check.observed && (
+                      <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px]">
+                        observado
+                      </Badge>
+                    )}
                     {check.details && (
                       <span className="text-muted-foreground ml-1">
                         &mdash; {check.details}
                       </span>
+                    )}
+                    {(check.command || check.exitCode !== undefined || check.durationMs !== undefined) && (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {check.command && (
+                          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+                            {check.command}
+                          </code>
+                        )}
+                        {check.exitCode !== undefined && check.exitCode !== null && (
+                          <span>exit {check.exitCode}</span>
+                        )}
+                        {check.durationMs !== undefined && check.durationMs !== null && (
+                          <span>{Math.round(check.durationMs / 100) / 10}s</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -232,9 +255,21 @@ function FullLogView({ result }: { result: StructuredResultV1 }) {
               {result.git!.branch && (
                 <div className="flex items-center gap-1.5">
                   <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="font-mono text-xs">
-                    {result.git!.branch}
-                  </span>
+                  {result.git!.links?.branch ? (
+                    <a
+                      href={result.git!.links.branch}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-xs text-blue-500 hover:underline inline-flex items-center gap-1"
+                    >
+                      {result.git!.branch}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <span className="font-mono text-xs">
+                      {result.git!.branch}
+                    </span>
+                  )}
                 </div>
               )}
               {result.git!.baseBranch && (
@@ -245,10 +280,62 @@ function FullLogView({ result }: { result: StructuredResultV1 }) {
               {result.git!.commitShas && result.git!.commitShas.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pl-5">
                   {result.git!.commitShas.map((sha, i) => (
-                    <Badge key={i} variant="outline" className="text-xs font-mono">
-                      {sha.slice(0, 7)}
-                    </Badge>
+                    result.git!.links?.commits?.[i] ? (
+                      <a
+                        key={i}
+                        href={result.git!.links.commits[i]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Badge variant="outline" className="text-xs font-mono hover:bg-muted">
+                          {sha.slice(0, 7)}
+                        </Badge>
+                      </a>
+                    ) : (
+                      <Badge key={i} variant="outline" className="text-xs font-mono">
+                        {sha.slice(0, 7)}
+                      </Badge>
+                    )
                   ))}
+                </div>
+              )}
+              {result.git!.links?.compare && (
+                <div className="pl-5">
+                  <a
+                    href={result.git!.links.compare}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-500 hover:underline inline-flex items-center gap-1"
+                  >
+                    Comparar alterações
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+              {result.git!.hasVerifiableDelta !== undefined && (
+                <div className="flex flex-wrap gap-1.5 pl-5">
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${
+                      result.git!.hasVerifiableDelta
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-amber-600 dark:text-amber-400'
+                    }`}
+                  >
+                    delta {result.git!.hasVerifiableDelta ? 'verificado' : 'ausente'}
+                  </Badge>
+                  {result.git!.policyVerified !== undefined && (
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${
+                        result.git!.policyVerified
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}
+                    >
+                      policy {result.git!.policyVerified ? 'ok' : 'falhou'}
+                    </Badge>
+                  )}
                 </div>
               )}
               {result.git!.prUrl && (

@@ -31,6 +31,13 @@ type FinalizeExecutionParams struct {
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 }
 
+type ExecutionSnapshot struct {
+	ID       string                 `json:"id"`
+	Status   string                 `json:"status"`
+	TaskID   string                 `json:"taskId"`
+	Metadata map[string]interface{} `json:"metadata"`
+}
+
 // CreateExecution sends a POST to create a new execution record (CLAIMED).
 // Returns the execution ID.
 func CreateExecution(client *Client, taskID, agentID, projectID, tool, model string) (string, error) {
@@ -110,6 +117,31 @@ func HeartbeatExecution(client *Client, execID string) error {
 		return fmt.Errorf("API error: %v", errMsg)
 	}
 	return nil
+}
+
+func GetExecution(client *Client, execID string) (*ExecutionSnapshot, error) {
+	resp, err := client.Get("/executions/" + execID)
+	if err != nil {
+		return nil, fmt.Errorf("get execution: %w", err)
+	}
+	if errMsg, ok := resp["error"]; ok {
+		return nil, fmt.Errorf("API error: %v", errMsg)
+	}
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok || len(data) == 0 {
+		return nil, nil
+	}
+	snapshot := &ExecutionSnapshot{}
+	snapshot.ID, _ = data["id"].(string)
+	snapshot.Status, _ = data["status"].(string)
+	snapshot.TaskID, _ = data["taskId"].(string)
+	if metadata, ok := data["metadata"].(map[string]interface{}); ok {
+		snapshot.Metadata = metadata
+	}
+	if snapshot.ID == "" {
+		return nil, nil
+	}
+	return snapshot, nil
 }
 
 func FinalizeExecution(client *Client, execID string, params FinalizeExecutionParams) (map[string]interface{}, error) {

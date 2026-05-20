@@ -3,10 +3,9 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/fluxo-app/fluxo-runner/internal/version"
 	"github.com/spf13/cobra"
 )
-
-const Version = "0.3.0"
 
 var cfgFile string
 
@@ -18,7 +17,7 @@ polls for pending tasks, and executes them using Claude Code or OpenCode.
 
 It supports continuous polling mode, single-execution mode, and graceful
 shutdown with task handoff.`,
-	Version: Version,
+	Version: version.String(),
 }
 
 func Execute() {

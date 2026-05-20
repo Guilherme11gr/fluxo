@@ -4,20 +4,35 @@ export interface StructuredResultCheck {
   name: string;
   status: 'passed' | 'failed' | 'skipped';
   details?: string | null;
+  command?: string | null;
+  observed?: boolean;
+  exitCode?: number | null;
+  durationMs?: number | null;
 }
 
 export interface StructuredResultGit {
-  mode?: 'manual' | 'branch-push' | 'pr' | null;
+  mode?: 'manual' | 'branch-push' | 'pr' | 'no_write' | 'branch_only' | 'branch_commit_pr' | null;
+  gitPolicy?: string | null;
   baseBranch?: string | null;
   branch?: string | null;
   commitShas?: string[];
+  newCommitShas?: string[];
+  changedFiles?: string[];
+  hasVerifiableDelta?: boolean;
+  policyVerified?: boolean;
   prUrl?: string | null;
   prNumber?: number | null;
+  links?: {
+    repository?: string;
+    branch?: string;
+    compare?: string;
+    commits?: string[];
+  };
 }
 
 export interface StructuredResultV1 {
   schemaVersion: 'v1';
-  status: 'success' | 'failed' | 'error';
+  status: 'success' | 'failed' | 'error' | 'rejected';
   summary: string;
   whatChanged?: string[];
   decisions?: string[];

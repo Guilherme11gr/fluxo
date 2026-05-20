@@ -55,6 +55,7 @@ describe('searchTasks', () => {
 
     expect(result).toEqual({
       items: expectedTasks,
+      nextCursor: null,
       total: totalCount,
       page: 1,
       pageSize: 10,
@@ -100,6 +101,7 @@ describe('searchTasks', () => {
     // Total deve ser -1 quando skipCount=true
     expect(result).toEqual({
       items: expectedTasks,
+      nextCursor: null,
       total: -1,
       page: 1,
       pageSize: 10,
@@ -111,4 +113,3 @@ describe('searchTasks', () => {
     expect(mockRepo.count).not.toHaveBeenCalled();
   });
 });
-

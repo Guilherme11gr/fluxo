@@ -33,6 +33,7 @@ const finalizeEvidenceSchema = z.object({
     prUrl: z.string().nullable().optional(),
     prNumber: z.number().int().nullable().optional(),
   }).passthrough().optional(),
+  git: z.record(z.string(), z.unknown()).optional(),
   workflow: z.record(z.string(), z.unknown()).optional(),
   qa: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();
@@ -92,6 +93,11 @@ function extractGitPayload(data: {
   metadata?: Record<string, unknown>;
   evidence?: z.infer<typeof finalizeEvidenceSchema>;
 }): Record<string, unknown> | undefined {
+  const canonicalGit = data.evidence?.git;
+  if (canonicalGit && typeof canonicalGit === 'object') {
+    return canonicalGit as Record<string, unknown>;
+  }
+
   const evidenceGit = data.evidence?.artifact;
   if (evidenceGit && typeof evidenceGit === 'object') {
     return evidenceGit as Record<string, unknown>;
@@ -108,6 +114,50 @@ function extractGitPayload(data: {
   }
 
   return undefined;
+}
+
+function normalizeChecksRunFromLegacyChecks(qa: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(qa.checksRun)) {
+    return qa;
+  }
+
+  const checks = qa.checks;
+  if (!Array.isArray(checks)) {
+    return qa;
+  }
+
+  const defaultStatus = qa.passed === false ? 'failed' : qa.passed === true ? 'passed' : 'skipped';
+  const checksRun = checks
+    .filter((check): check is string => typeof check === 'string' && check.trim().length > 0)
+    .map((check) => ({
+      name: check,
+      status: defaultStatus,
+      details: null,
+      observed: false,
+    }));
+
+  return {
+    ...qa,
+    checksRun,
+  };
+}
+
+function normalizeFinalizeEvidence(
+  evidence: z.infer<typeof finalizeEvidenceSchema> | undefined,
+): z.infer<typeof finalizeEvidenceSchema> | undefined {
+  if (!evidence) {
+    return undefined;
+  }
+
+  const normalized: z.infer<typeof finalizeEvidenceSchema> = { ...evidence };
+  if (!normalized.git && normalized.artifact) {
+    normalized.git = normalized.artifact as Record<string, unknown>;
+  }
+  const qa = asRecord(normalized.qa);
+  if (qa) {
+    normalized.qa = normalizeChecksRunFromLegacyChecks(qa);
+  }
+  return normalized;
 }
 
 function mergeEvidenceIntoMetadata(
@@ -196,9 +246,44 @@ function validateQaPassEvidence(data: FinalizeRequest): string | null {
     return 'QA pass requires evidence.qa.passed=true';
   }
 
-  const checks = qaEvidence.checks;
-  if (!Array.isArray(checks) || checks.length === 0) {
+  const checksRun = qaEvidence.checksRun;
+  const legacyChecks = qaEvidence.checks;
+  if (
+    (!Array.isArray(checksRun) || checksRun.length === 0) &&
+    (!Array.isArray(legacyChecks) || legacyChecks.length === 0)
+  ) {
     return 'QA pass requires at least one QA check';
+  }
+
+  return null;
+}
+
+function validateQaEvidenceForSuccess(data: FinalizeRequest): string | null {
+  if (data.status !== 'SUCCESS') {
+    return null;
+  }
+
+  const qaEvidence = asRecord(data.evidence?.qa);
+  if (!qaEvidence) {
+    return null;
+  }
+
+  if (qaEvidence.passed === false) {
+    return 'SUCCESS requires evidence.qa.passed=true when QA evidence is provided';
+  }
+
+  const checksRun = qaEvidence.checksRun;
+  if (!Array.isArray(checksRun)) {
+    return null;
+  }
+
+  const failedCheck = checksRun.find((check) => {
+    const record = asRecord(check);
+    return record?.status === 'failed';
+  });
+
+  if (failedCheck) {
+    return 'SUCCESS cannot include failed evidence.qa.checksRun entries';
   }
 
   return null;
@@ -409,7 +494,11 @@ export async function POST(
       : null;
     const alreadyTerminal = terminalExecutionStatus !== null;
     const body = await request.json();
-    const data = finalizeSchema.parse(body);
+    const parsedData = finalizeSchema.parse(body);
+    const data: FinalizeRequest = {
+      ...parsedData,
+      evidence: normalizeFinalizeEvidence(parsedData.evidence),
+    };
     if (data.expectedExecutionId && data.expectedExecutionId !== execution.id) {
       return agentError(
         'EXECUTION_MISMATCH',
@@ -433,6 +522,14 @@ export async function POST(
           expectedExecutionId: data.expectedExecutionId ?? null,
         }).catch(() => {});
         return agentError('FINALIZE_VALIDATION_REJECTED', artifactValidationError, 422);
+      }
+      const qaValidationError = validateQaEvidenceForSuccess(data);
+      if (qaValidationError) {
+        await recordFinalizeValidationRejected(execution.id, qaValidationError, {
+          gate: 'qa',
+          expectedExecutionId: data.expectedExecutionId ?? null,
+        }).catch(() => {});
+        return agentError('FINALIZE_VALIDATION_REJECTED', qaValidationError, 422);
       }
     }
 

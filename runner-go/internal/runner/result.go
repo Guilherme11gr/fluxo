@@ -166,9 +166,13 @@ func SerializeAgentSummaryV1(summary *AgentSummaryV1) string {
 }
 
 type ExecutionResultCheck struct {
-	Name    string  `json:"name"`
-	Status  string  `json:"status"`
-	Details *string `json:"details"`
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	Details    *string `json:"details"`
+	Command    string  `json:"command,omitempty"`
+	Observed   bool    `json:"observed,omitempty"`
+	ExitCode   *int    `json:"exitCode,omitempty"`
+	DurationMs *int64  `json:"durationMs,omitempty"`
 }
 
 type ExecutionResultSkillCandidate struct {
@@ -230,6 +234,7 @@ func BuildExecutionResultV1WithContextAndMeta(success bool, readableOutput strin
 			parsed.Git.Mode = "manual"
 		}
 		ensureExecutionResultDefaults(parsed)
+		parsed.ChecksRun = mergeExecutionChecks(ctx.ChecksRun, parsed.ChecksRun)
 		return parsed.toMap(), ExecutionResultBuildMeta{
 			Source:        meta.Source,
 			HadMarkers:    meta.HadMarkers,
@@ -844,6 +849,48 @@ func cloneExecutionChecks(checks []ExecutionResultCheck) []ExecutionResultCheck 
 	return cloned
 }
 
+func MergeExecutionChecks(primary, secondary []ExecutionResultCheck) []ExecutionResultCheck {
+	return mergeExecutionChecks(primary, secondary)
+}
+
+func mergeExecutionChecks(primary, secondary []ExecutionResultCheck) []ExecutionResultCheck {
+	result := make([]ExecutionResultCheck, 0, len(primary)+len(secondary))
+	seen := map[string]struct{}{}
+	appendCheck := func(check ExecutionResultCheck) {
+		normalized := normalizeExecutionCheck(check)
+		if normalized == nil {
+			return
+		}
+		key := executionCheckIdentity(*normalized)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		result = append(result, *normalized)
+	}
+	for _, check := range primary {
+		appendCheck(check)
+	}
+	for _, check := range secondary {
+		appendCheck(check)
+	}
+	if len(result) == 0 {
+		return []ExecutionResultCheck{}
+	}
+	return result
+}
+
+func executionCheckIdentity(check ExecutionResultCheck) string {
+	if strings.TrimSpace(check.Command) != "" {
+		return "command\x00" + strings.TrimSpace(check.Command)
+	}
+	key := strings.TrimSpace(check.Name) + "\x00" + strings.TrimSpace(check.Status)
+	if check.Details != nil {
+		key += "\x00" + strings.TrimSpace(*check.Details)
+	}
+	return key
+}
+
 func normalizeExecutionResultV1(data map[string]interface{}) ExecutionResultV1 {
 	return ExecutionResultV1{
 		SchemaVersion:    normalizeExecutionString(data["schemaVersion"]),
@@ -930,10 +977,7 @@ func normalizeExecutionChecks(value interface{}) []ExecutionResultCheck {
 		if check == nil {
 			continue
 		}
-		key := check.Name + "\x00" + check.Status
-		if check.Details != nil {
-			key += "\x00" + *check.Details
-		}
+		key := executionCheckIdentity(*check)
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -951,6 +995,7 @@ func normalizeExecutionCheck(value interface{}) *ExecutionResultCheck {
 		check := typed
 		check.Name = normalizeExecutionString(check.Name)
 		check.Status = normalizeExecutionCheckStatus(check.Status)
+		check.Command = normalizeExecutionString(check.Command)
 		if check.Status == "" {
 			check.Status = "skipped"
 		}
@@ -963,16 +1008,20 @@ func normalizeExecutionCheck(value interface{}) *ExecutionResultCheck {
 			}
 		}
 		if check.Name == "" {
-			if check.Details == nil {
+			if check.Command != "" {
+				check.Name = check.Command
+			} else if check.Details == nil {
 				return nil
+			} else {
+				check.Name = *check.Details
+				check.Details = nil
 			}
-			check.Name = *check.Details
-			check.Details = nil
 		}
 		return &check
 	case map[string]interface{}:
 		name := firstNonEmptyExecutionString(typed["name"], typed["command"], typed["check"], typed["title"])
 		details := firstNonEmptyExecutionString(typed["details"], typed["message"], typed["summary"])
+		command := firstNonEmptyExecutionString(typed["command"], typed["cmd"])
 		if name == "" {
 			name = details
 			details = ""
@@ -991,7 +1040,15 @@ func normalizeExecutionCheck(value interface{}) *ExecutionResultCheck {
 		if details != "" && details != name {
 			detailsPtr = &details
 		}
-		return &ExecutionResultCheck{Name: name, Status: status, Details: detailsPtr}
+		return &ExecutionResultCheck{
+			Name:       name,
+			Status:     status,
+			Details:    detailsPtr,
+			Command:    command,
+			Observed:   normalizeExecutionBool(typed["observed"]),
+			ExitCode:   normalizeExecutionIntPointer(typed["exitCode"]),
+			DurationMs: normalizeExecutionInt64Pointer(firstNonNil(typed["durationMs"], typed["duration"])),
+		}
 	default:
 		name := normalizeExecutionString(value)
 		if name == "" {
@@ -1178,6 +1235,15 @@ func firstNonEmptyExecutionString(values ...interface{}) string {
 	return ""
 }
 
+func firstNonNil(values ...interface{}) interface{} {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
 func normalizeExecutionStringPointer(value interface{}) *string {
 	switch typed := value.(type) {
 	case nil:
@@ -1197,6 +1263,24 @@ func normalizeExecutionStringPointer(value interface{}) *string {
 			return nil
 		}
 		return &normalized
+	}
+}
+
+func normalizeExecutionBool(value interface{}) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case *bool:
+		return typed != nil && *typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes", "y":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
 	}
 }
 
@@ -1248,6 +1332,15 @@ func normalizeExecutionIntPointer(value interface{}) *int {
 			return nil
 		}
 	}
+}
+
+func normalizeExecutionInt64Pointer(value interface{}) *int64 {
+	intValue := normalizeExecutionIntPointer(value)
+	if intValue == nil {
+		return nil
+	}
+	parsed := int64(*intValue)
+	return &parsed
 }
 
 func normalizeExecutionString(value interface{}) string {

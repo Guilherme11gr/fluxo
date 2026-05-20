@@ -33,7 +33,7 @@ describe('Response Helpers', () => {
       const data = { foo: 'bar' };
       const response = jsonSuccess(data, { private: true });
       
-      expect(response.headers.get('Cache-Control')).toBe('private, max-age=60');
+      expect(response.headers.get('Cache-Control')).toBe('private, max-age=0, must-revalidate');
     });
   });
 

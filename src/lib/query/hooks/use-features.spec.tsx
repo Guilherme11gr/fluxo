@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
@@ -5,6 +6,36 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCreateFeature, useUpdateFeature, useDeleteFeature } from './use-features';
 import { queryKeys } from '../query-keys';
 import type { ReactNode } from 'react';
+
+vi.mock('./use-org-id', () => ({
+  useCurrentOrgId: () => 'org-123',
+}));
+
+vi.mock('@/hooks/use-realtime-status', () => ({
+  useRealtimeActive: () => false,
+}));
+
+vi.mock('@/hooks/use-realtime-sync', () => ({
+  useRealtimeBroadcast: () => vi.fn(),
+}));
+
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({
+    viewer: {
+      id: 'user-123',
+      displayName: 'Test User',
+    },
+  }),
+}));
+
+vi.mock('../helpers', () => ({
+  smartInvalidate: (queryClient: QueryClient, queryKey: readonly unknown[]) => (
+    queryClient.invalidateQueries({ queryKey })
+  ),
+  smartInvalidateImmediate: (queryClient: QueryClient, queryKey: readonly unknown[]) => (
+    queryClient.invalidateQueries({ queryKey })
+  ),
+}));
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -101,7 +132,7 @@ describe('use-features: Cache Invalidation', () => {
 
       // Assert: should invalidate all-features list
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.features.list(orgId),
+        queryKey: queryKeys.features.allList(orgId),
       });
     });
 
@@ -152,8 +183,6 @@ describe('use-features: Cache Invalidation', () => {
         json: async () => ({ data: updatedFeature }),
       });
 
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-
       const { result } = renderHook(() => useUpdateFeature(), { wrapper });
 
       result.current.mutate({
@@ -163,10 +192,7 @@ describe('use-features: Cache Invalidation', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      // Assert: should invalidate feature detail
-      expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.features.detail(orgId, featureId),
-      });
+      expect(queryClient.getQueryData(queryKeys.features.detail(orgId, featureId))).toEqual(updatedFeature);
     });
 
     it('should invalidate feature lists after update', async () => {
@@ -259,7 +285,7 @@ describe('use-features: Cache Invalidation', () => {
 
       // Assert: should invalidate tasks (they depend on feature.status)
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.tasks.lists(orgId),
+        queryKey: queryKeys.tasks.list(orgId, { featureId }),
       });
     });
   });
@@ -280,9 +306,12 @@ describe('use-features: Cache Invalidation', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      // Assert: should invalidate all feature queries
+      // Assert: should invalidate all feature list queries
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.features.all(orgId),
+        queryKey: queryKeys.features.lists(orgId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.features.allList(orgId),
       });
     });
 
@@ -313,6 +342,14 @@ describe('use-features: Cache Invalidation', () => {
 
     it('should invalidate epics after feature deletion', async () => {
       const featureId = 'feature-123';
+      const epicId = 'epic-123';
+
+      queryClient.setQueryData(queryKeys.features.allList(orgId), [{
+        id: featureId,
+        title: 'Feature to delete',
+        status: 'BACKLOG',
+        epicId,
+      }]);
 
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
@@ -328,7 +365,7 @@ describe('use-features: Cache Invalidation', () => {
 
       // Assert: should invalidate epics to update counters
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.epics.all,
+        queryKey: queryKeys.epics.detail(orgId, epicId),
       });
     });
   });

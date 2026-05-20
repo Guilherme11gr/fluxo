@@ -12,9 +12,17 @@ describe('createProject', () => {
     update: vi.fn(),
     delete: vi.fn(),
   } as unknown as ProjectRepository;
+  const mockEpicRepository = {
+    create: vi.fn(),
+  };
+  const mockFeatureRepository = {
+    create: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEpicRepository.create.mockResolvedValue({ id: 'epic-sustentation' });
+    mockFeatureRepository.create.mockResolvedValue({ id: 'feature-sustentation' });
   });
 
   it('should create a project successfully', async () => {
@@ -44,12 +52,28 @@ describe('createProject', () => {
 
     const result = await createProject(input, {
       projectRepository: mockRepo,
-      epicRepository: {} as any,
-      featureRepository: {} as any,
+      epicRepository: mockEpicRepository as any,
+      featureRepository: mockFeatureRepository as any,
     });
 
     expect(result).toEqual(expectedProject);
-    expect(mockRepo.create).toHaveBeenCalledWith(input);
+    expect(mockRepo.create).toHaveBeenCalledWith({
+      orgId: input.orgId,
+      name: input.name,
+      key: input.key,
+      description: input.description,
+      modules: input.modules,
+    });
+    expect(mockEpicRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: input.orgId,
+      projectId: expectedProject.id,
+      isSystem: true,
+    }));
+    expect(mockFeatureRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: input.orgId,
+      epicId: 'epic-sustentation',
+      isSystem: true,
+    }));
   });
 
   it('should throw ValidationError if key is invalid', async () => {

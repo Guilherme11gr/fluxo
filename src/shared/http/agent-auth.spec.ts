@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateAgentApiKey } from './agent-api-key';
 
-const mockHeaders = vi.fn();
-const mockFindByKeyHash = vi.fn();
-const mockTouchUsage = vi.fn();
+const {
+  mockHeaders,
+  mockFindByKeyHash,
+  mockTouchUsage,
+} = vi.hoisted(() => ({
+  mockHeaders: vi.fn(),
+  mockFindByKeyHash: vi.fn(),
+  mockTouchUsage: vi.fn(),
+}));
 
 vi.mock('next/headers', () => ({
   headers: mockHeaders,
@@ -21,6 +27,7 @@ import { AgentAuthError, extractAgentAuth } from './agent-auth';
 describe('extractAgentAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTouchUsage.mockResolvedValue(undefined);
   });
 
   it('returns tenant-scoped auth context for a valid key', async () => {

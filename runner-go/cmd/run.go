@@ -15,6 +15,7 @@ import (
 	"github.com/fluxo-app/fluxo-runner/internal/orchestrator"
 	"github.com/fluxo-app/fluxo-runner/internal/runner"
 	"github.com/fluxo-app/fluxo-runner/internal/sync"
+	"github.com/fluxo-app/fluxo-runner/internal/version"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -92,7 +93,7 @@ Legacy mode (agents in config.yaml):
 		// Banner
 		fmt.Println()
 		fmt.Println("\033[36m╔══════════════════════════════════════╗")
-		fmt.Printf("║   FluXo Runner v%-20s ║\n", Version)
+		fmt.Printf("║   FluXo Runner v%-20s ║\n", version.String())
 		fmt.Println("╚══════════════════════════════════════╝\033[0m")
 		fmt.Printf("  API: %s\n", apiURL)
 

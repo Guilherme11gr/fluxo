@@ -223,3 +223,31 @@ func TestLockFilePersistsInfo(t *testing.T) {
 
 	lock.Release()
 }
+
+func TestListAndRemoveLockRecords(t *testing.T) {
+	repoPath := t.TempDir()
+	lock, err := AcquireLock(repoPath, "feature-list", "exec-list", "builder")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+
+	records, err := ListLocks(repoPath)
+	if err != nil {
+		t.Fatalf("ListLocks failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one lock record, got %#v", records)
+	}
+	if records[0].Info.ExecutionID != "exec-list" {
+		t.Fatalf("expected execution id in lock record, got %#v", records[0].Info)
+	}
+
+	if err := RemoveLockRecord(records[0]); err != nil {
+		t.Fatalf("RemoveLockRecord failed: %v", err)
+	}
+	if IsLocked(repoPath, "feature-list") {
+		t.Fatal("expected lock to be removed")
+	}
+
+	_ = lock.Release()
+}

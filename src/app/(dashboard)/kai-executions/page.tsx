@@ -28,6 +28,7 @@ import {
   FolderKanban,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
 } from 'lucide-react';
 import { ExecutionResultPanel } from '@/components/features/executions/execution-result-panel';
 import { ExecutionContextCard } from '@/components/features/executions/execution-context-card';
@@ -76,6 +77,27 @@ const WORKSPACE_MODE_LABELS: Record<string, string> = {
   direct: 'Direto',
 };
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function evidenceChecksCount(qaEvidence: Record<string, unknown> | null): number {
+  const checksRun = qaEvidence?.checksRun;
+  if (Array.isArray(checksRun)) return checksRun.length;
+  const checks = qaEvidence?.checks;
+  return Array.isArray(checks) ? checks.length : 0;
+}
+
 export default function ExecutionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [projectFilter, setProjectFilter] = useState<string>('');
@@ -107,6 +129,20 @@ export default function ExecutionsPage() {
   const { data: linkedTask, isLoading: isLoadingTask } = useExecutionTask(taskId, !!taskId);
 
   const structuredResult = exec?.metadata ? extractStructuredResult(exec.metadata) : null;
+  const executionMetadata = (exec?.metadata ?? {}) as Record<string, unknown>;
+  const runtimeBinding = asRecord(executionMetadata.runtimeBinding);
+  const outputContract = asRecord(executionMetadata.outputContract);
+  const evidence = asRecord(executionMetadata.evidence);
+  const qaEvidence = asRecord(evidence?.qa);
+  const gitEvidence = asRecord(evidence?.git) ?? asRecord(evidence?.artifact);
+  const gitLinks = asRecord(gitEvidence?.links);
+  const runtimeMetadata = asRecord(runtimeBinding?.metadata);
+  const effectiveRole =
+    readString(executionMetadata.runRole) ??
+    readString(runtimeMetadata?.runRole) ??
+    readString(runtimeMetadata?.role);
+  const qaPassed = readBoolean(qaEvidence?.passed);
+  const hasProtocolEvidence = Boolean(outputContract || qaEvidence || gitEvidence);
 
   const agentsMap = new Map((agents ?? []).map((a: any) => [a.id, a.name]));
 
@@ -441,7 +477,17 @@ export default function ExecutionsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 text-xs">
+            <div>
+              <span className="text-muted-foreground">Execution</span>
+              <div className="mt-0.5 font-mono break-all">{exec.id}</div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Owner</span>
+              <div className="mt-0.5 font-medium">
+                {agentsMap.get(exec.agentId) ?? exec.agentId.slice(0, 8)}
+              </div>
+            </div>
             <div>
               <span className="text-muted-foreground">Status</span>
               <div className="mt-0.5">
@@ -461,6 +507,10 @@ export default function ExecutionsPage() {
             <div>
               <span className="text-muted-foreground">Exit Code</span>
               <div className="mt-0.5 font-mono">{exec.exitCode ?? '—'}</div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Role</span>
+              <div className="mt-0.5 font-medium">{effectiveRole ?? '—'}</div>
             </div>
           </div>
 
@@ -517,6 +567,80 @@ export default function ExecutionsPage() {
                   Task vinculada
                 </div>
                 <ExecutionContextCard taskId={taskId} task={linkedTask} isLoading={isLoadingTask} />
+              </div>
+            </>
+          )}
+
+          {hasProtocolEvidence && (
+            <>
+              <Separator />
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Evidence
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {outputContract && (
+                    <Badge variant="outline" className="gap-1">
+                      result: {readString(outputContract.source) ?? 'unknown'}
+                    </Badge>
+                  )}
+                  {qaEvidence && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        qaPassed === true
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : qaPassed === false
+                            ? 'text-red-600 dark:text-red-400'
+                            : ''
+                      }
+                    >
+                      QA {qaPassed === true ? 'passou' : qaPassed === false ? 'falhou' : 'pendente'} · {evidenceChecksCount(qaEvidence)} checks
+                    </Badge>
+                  )}
+                  {gitEvidence && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        readBoolean(gitEvidence.policyVerified) === false
+                          ? 'text-red-600 dark:text-red-400'
+                          : readBoolean(gitEvidence.hasVerifiableDelta) === true
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : ''
+                      }
+                    >
+                      Git {readString(gitEvidence.gitPolicy) ?? readString(gitEvidence.mode) ?? 'manual'}
+                    </Badge>
+                  )}
+                  {readString(gitEvidence?.branch) && (
+                    <Badge variant="outline" className="font-mono">
+                      {readString(gitEvidence?.branch)}
+                    </Badge>
+                  )}
+                  {readString(gitLinks?.compare) && (
+                    <a
+                      href={readString(gitLinks?.compare) ?? '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-blue-500 hover:underline"
+                    >
+                      compare
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                  {readString(gitEvidence?.prUrl) && (
+                    <a
+                      href={readString(gitEvidence?.prUrl) ?? '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-blue-500 hover:underline"
+                    >
+                      PR #{typeof gitEvidence?.prNumber === 'number' ? gitEvidence.prNumber : '?'}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
               </div>
             </>
           )}
