@@ -22,7 +22,8 @@
     "db:verify:migration": "node scripts/verify-migration-counts.mjs",
     "vercel-build": "prisma generate && node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && next build --webpack",
     "realtime:cleanup": "npx tsx scripts/cleanup-connections.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "fluxo-smoke-missing-script": "node -e \"process.exit(1)\""
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
