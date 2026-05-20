@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Sheet,
   SheetContent,
@@ -18,10 +19,15 @@ import {
   AlertCircle,
   Link as LinkIcon,
   Tag,
+  Activity,
+  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownViewer } from '@/components/ui/markdown-viewer';
 import { TagBadge } from '@/components/features/tags/tag-badge';
+import { StatusBadge } from '@/components/features/tasks/status-badge';
+import { useLinkedTaskPreview } from '@/lib/query/hooks/use-linked-task';
+import type { TaskStatus } from '@/shared/types';
 import type { PersonalBoardItem } from './types';
 
 const PRIORITY_CONFIG = {
@@ -73,6 +79,9 @@ export function PersonalBoardDetailModal({
   onDelete,
   onOpenLinkTask,
 }: PersonalBoardDetailModalProps) {
+  const router = useRouter();
+  const { data: linkedTask } = useLinkedTaskPreview(item?.linkedTaskId);
+
   const handleEdit = useCallback(() => {
     if (item && onEdit) {
       onEdit(item);
@@ -179,10 +188,39 @@ export function PersonalBoardDetailModal({
               Task vinculada
             </h3>
             {hasLinkedTask ? (
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="font-mono text-xs">
-                  {item.linkedTaskId!.slice(0, 8)}...
-                </Badge>
+              <div className="space-y-2">
+                {linkedTask ? (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={linkedTask.status as TaskStatus} size="sm" />
+                      <span className="text-xs font-mono text-muted-foreground">{linkedTask.readableId}</span>
+                    </div>
+                    <p className="text-sm font-medium">{linkedTask.title}</p>
+                    {linkedTask.currentExecutionId && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-xs text-amber-500">Execução ativa</span>
+                      </div>
+                    )}
+                    <div className="flex gap-2 pt-1">
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => router.push(`/tasks?task=${linkedTask.id}`)}>
+                        Abrir task
+                      </Button>
+                      {linkedTask.currentExecutionId && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => router.push(`/kai-executions/${linkedTask.currentExecutionId}`)}>
+                          Ver execução <ExternalLink className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {item.linkedTaskId!.slice(0, 8)}...
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">Carregando...</span>
+                  </div>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useComments, useAddComment, useDeleteComment } from '@/lib/query/hooks/use-comments';
 import { useUsers, type User } from '@/lib/query/hooks/use-users';
 import { useMention } from '@/lib/query/hooks/use-mention';
-import { Loader2, Send, Trash2, MessageSquare, AlertCircle, RefreshCw, AtSign } from 'lucide-react';
+import { Loader2, Send, Trash2, MessageSquare, AlertCircle, RefreshCw, AtSign, CheckCircle, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -104,6 +104,29 @@ const commentMarkdownComponents = {
   ),
   hr: () => <hr className="my-2 border-border/50" />,
 };
+
+/**
+ * Detect execution closeout comments from runner output.
+ */
+function isExecutionComment(content: string): { isExecution: boolean; status: 'success' | 'failed' | null } {
+  if (content.startsWith('## Execution Complete')) {
+    return { isExecution: true, status: 'success' };
+  }
+  if (content.startsWith('## Execution Failed')) {
+    return { isExecution: true, status: 'failed' };
+  }
+  return { isExecution: false, status: null };
+}
+
+/**
+ * Extract the ### Summary section from an execution comment.
+ */
+function extractExecutionSummary(content: string): string | null {
+  const match = content.match(/### Summary\s*\n\s*([\s\S]+?)(?:\n### |\n## |\n<details>|$)/);
+  if (!match) return null;
+  const text = match[1].trim();
+  return text.length > 300 ? text.slice(0, 300) + '...' : text;
+}
 
 interface TaskCommentsProps {
   taskId: string;
@@ -325,57 +348,98 @@ export function TaskComments({ taskId, className }: TaskCommentsProps) {
           </div>
         ) : (
           <div className="space-y-5">
-            {comments.map((comment) => (
-              <div
-                key={comment.id}
-                className="group flex gap-3 animate-in fade-in slide-in-from-bottom-1 duration-300"
-              >
-                <UserAvatar
-                  displayName={comment.agent?.name || comment.user?.displayName}
-                  avatarUrl={comment.user?.avatarUrl}
-                  userId={comment.userId}
-                  size="sm"
-                  className="mt-0.5 shadow-sm ring-2 ring-background"
-                />
+            {comments.map((comment) => {
+              const executionMeta = isExecutionComment(comment.content);
+              const isExecution = executionMeta.isExecution;
+              const summary = isExecution ? extractExecutionSummary(comment.content) : null;
 
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-foreground/90">
-                        {comment.agent?.name || comment.user?.displayName || 'Usuario'}
-                      </span>
-                      {comment.agent && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                          Agent
+              return (
+                <div
+                  key={comment.id}
+                  className={cn(
+                    "group flex gap-3 animate-in fade-in slide-in-from-bottom-1 duration-300",
+                    isExecution && "relative"
+                  )}
+                >
+                  {/* Colored left border for execution comments */}
+                  {isExecution && (
+                    <div className={cn(
+                      "absolute left-0 top-0 bottom-0 w-[3px] rounded-l-2xl -ml-3",
+                      executionMeta.status === 'success' && "bg-green-500/60",
+                      executionMeta.status === 'failed' && "bg-red-500/60"
+                    )} />
+                  )}
+
+                  <UserAvatar
+                    displayName={comment.agent?.name || comment.user?.displayName}
+                    avatarUrl={comment.user?.avatarUrl}
+                    userId={comment.userId}
+                    size="sm"
+                    className="mt-0.5 shadow-sm ring-2 ring-background"
+                  />
+
+                  <div className={cn("flex-1 min-w-0", isExecution && "pl-1")}>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-foreground/90">
+                          {comment.agent?.name || comment.user?.displayName || 'Usuario'}
                         </span>
-                      )}
-                      <span className="text-[10px] text-muted-foreground tabular-nums">
-                        {formatDate(comment.createdAt)}
-                      </span>
+                        {comment.agent && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                            Agent
+                          </span>
+                        )}
+                        {isExecution && (
+                          <span className={cn(
+                            "text-[10px] font-medium px-1.5 py-0.5 rounded gap-1 inline-flex items-center",
+                            executionMeta.status === 'success' && "bg-green-500/10 text-green-400",
+                            executionMeta.status === 'failed' && "bg-red-500/10 text-red-400"
+                          )}>
+                            {executionMeta.status === 'success' ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                            Execution
+                          </span>
+                        )}
+                        <span className="text-[10px] text-muted-foreground tabular-nums">
+                          {formatDate(comment.createdAt)}
+                        </span>
+                      </div>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 opacity-0 group-hover:opacity-100 transition-all hover:bg-destructive/10 hover:text-destructive -mr-2"
+                        onClick={() => handleDelete(comment.id)}
+                        title="Excluir comentario"
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
                     </div>
 
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-6 opacity-0 group-hover:opacity-100 transition-all hover:bg-destructive/10 hover:text-destructive -mr-2"
-                      onClick={() => handleDelete(comment.id)}
-                      title="Excluir comentario"
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </div>
+                    <div className={cn(
+                      "relative transition-colors p-3.5 rounded-2xl rounded-tl-none text-sm leading-relaxed break-words border shadow-sm",
+                      isExecution
+                        ? "bg-muted/70 hover:bg-muted/90 border-border/80"
+                        : "bg-muted/40 hover:bg-muted/60 border-border/50"
+                    )}>
+                      {/* Highlighted summary for execution comments */}
+                      {isExecution && summary && (
+                        <div className="mb-3 pb-3 border-b border-border/40">
+                          <p className="text-sm font-medium text-foreground mb-1">Resumo da execução</p>
+                          <p className="text-sm text-foreground/80 leading-relaxed">{summary}</p>
+                        </div>
+                      )}
 
-                  <div className="relative bg-muted/40 hover:bg-muted/60 transition-colors p-3.5 rounded-2xl rounded-tl-none text-sm text-foreground/90 leading-relaxed break-words border border-border/50 shadow-sm">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={commentMarkdownComponents}
-                    >
-                      {comment.content}
-                    </ReactMarkdown>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={commentMarkdownComponents}
+                      >
+                        {comment.content}
+                      </ReactMarkdown>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

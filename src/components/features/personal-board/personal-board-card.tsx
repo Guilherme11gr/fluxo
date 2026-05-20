@@ -12,6 +12,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { TagBadge } from '@/components/features/tags/tag-badge';
+import { useLinkedTaskPreview } from '@/lib/query/hooks/use-linked-task';
+import { StatusBadge } from '@/components/features/tasks/status-badge';
+import type { TaskStatus } from '@/shared/types';
+import { Activity } from 'lucide-react';
 import type { PersonalBoardItem } from './types';
 
 const PRIORITY_CONFIG = {
@@ -46,6 +50,8 @@ export function PersonalBoardCard({
   onEdit,
   onDelete,
 }: PersonalBoardCardProps) {
+  const { data: linkedTask } = useLinkedTaskPreview(item.linkedTaskId);
+
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: item.id,
   });
@@ -110,7 +116,17 @@ export function PersonalBoardCard({
               {formatDate(item.dueDate)}
             </span>
           )}
-          {item.linkedTaskId && (
+          {item.linkedTaskId && linkedTask && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <StatusBadge status={linkedTask.status as TaskStatus} size="sm" />
+              <span className="text-[10px] font-mono text-muted-foreground">{linkedTask.readableId}</span>
+              <span className="text-xs text-foreground truncate max-w-[120px]">{linkedTask.title}</span>
+              {linkedTask.currentExecutionId && (
+                <span className="text-[10px] text-amber-400 animate-pulse">●</span>
+              )}
+            </div>
+          )}
+          {item.linkedTaskId && !linkedTask && (
             <span className="text-[10px] px-1.5 py-0 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-medium flex items-center gap-1">
               <LinkIcon className="w-2.5 h-2.5" />
               Task

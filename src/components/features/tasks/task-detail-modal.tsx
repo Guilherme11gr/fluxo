@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Sheet,
   SheetContent,
@@ -35,6 +36,11 @@ import {
   Layout,
   Tag,
   Ban,
+  Activity,
+  CheckCircle,
+  XCircle,
+  Clock,
+  ExternalLink,
 } from 'lucide-react';
 import type { TaskWithReadableId, TaskStatus } from '@/shared/types';
 import { cn } from '@/lib/utils';
@@ -49,11 +55,22 @@ import { useMoveTaskWithUndo } from '@/hooks/use-move-task-undo';
 import { useAuth } from '@/hooks/use-auth';
 import { useAgents } from '@/lib/query/hooks/use-agents';
 import { useUpdateTask } from '@/lib/query/hooks/use-tasks';
+import { useExecutions } from '@/lib/query/hooks/use-executions';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { Bot } from 'lucide-react';
 import { toast } from 'sonner';
 
 function getAssigneeName(task: TaskWithReadableId) {
   return task.assignee?.displayName || task.assigneeAgent?.name || 'Sem responsável';
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '-';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
 }
 
 interface TaskDetailModalProps {
@@ -96,6 +113,23 @@ export function TaskDetailModal({
   const { moveWithUndo, isPending: isMovePending } = useMoveTaskWithUndo();
   const { data: agents } = useAgents();
   const updateTaskMutation = useUpdateTask();
+
+  const router = useRouter();
+  // TODO(Caminho2): quando TaskWithReadableId tiver currentExecution/latestExecution,
+  // remover useExecutions({ taskId }) aqui e usar task.latestExecution diretamente
+  const { data: executionsData, isLoading: isLoadingExecutions } = useExecutions({
+    filters: { taskId: task?.id || '' },
+    limit: 5,
+  });
+
+  // Derive execution context when task exists
+  const executions = task ? ((executionsData?.items ?? []) as Array<Record<string, unknown>>) : [];
+  const currentExecution = executions.find(
+    (e) => e.id === task?.currentExecutionId && ['CLAIMED', 'RUNNING'].includes(String(e.status))
+  );
+  const lastCompleted = executions.find(
+    (e) => ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED'].includes(String(e.status))
+  );
 
   // Get current org slug for deep links
   const currentOrgSlug = viewer?.memberships.find(m => m.orgId === viewer.currentOrgId)?.orgSlug;
@@ -383,7 +417,89 @@ export function TaskDetailModal({
             </div>
           </div>
 
-          <Separator />
+          {/* Execution Context */}
+          {(currentExecution || lastCompleted || (task.currentExecutionId && isLoadingExecutions)) && (
+            <>
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium flex items-center gap-2 text-foreground/80">
+                  <Activity className="h-4 w-4 text-primary" />
+                  Contexto de Execução
+                </h3>
+
+                <div className="space-y-2">
+                  {/* Current Execution */}
+                  {currentExecution && (
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[10px] gap-1 border-amber-500/50 text-amber-400 animate-pulse">
+                            <Activity className="w-3 h-3" />
+                            Executando agora
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDistanceToNow(new Date(String(currentExecution.startedAt)), { addSuffix: true, locale: ptBR })}
+                          </span>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => router.push(`/kai-executions/${String(currentExecution.id)}`)}>
+                        Acompanhar execução <ExternalLink className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Last Completed */}
+                  {lastCompleted && (
+                    <div className={cn(
+                      "rounded-lg border p-3 space-y-2",
+                      lastCompleted.status === 'SUCCESS' && "border-green-500/20 bg-green-500/5",
+                      lastCompleted.status === 'FAILED' && "border-red-500/20 bg-red-500/5",
+                      lastCompleted.status === 'TIMEOUT' && "border-amber-500/20 bg-amber-500/5",
+                      lastCompleted.status === 'CANCELLED' && "border-muted",
+                    )}>
+                      <div className="flex items-center gap-2">
+                        {lastCompleted.status === 'SUCCESS' && <CheckCircle className="w-4 h-4 text-green-500" />}
+                        {lastCompleted.status === 'FAILED' && <XCircle className="w-4 h-4 text-red-500" />}
+                        {lastCompleted.status === 'TIMEOUT' && <Clock className="w-4 h-4 text-amber-500" />}
+                        <Badge variant="outline" className={cn("text-[10px]",
+                          lastCompleted.status === 'SUCCESS' && "border-green-500/50 text-green-400",
+                          lastCompleted.status === 'FAILED' && "border-red-500/50 text-red-400",
+                          lastCompleted.status === 'TIMEOUT' && "border-amber-500/50 text-amber-400",
+                        )}>
+                          {String(lastCompleted.status)}
+                        </Badge>
+                        {lastCompleted.duration != null && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatDuration(Number(lastCompleted.duration))}
+                          </span>
+                        )}
+                      </div>
+                      {!!lastCompleted.resultSummary && (
+                        <p className="text-sm text-foreground/80 line-clamp-3 leading-relaxed">
+                          {String(lastCompleted.resultSummary)}
+                        </p>
+                      )}
+                      <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => router.push(`/kai-executions/${String(lastCompleted.id)}`)}>
+                        Ver execução <ExternalLink className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Loading state */}
+                  {!currentExecution && !lastCompleted && task.currentExecutionId && isLoadingExecutions && (
+                    <div className="rounded-lg border border-muted p-3 flex items-center gap-2">
+                      <Activity className="w-4 h-4 animate-spin text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Carregando execução...</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Separator />
+            </>
+          )}
+
+          {!(currentExecution || lastCompleted || (task.currentExecutionId && isLoadingExecutions)) && (
+            <Separator />
+          )}
 
           {/* Comments Section */}
           <TaskComments taskId={task.id} />

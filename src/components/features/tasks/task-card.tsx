@@ -11,7 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Bug, Ban, GitPullRequest, GitBranch, CircleDot, Loader2 } from 'lucide-react';
+import { Bug, Ban, GitPullRequest, GitBranch, CircleDot, Loader2, Activity } from 'lucide-react';
 import { StatusBadge } from './status-badge';
 import { PriorityIndicator } from './priority-indicator';
 import { TagBadge } from '@/components/features/tags';
@@ -332,6 +332,26 @@ export function TaskCard({
           )}
           {isBug && (
             <Bug className="w-3.5 h-3.5 text-red-500" />
+          )}
+          {/* Execution signal */}
+          {task.currentExecutionId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 gap-1 border-amber-500/50 text-amber-400 animate-pulse cursor-help"
+                >
+                  <Activity className="w-3 h-3" />
+                  Running
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p className="text-xs font-medium">Execução ativa</p>
+                <p className="text-[10px] text-muted-foreground font-mono">
+                  {task.currentExecutionId.slice(0, 8)}...
+                </p>
+              </TooltipContent>
+            </Tooltip>
           )}
           {/* Blocked toggle - apenas se não estiver DONE */}
           {task.status !== 'DONE' && (
