@@ -1,5 +1,6 @@
 # FluXo Runner Config
 # Preencha explicitamente para uso local.
+# smoke: verified 2026-05-20T01:16:26.199Z
 
 runner:
   api_url: "http://localhost:3005/api/agent"
